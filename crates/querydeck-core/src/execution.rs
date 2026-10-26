@@ -260,6 +260,20 @@ impl Session {
         }
     }
 
+    /// Commits or rolls back every open transaction of this Session, nested
+    /// ones included, and returns how many remain (0 unless the Server
+    /// refused).
+    pub async fn end_transactions(&mut self, commit: bool) -> crate::Result<i64> {
+        let end = if commit {
+            "WHILE @@TRANCOUNT > 0 COMMIT TRANSACTION;"
+        } else {
+            "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;"
+        };
+        self.query(end).await?;
+        let rows = self.query("SELECT @@TRANCOUNT").await?;
+        Ok(rows.first().and_then(|row| int(row, 0).ok()).unwrap_or(0))
+    }
+
     /// Makes `database` the current database of this Session.
     pub async fn use_database(&mut self, database: &str) -> crate::Result<()> {
         self.query(&format!("USE {}", crate::catalog::quote_name(database)))

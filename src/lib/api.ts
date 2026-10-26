@@ -75,7 +75,22 @@ export const api = {
   ) => invoke<{ rows: number; columns: number }>("result_copy", { tabId, set, rows, columns, format }),
   resultExportMarkdown: (tabId: string, set: number, path: string) =>
     invoke<void>("result_export_markdown", { tabId, set, path }),
+
+  checkScript: (script: string, baseLine: number) => invoke<ScriptCheck>("query_check", { script, baseLine }),
+  useDatabase: (tabId: string, database: string) => invoke<string>("query_use_database", { tabId, database }),
+  endTransactions: (tabId: string, commit: boolean) =>
+    invoke<number>("query_end_transactions", { tabId, commit }),
 };
+
+/** Mirrors querydeck_core::guard::Check. */
+export interface ScriptCheck {
+  findings: {
+    kind: "updateWithoutWhere" | "deleteWithoutWhere" | "truncate" | "drop" | "alterTable";
+    target: string;
+    line: number;
+  }[];
+  uncertain: boolean;
+}
 
 export function displayName(connection: SavedConnection) {
   return connection.name.trim() || connection.server;

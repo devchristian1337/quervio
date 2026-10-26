@@ -11,7 +11,7 @@ const connection: SavedConnection = {
   server: "localhost,14333",
   authentication: { kind: "sql", userName: "sa" },
   defaultDatabase: null,
-  environment: "development",
+  environment: "production",
   encrypt: "mandatory",
   trustServerCertificate: true,
 };
@@ -106,6 +106,20 @@ mockIPC(async (cmd, args) => {
         rows: (a.rows as number[])[1] - (a.rows as number[])[0],
         columns: (a.columns as number[])[1] - (a.columns as number[])[0],
       };
+    case "query_check": {
+      // Rough stand-in for the Rust check: any DELETE counts.
+      const lines = String(a.script).split(/\r?\n/);
+      const findings = lines.flatMap((text, i) =>
+        /\bdelete\b/i.test(text)
+          ? [{ kind: "deleteWithoutWhere", target: "dbo.Customer", line: (a.baseLine as number) + i + 1 }]
+          : [],
+      );
+      return { findings, uncertain: false };
+    }
+    case "query_use_database":
+      return a.database;
+    case "query_end_transactions":
+      return 0;
     default:
       return null;
   }

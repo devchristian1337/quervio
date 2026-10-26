@@ -7,6 +7,9 @@ import {
 import { ObjectExplorer } from "@/components/ObjectExplorer";
 import { QueryWorkspace } from "@/components/QueryWorkspace";
 import { Toaster } from "@/components/ui/sonner";
+import { SafetyDialogs } from "@/components/SafetyDialogs";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useQueries } from "@/stores/queries";
 
 // Follow the Windows light/dark setting.
 function useSystemTheme() {
@@ -20,8 +23,28 @@ function useSystemTheme() {
   }, []);
 }
 
+// Closing the window ends every Session: settle open transactions first.
+function useCloseGuard() {
+  useEffect(() => {
+    // Absent in a plain browser and in the dev mock.
+    if (!(window as { __TAURI_INTERNALS__?: { metadata?: unknown } }).__TAURI_INTERNALS__?.metadata) return;
+    const appWindow = getCurrentWindow();
+    let closing = false;
+    const unlisten = appWindow.onCloseRequested(async (event) => {
+      if (closing || useQueries.getState().tabs.every((t) => t.openTransactions === 0)) return;
+      event.preventDefault();
+      if (await useQueries.getState().settleAllTransactions()) {
+        closing = true;
+        await appWindow.destroy();
+      }
+    });
+    return () => void unlisten.then((stop) => stop());
+  }, []);
+}
+
 export default function App() {
   useSystemTheme();
+  useCloseGuard();
 
   return (
     <>
@@ -34,6 +57,7 @@ export default function App() {
         <QueryWorkspace />
       </ResizablePanel>
     </ResizablePanelGroup>
+    <SafetyDialogs />
     <Toaster position="bottom-right" />
     </>
   );

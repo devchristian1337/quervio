@@ -11,6 +11,7 @@ pub mod connection;
 pub mod error;
 pub mod execution;
 pub mod format;
+pub mod guard;
 pub mod results;
 pub mod secrets;
 pub mod session;
