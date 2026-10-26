@@ -16,7 +16,7 @@ use crate::error::{Error, Result};
 const LOGIN_TIMEOUT_SECS: u32 = 15;
 
 pub struct Session {
-    client: TdsClient,
+    pub(crate) client: TdsClient,
 }
 
 /// What the Server says about itself right after login.

@@ -1,6 +1,7 @@
 // Typed wrappers around the Tauri commands in src-tauri/src/explorer.rs.
 // Shapes mirror querydeck-core's serde output.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type Channel } from "@tauri-apps/api/core";
+import type { ExecutionEvent, Outcome } from "@/lib/execution";
 
 export type Environment = "production" | "test" | "development";
 export type Encrypt = "mandatory" | "optional" | "strict";
@@ -51,6 +52,13 @@ export const api = {
     invoke<CatalogItem[]>("explorer_objects", { id, database, folder }),
   tableChildren: (id: string, database: string, objectId: number, folder: TableFolder) =>
     invoke<CatalogItem[]>("explorer_table_children", { id, database, objectId, folder }),
+
+  openQuery: (tabId: string, connectionId: string, database: string | null) =>
+    invoke<ServerInfo>("query_open", { tabId, connectionId, database }),
+  closeQuery: (tabId: string) => invoke<void>("query_close", { tabId }),
+  executeQuery: (tabId: string, script: string, baseLine: number, onEvent: Channel<ExecutionEvent>) =>
+    invoke<Outcome>("query_execute", { tabId, script, baseLine, onEvent }),
+  cancelQuery: (tabId: string) => invoke<void>("query_cancel", { tabId }),
 };
 
 export function displayName(connection: SavedConnection) {

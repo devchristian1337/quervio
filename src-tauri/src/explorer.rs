@@ -31,7 +31,7 @@ impl ExplorerState {
         })
     }
 
-    fn connection(&self, id: &str) -> CommandResult<SavedConnection> {
+    pub(crate) fn connection(&self, id: &str) -> CommandResult<SavedConnection> {
         Ok(self
             .connections
             .lock()
@@ -42,7 +42,11 @@ impl ExplorerState {
     }
 
     /// The stored password, or the one typed in the dialog when given.
-    fn password(&self, id: &str, typed: Option<String>) -> CommandResult<Option<String>> {
+    pub(crate) fn password(
+        &self,
+        id: &str,
+        typed: Option<String>,
+    ) -> CommandResult<Option<String>> {
         match typed.filter(|password| !password.is_empty()) {
             Some(password) => Ok(Some(password)),
             None if id.is_empty() => Ok(None),
@@ -87,9 +91,9 @@ async fn close(session: Option<SharedSession>) {
     }
 }
 
-type CommandResult<T> = Result<T, String>;
+pub(crate) type CommandResult<T> = Result<T, String>;
 
-fn message(error: impl std::fmt::Display) -> String {
+pub(crate) fn message(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 

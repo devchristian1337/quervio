@@ -13,6 +13,7 @@ import {
   Plus,
   ScrollText,
   Server,
+  SquarePen,
   Table2,
   X,
   Zap,
@@ -31,7 +32,9 @@ import { displayName, type SavedConnection } from "@/lib/api";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
-import { isFilterable, serverKey, useExplorer, type TreeNode } from "@/stores/explorer";
+import { contextOf, isFilterable, serverKey, useExplorer, type TreeNode } from "@/stores/explorer";
+import { useQueries } from "@/stores/queries";
+import { openQueryFromContext } from "@/lib/shortcuts";
 
 type Row =
   | { type: "node"; node: TreeNode; depth: number; parent: string | null }
@@ -99,6 +102,13 @@ export function ObjectExplorer() {
 
   const nodeRows = rows.filter((r): r is Extract<Row, { type: "node" }> => r.type === "node");
   const selectedIndex = nodeRows.findIndex((r) => r.node.key === explorer.selected);
+  const selectedNode = nodeRows[selectedIndex]?.node;
+
+  // New Query (Ctrl+N, toolbar) opens on the selected server and database.
+  const setContext = explorer.setContext;
+  useEffect(() => {
+    setContext(selectedNode ? contextOf(selectedNode.kind) : null);
+  }, [selectedNode, setContext]);
 
   function connectionOf(node: TreeNode) {
     const { kind } = node;
@@ -151,6 +161,17 @@ export function ObjectExplorer() {
     <section className="flex h-full flex-col">
       <header className="flex h-9 shrink-0 items-center justify-between border-b px-3">
         <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Object Explorer</h2>
+        <div className="flex items-center">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          title="New query (Ctrl+N)"
+          disabled={!explorer.context}
+          onClick={() => openQueryFromContext()}
+        >
+          <SquarePen />
+        </Button>
         <Button
           variant="ghost"
           size="icon"
@@ -160,6 +181,7 @@ export function ObjectExplorer() {
         >
           <Plus />
         </Button>
+        </div>
       </header>
 
       <div
@@ -296,6 +318,19 @@ export function ObjectExplorer() {
                 </div>
               </ContextMenuTrigger>
               <ContextMenuContent className="w-48">
+                {contextOf(node.kind) && (
+                  <>
+                    <ContextMenuItem
+                      onSelect={() => {
+                        const context = contextOf(node.kind);
+                        if (context) void useQueries.getState().open(context.connectionId, context.database);
+                      }}
+                    >
+                      New Query <ContextMenuShortcut>Ctrl+N</ContextMenuShortcut>
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                  </>
+                )}
                 {node.expandable && (
                   <ContextMenuItem onSelect={() => void explorer.refresh(node)}>
                     Refresh <ContextMenuShortcut>F5</ContextMenuShortcut>

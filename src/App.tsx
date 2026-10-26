@@ -5,6 +5,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { ObjectExplorer } from "@/components/ObjectExplorer";
+import { QueryWorkspace } from "@/components/QueryWorkspace";
 
 // Follow the Windows light/dark setting.
 function useSystemTheme() {
@@ -18,22 +19,8 @@ function useSystemTheme() {
   }, []);
 }
 
-// F5 and Ctrl+R are SSMS shortcuts (Refresh, toggle Results), not page reloads.
-function useNoReloadKeys() {
-  useEffect(() => {
-    const block = (event: KeyboardEvent) => {
-      if (event.key === "F5" || (event.ctrlKey && event.key.toLowerCase() === "r")) {
-        event.preventDefault();
-      }
-    };
-    window.addEventListener("keydown", block);
-    return () => window.removeEventListener("keydown", block);
-  }, []);
-}
-
 export default function App() {
   useSystemTheme();
-  useNoReloadKeys();
 
   return (
     <ResizablePanelGroup orientation="horizontal" className="text-sm">
@@ -42,19 +29,7 @@ export default function App() {
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel>
-        <ResizablePanelGroup orientation="vertical">
-          <ResizablePanel defaultSize="60%" minSize={120}>
-            <section className="h-full bg-background/70 p-3 text-muted-foreground">
-              Query Tabs
-            </section>
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel minSize={80}>
-            <section className="h-full bg-background/70 p-3 text-muted-foreground">
-              Results / Messages
-            </section>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+        <QueryWorkspace />
       </ResizablePanel>
     </ResizablePanelGroup>
   );

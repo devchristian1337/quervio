@@ -1,0 +1,332 @@
+import { lazy, Suspense, useEffect, useState } from "react";
+import { CheckCircle2, Circle, Loader2, Play, Plus, Square, X, XCircle } from "lucide-react";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Button } from "@/components/ui/button";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { displayName } from "@/lib/api";
+import { currentScript, disposeModel, focusEditor, revealLine } from "@/lib/editor";
+import { ENVIRONMENTS } from "@/lib/environment";
+import { openQueryFromContext, useGlobalShortcuts } from "@/lib/shortcuts";
+import { cn } from "@/lib/utils";
+import { useConnections } from "@/stores/connections";
+import { useExplorer } from "@/stores/explorer";
+import { useQueries, type QueryTab } from "@/stores/queries";
+
+const SqlEditor = lazy(() => import("@/components/SqlEditor"));
+
+export function QueryWorkspace() {
+  useGlobalShortcuts();
+  const { tabs, activeId } = useQueries();
+  const active = tabs.find((t) => t.id === activeId) ?? null;
+
+  return (
+    <section className="flex h-full flex-col bg-background/70">
+      <TabBar />
+      {active ? (
+        <>
+          <Toolbar tab={active} />
+          <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+            <ResizablePanel defaultSize="60%" minSize={80}>
+              <ErrorBoundary label="The editor">
+                <Suspense fallback={<Centered>Loading editor…</Centered>}>
+                  <SqlEditor tabId={active.id} />
+                </Suspense>
+              </ErrorBoundary>
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel minSize={60}>
+              <ErrorBoundary label="The results panel">
+                <OutputPanel tab={active} />
+              </ErrorBoundary>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+          <StatusBar tab={active} />
+        </>
+      ) : (
+        <EmptyState />
+      )}
+    </section>
+  );
+}
+
+function Centered({ children }: { children: React.ReactNode }) {
+  return <div className="grid h-full place-items-center text-muted-foreground">{children}</div>;
+}
+
+function EmptyState() {
+  const context = useExplorer((s) => s.context);
+  return (
+    <div className="grid flex-1 place-items-center">
+      <div className="flex flex-col items-center gap-3 text-muted-foreground">
+        <p>Select a server or database in the Object Explorer, then open a query.</p>
+        <Button variant="outline" size="sm" disabled={!context} onClick={() => openQueryFromContext()}>
+          <Plus /> New query <span className="text-xs text-muted-foreground">Ctrl+N</span>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+async function closeTab(tab: QueryTab) {
+  if (
+    tab.openTransactions > 0 &&
+    !window.confirm(
+      `${tab.title} has ${tab.openTransactions} open transaction(s). Closing it rolls them back. Close anyway?`,
+    )
+  ) {
+    return;
+  }
+  await useQueries.getState().close(tab.id);
+  await disposeModel(tab.id);
+}
+
+function TabBar() {
+  const { tabs, activeId, activate } = useQueries();
+  const connections = useConnections((s) => s.connections);
+
+  return (
+    <div className="flex h-9 shrink-0 items-end overflow-x-auto border-b">
+      {tabs.map((tab) => {
+        const connection = connections.find((c) => c.id === tab.connectionId);
+        const environment = connection ? ENVIRONMENTS[connection.environment] : null;
+        const selected = tab.id === activeId;
+        return (
+          <div
+            key={tab.id}
+            role="tab"
+            aria-selected={selected}
+            title={connection ? `${displayName(connection)}${tab.database ? ` · ${tab.database}` : ""}` : undefined}
+            onMouseDown={(e) => {
+              if (e.button === 1) {
+                e.preventDefault();
+                void closeTab(tab);
+              } else {
+                activate(tab.id);
+              }
+            }}
+            className={cn(
+              "group flex h-full min-w-0 max-w-56 shrink-0 cursor-default items-center gap-2 border-r border-t-2 px-3",
+              selected ? "bg-background" : "border-t-transparent text-muted-foreground hover:bg-accent/40",
+              selected && (environment ? environment.bar.replace("border-l-", "border-t-") : "border-t-primary"),
+            )}
+          >
+            {tab.status === "executing" ? (
+              <Loader2 className="size-3 shrink-0 animate-spin" />
+            ) : tab.openTransactions > 0 ? (
+              <Circle className="size-2.5 shrink-0 fill-amber-500 text-amber-500" aria-label="Open transaction" />
+            ) : null}
+            <span className="truncate">{tab.title}</span>
+            {connection && <span className="truncate text-xs text-muted-foreground">{displayName(connection)}</span>}
+            <button
+              title="Close"
+              className={cn("ml-1 rounded p-0.5 hover:bg-accent", !selected && "opacity-0 group-hover:opacity-100")}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => void closeTab(tab)}
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Toolbar({ tab }: { tab: QueryTab }) {
+  const { execute, cancel } = useQueries();
+  const executing = tab.status === "executing";
+  return (
+    <div className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 text-emerald-500 hover:text-emerald-400"
+        disabled={tab.status !== "ready"}
+        title="Execute (F5)"
+        onClick={() => {
+          const script = currentScript();
+          if (script) void execute(tab.id, script);
+          focusEditor();
+        }}
+      >
+        <Play className="fill-current" /> Execute
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 text-red-500 hover:text-red-400"
+        disabled={!executing}
+        title="Cancel executing query (Alt+Break)"
+        onClick={() => void cancel(tab.id)}
+      >
+        <Square className="fill-current" /> Cancel
+      </Button>
+      {tab.status === "connecting" && (
+        <span className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" /> Connecting…
+        </span>
+      )}
+      {tab.status === "disconnected" && tab.error && (
+        <span className="ml-2 truncate text-xs text-destructive" title={tab.error}>
+          {tab.error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function OutputPanel({ tab }: { tab: QueryTab }) {
+  const setView = useQueries((s) => s.setView);
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex h-8 shrink-0 items-end gap-1 border-b px-2 text-xs">
+        {(["results", "messages"] as const).map((view) => (
+          <button
+            key={view}
+            onClick={() => setView(tab.id, view)}
+            className={cn(
+              "-mb-px border-b-2 px-2 pb-1.5 capitalize",
+              tab.view === view ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {view}
+            {view === "messages" && tab.messages.some((m) => m.isError) && (
+              <span className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive align-middle" />
+            )}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {tab.view === "messages" ? <Messages tab={tab} /> : <Results tab={tab} />}
+      </div>
+    </div>
+  );
+}
+
+function Messages({ tab }: { tab: QueryTab }) {
+  const finishedAt = tab.startedAt !== null && tab.elapsedMs !== null ? new Date(tab.startedAt + tab.elapsedMs) : null;
+  return (
+    <div className="space-y-1 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+      {tab.messages.map((message, index) => {
+        const { line } = message;
+        return (
+          <div
+            key={index}
+            className={cn(message.isError && "text-red-500", line && "cursor-pointer hover:underline")}
+            title={line ? `Go to line ${line}` : undefined}
+            onDoubleClick={line ? () => revealLine(line) : undefined}
+            onClick={line ? () => revealLine(line) : undefined}
+          >
+            {message.header && <div>{message.header}</div>}
+            <div>{message.text}</div>
+          </div>
+        );
+      })}
+      {finishedAt && tab.status !== "executing" && (
+        <div className="pt-2 text-muted-foreground">Completion time: {finishedAt.toISOString()}</div>
+      )}
+    </div>
+  );
+}
+
+function Results({ tab }: { tab: QueryTab }) {
+  if (tab.resultSets.length === 0) {
+    return <Centered>{tab.status === "executing" ? "Waiting for results…" : "No result sets."}</Centered>;
+  }
+  return (
+    <div className="space-y-3 p-3">
+      {tab.resultSets.map((set) => (
+        <div key={set.index} className="rounded border">
+          <div className="flex items-center justify-between border-b px-2 py-1 text-xs text-muted-foreground">
+            <span>Result {set.index + 1}</span>
+            <span>{set.rows === null ? "Reading…" : `${set.rows} row${set.rows === 1 ? "" : "s"}`}</span>
+          </div>
+          <div className="flex gap-0 overflow-x-auto font-mono text-xs">
+            {set.columns.map((column, index) => (
+              <div key={index} className="shrink-0 border-r px-2 py-1 font-semibold last:border-r-0">
+                {column || "(No column name)"}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <p className="text-xs text-muted-foreground">The row grid arrives in the next milestone.</p>
+    </div>
+  );
+}
+
+function useElapsed(tab: QueryTab) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (tab.status !== "executing") return;
+    const timer = window.setInterval(() => tick((n) => n + 1), 250);
+    return () => window.clearInterval(timer);
+  }, [tab.status]);
+  if (tab.status === "executing" && tab.startedAt !== null) return Date.now() - tab.startedAt;
+  return tab.elapsedMs;
+}
+
+function formatElapsed(ms: number | null) {
+  if (ms === null) return "00:00:00";
+  const seconds = Math.floor(ms / 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}`;
+}
+
+function StatusBar({ tab }: { tab: QueryTab }) {
+  const connection = useConnections((s) => s.connections.find((c) => c.id === tab.connectionId));
+  const elapsed = useElapsed(tab);
+  const environment = connection ? ENVIRONMENTS[connection.environment] : null;
+  const rows = tab.resultSets.reduce((sum, set) => sum + (set.rows ?? 0), 0);
+
+  let status: React.ReactNode;
+  if (tab.status === "executing") {
+    status = (
+      <>
+        <Loader2 className="size-3 animate-spin" /> Executing query…
+      </>
+    );
+  } else if (tab.status === "connecting") {
+    status = "Connecting…";
+  } else if (tab.status === "disconnected") {
+    status = (
+      <>
+        <XCircle className="size-3" /> Disconnected
+      </>
+    );
+  } else if (tab.outcome === "succeeded") {
+    status = (
+      <>
+        <CheckCircle2 className="size-3" /> Query executed successfully.
+      </>
+    );
+  } else if (tab.outcome === "failed") {
+    status = (
+      <>
+        <XCircle className="size-3" /> Query completed with errors.
+      </>
+    );
+  } else if (tab.outcome === "cancelled") {
+    status = "Query was cancelled.";
+  } else {
+    status = "Connected.";
+  }
+
+  return (
+    <footer className="flex h-6 shrink-0 items-center gap-4 border-t px-3 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1.5">{status}</span>
+      <span className="ml-auto flex items-center gap-1.5">
+        {environment && <span className={cn("size-2 rounded-full", environment.dot)} title={environment.label} />}
+        {tab.server?.serverName}
+      </span>
+      {connection && (
+        <span>{connection.authentication.kind === "sql" ? connection.authentication.userName : "Windows"}</span>
+      )}
+      <span>{tab.database}</span>
+      <span className="tabular-nums">{formatElapsed(elapsed)}</span>
+      <span className="tabular-nums">
+        {rows} {rows === 1 ? "row" : "rows"}
+      </span>
+    </footer>
+  );
+}
