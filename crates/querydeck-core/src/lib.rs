@@ -4,3 +4,11 @@
 //! against a real SQL Server without starting the app.
 //!
 //! Terms follow `GLOSSARY.md` at the repository root.
+
+pub mod catalog;
+pub mod connection;
+pub mod error;
+pub mod secrets;
+pub mod session;
+
+pub use error::{Error, Result};

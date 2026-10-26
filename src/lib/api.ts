@@ -1,0 +1,63 @@
+// Typed wrappers around the Tauri commands in src-tauri/src/explorer.rs.
+// Shapes mirror querydeck-core's serde output.
+import { invoke } from "@tauri-apps/api/core";
+
+export type Environment = "production" | "test" | "development";
+export type Encrypt = "mandatory" | "optional" | "strict";
+
+export type Authentication =
+  | { kind: "sql"; userName: string }
+  | { kind: "windows" };
+
+export interface SavedConnection {
+  id: string;
+  name: string;
+  server: string;
+  authentication: Authentication;
+  defaultDatabase: string | null;
+  environment: Environment;
+  encrypt: Encrypt;
+  trustServerCertificate: boolean;
+}
+
+export interface ServerInfo {
+  serverName: string;
+  version: string;
+  database: string;
+}
+
+export interface CatalogItem {
+  name: string;
+  schema: string | null;
+  objectId: number | null;
+  detail: string | null;
+  system: boolean;
+}
+
+export type ObjectFolder = "tables" | "views" | "storedProcedures" | "functions";
+export type TableFolder = "columns" | "keys" | "indexes" | "triggers";
+
+export const api = {
+  listConnections: () => invoke<SavedConnection[]>("list_connections"),
+  saveConnection: (connection: SavedConnection, password: string | null) =>
+    invoke<SavedConnection>("save_connection", { connection, password }),
+  deleteConnection: (id: string) => invoke<void>("delete_connection", { id }),
+  testConnection: (connection: SavedConnection, password: string | null) =>
+    invoke<ServerInfo>("test_connection", { connection, password }),
+  connect: (id: string) => invoke<ServerInfo>("explorer_connect", { id }),
+  disconnect: (id: string) => invoke<void>("explorer_disconnect", { id }),
+  databases: (id: string) => invoke<CatalogItem[]>("explorer_databases", { id }),
+  objects: (id: string, database: string, folder: ObjectFolder) =>
+    invoke<CatalogItem[]>("explorer_objects", { id, database, folder }),
+  tableChildren: (id: string, database: string, objectId: number, folder: TableFolder) =>
+    invoke<CatalogItem[]>("explorer_table_children", { id, database, objectId, folder }),
+};
+
+export function displayName(connection: SavedConnection) {
+  return connection.name.trim() || connection.server;
+}
+
+/** Tauri rejects with the Rust error's message as a plain string. */
+export function errorMessage(error: unknown) {
+  return typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
+}
