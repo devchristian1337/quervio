@@ -54,6 +54,12 @@ export function selectAll() {
   current.focus();
 }
 
+/** Monaco's Format Selection or Format Document (see SqlEditor.tsx). */
+export function formatInEditor(selectionOnly: boolean) {
+  current?.focus();
+  void current?.getAction(selectionOnly ? "editor.action.formatSelection" : "editor.action.formatDocument")?.run();
+}
+
 // Absent in a plain browser and in the dev mock.
 function inTauri() {
   return Boolean((window as { __TAURI_INTERNALS__?: { metadata?: unknown } }).__TAURI_INTERNALS__?.metadata);

@@ -23,6 +23,7 @@
     "lucide-react": "^1.61.0",
     "marked": "^16.4.2",
     "monaco-editor": "0.57.0",
+    "poor-mans-t-sql-formatter": "1.6.10",
     "radix-ui": "^1.8.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
