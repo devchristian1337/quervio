@@ -89,6 +89,9 @@ mockIPC(async (cmd, args) => {
       const channel = a.onEvent as Channel<ExecutionEvent>;
       const send = (event: ExecutionEvent) => channel.onmessage(event);
       send({ type: "batchStarted", batch: 0, firstLine: 0 });
+      // WAITFOR DELAY '00:00:05' makes the mock slow, to see the running state.
+      const wait = /waitfor\s+delay\s+'00:00:(\d\d)'/i.exec(String(a.script));
+      if (wait) await new Promise((resolve) => setTimeout(resolve, Number(wait[1]) * 1000));
       send({ type: "resultSetStarted", index: 0, columns: COLUMNS.map((name) => ({ name })) });
       send({ type: "resultSetFinished", index: 0, rows: MOCK_ROWS });
       send({ type: "rowsAffected", count: MOCK_ROWS });
