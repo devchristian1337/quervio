@@ -1,4 +1,6 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { toast } from "sonner";
 import {
   CheckCircle2,
   Circle,
@@ -15,6 +17,14 @@ import {
 import { closeTab as closeTabSafely, openFile, saveTab } from "@/lib/files";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api, displayName, errorMessage } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -290,27 +300,57 @@ function OutputPanel({ tab }: { tab: QueryTab }) {
 
 function Messages({ tab }: { tab: QueryTab }) {
   const finishedAt = tab.startedAt !== null && tab.elapsedMs !== null ? new Date(tab.startedAt + tab.elapsedMs) : null;
+  const list = useRef<HTMLDivElement>(null);
+  // Read when the menu opens: by the time an item is chosen, focus has moved.
+  const [selection, setSelection] = useState("");
+
+  const copy = (text: string, what: string) =>
+    writeText(text).then(
+      () => toast.success(`Copied ${what}`),
+      (error) => toast.error("Copy failed", { description: errorMessage(error) }),
+    );
+  const allText = () => list.current?.innerText.trim() ?? "";
+  const selectAll = () => {
+    if (list.current) window.getSelection()?.selectAllChildren(list.current);
+  };
+
   return (
-    <div className="space-y-1 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
-      {tab.messages.map((message, index) => {
-        const { line } = message;
-        return (
-          <div
-            key={index}
-            className={cn(message.isError && "text-red-500", line && "cursor-pointer hover:underline")}
-            title={line ? `Go to line ${line}` : undefined}
-            onDoubleClick={line ? () => revealLine(line) : undefined}
-            onClick={line ? () => revealLine(line) : undefined}
-          >
-            {message.header && <div>{message.header}</div>}
-            <div>{message.text}</div>
-          </div>
-        );
-      })}
-      {finishedAt && tab.status !== "executing" && (
-        <div className="pt-2 text-muted-foreground">Completion time: {finishedAt.toISOString()}</div>
-      )}
-    </div>
+    <ContextMenu onOpenChange={(open) => open && setSelection(window.getSelection()?.toString() ?? "")}>
+      <ContextMenuTrigger asChild>
+        <div ref={list} className="min-h-full space-y-1 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+          {tab.messages.map((message, index) => {
+            const { line } = message;
+            return (
+              <div
+                key={index}
+                className={cn(message.isError && "text-red-500", line && "cursor-pointer hover:underline")}
+                title={line ? `Go to line ${line}` : undefined}
+                onDoubleClick={line ? () => revealLine(line) : undefined}
+                onClick={line ? () => revealLine(line) : undefined}
+              >
+                {message.header && <div>{message.header}</div>}
+                <div>{message.text}</div>
+              </div>
+            );
+          })}
+          {finishedAt && tab.status !== "executing" && (
+            <div className="pt-2 text-muted-foreground">Completion time: {finishedAt.toISOString()}</div>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem disabled={!selection} onSelect={() => void copy(selection, "selection")}>
+          Copy <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem disabled={tab.messages.length === 0} onSelect={() => void copy(allText(), "messages")}>
+          Copy All
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={tab.messages.length === 0} onSelect={selectAll}>
+          Select All
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

@@ -73,7 +73,16 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
           const script = currentScript();
           if (activeId && script) void execute(activeId, script);
         };
-        editor.addAction({ id: "querydeck.execute", label: "Execute", keybindings: [KeyCode.F5, KeyMod.CtrlCmd | KeyCode.KeyE], run: execute });
+        editor.addAction({
+          id: "querydeck.execute",
+          label: "Execute",
+          // The menu shows the last one.
+          keybindings: [KeyMod.CtrlCmd | KeyCode.KeyE, KeyCode.F5],
+          // First in the editor's context menu, as in SSMS.
+          contextMenuGroupId: "navigation",
+          contextMenuOrder: 0,
+          run: execute,
+        });
         editor.addAction({
           id: "querydeck.cancel",
           label: "Cancel Executing Query",

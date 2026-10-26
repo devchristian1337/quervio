@@ -15,6 +15,15 @@ export function registerMonaco(api: typeof Monaco) {
   monaco = api;
 }
 
+export function editorHasTextFocus(): boolean {
+  return current?.hasTextFocus() ?? false;
+}
+
+/** Inserts `text` as if pasted at the cursor. */
+export function pasteIntoEditor(text: string) {
+  current?.trigger("keyboard", "paste", { text });
+}
+
 /** The selection when there is one, otherwise the whole script. */
 export function currentScript(): Script | null {
   const model = current?.getModel();
