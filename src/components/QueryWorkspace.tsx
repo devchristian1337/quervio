@@ -190,15 +190,28 @@ function DatabaseSelector({ tab }: { tab: QueryTab }) {
       onValueChange={(database) => void useDatabase(tab.id, database)}
       disabled={tab.status !== "ready"}
     >
-      <SelectTrigger size="sm" className="h-7 w-56 gap-1.5 text-xs" title="Current database (USE)">
+      <SelectTrigger size="sm" className="h-7 w-56 gap-1.5 px-2 text-xs" title="Current database (USE)">
         <Database className="size-3.5 text-muted-foreground" />
-        <SelectValue placeholder="Database" />
+        <span className="min-w-0 flex-1 truncate text-left">
+          <SelectValue placeholder="Database" />
+        </span>
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent
+        // A plain dropdown under the trigger, as wide as it, not a list
+        // laid over it around the current database.
+        position="popper"
+        align="start"
+        className="max-h-72 w-(--radix-select-trigger-width)"
+        // Back to the editor: the next thing is usually typing the query.
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          focusEditor();
+        }}
+      >
         {error && <div className="px-2 py-1.5 text-xs text-destructive">{error}</div>}
         {options.map((name) => (
-          <SelectItem key={name} value={name} className="text-xs">
-            {name}
+          <SelectItem key={name} value={name} className="text-xs" title={name}>
+            <span className="truncate">{name}</span>
           </SelectItem>
         ))}
       </SelectContent>
