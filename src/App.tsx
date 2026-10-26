@@ -21,7 +21,7 @@ export default function App() {
   useSystemTheme();
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="h-screen text-sm">
+    <ResizablePanelGroup orientation="horizontal" className="text-sm">
       <ResizablePanel defaultSize="22%" minSize={200}>
         <section className="h-full p-3 text-muted-foreground">
           Object Explorer

@@ -123,4 +123,10 @@
   body {
     @apply bg-transparent text-foreground;
     }
+  /* Panel groups size themselves with height: 100%, so the chain needs one. */
+  html,
+  body,
+  #root {
+    @apply h-full overflow-hidden;
+    }
 }
