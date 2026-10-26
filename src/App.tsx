@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/resizable";
 import { ObjectExplorer } from "@/components/ObjectExplorer";
 import { QueryWorkspace } from "@/components/QueryWorkspace";
+import { Toaster } from "@/components/ui/sonner";
 
 // Follow the Windows light/dark setting.
 function useSystemTheme() {
@@ -23,6 +24,7 @@ export default function App() {
   useSystemTheme();
 
   return (
+    <>
     <ResizablePanelGroup orientation="horizontal" className="text-sm">
       <ResizablePanel defaultSize="22%" minSize={200}>
         <ObjectExplorer />
@@ -32,5 +34,7 @@ export default function App() {
         <QueryWorkspace />
       </ResizablePanel>
     </ResizablePanelGroup>
+    <Toaster position="bottom-right" />
+    </>
   );
 }

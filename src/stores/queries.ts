@@ -15,7 +15,9 @@ export interface MessageLine {
 export interface ResultSetSummary {
   index: number;
   columns: string[];
-  rows: number | null;
+  /** Rows read so far; grows while the Result Set streams. */
+  rows: number;
+  done: boolean;
 }
 
 export type TabStatus = "connecting" | "ready" | "executing" | "disconnected";
@@ -32,6 +34,8 @@ export interface QueryTab {
   messages: MessageLine[];
   resultSets: ResultSetSummary[];
   outcome: Outcome | null;
+  /** Bumped on every Execution so grids drop rows cached from the last one. */
+  runId: number;
   startedAt: number | null;
   elapsedMs: number | null;
   view: "results" | "messages";
@@ -82,6 +86,7 @@ export const useQueries = create<QueriesState>((set, get) => {
         messages: [],
         resultSets: [],
         outcome: null,
+        runId: 0,
         startedAt: null,
         elapsedMs: null,
         view: "messages",
@@ -118,6 +123,7 @@ export const useQueries = create<QueriesState>((set, get) => {
         messages: [],
         resultSets: [],
         outcome: null,
+        runId: tab.runId + 1,
         startedAt: Date.now(),
         elapsedMs: null,
         error: null,
@@ -139,15 +145,21 @@ export const useQueries = create<QueriesState>((set, get) => {
             break;
           case "resultSetStarted":
             patch(id, (t) => ({
-              resultSets: [...t.resultSets, { index: event.index, columns: event.columns.map((c) => c.name), rows: null }],
+              resultSets: [
+                ...t.resultSets,
+                { index: event.index, columns: event.columns.map((c) => c.name), rows: 0, done: false },
+              ],
               view: "results",
             }));
             break;
-          case "resultSetFinished":
+          case "resultSetRows":
+          case "resultSetFinished": {
+            const done = event.type === "resultSetFinished";
             patch(id, (t) => ({
-              resultSets: t.resultSets.map((r) => (r.index === event.index ? { ...r, rows: event.rows } : r)),
+              resultSets: t.resultSets.map((r) => (r.index === event.index ? { ...r, rows: event.rows, done } : r)),
             }));
             break;
+          }
           case "finished":
             patch(id, (t) => ({
               outcome: event.outcome,

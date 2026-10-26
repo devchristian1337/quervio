@@ -12,6 +12,7 @@ use mssql_tds::error::Error as DriverError;
 use serde::Serialize;
 
 use crate::batch;
+use crate::results::{ResultColumn, ResultLimits, ResultSet as StoredResultSet, SharedResults};
 use crate::session::{Session, int};
 
 /// Cancels a running Execution from another task.
@@ -26,12 +27,6 @@ impl CancelToken {
     pub fn cancel(&self) {
         self.0.cancel();
     }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResultColumn {
-    pub name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -65,6 +60,9 @@ pub enum ExecutionEvent {
         index: usize,
         columns: Vec<ResultColumn>,
     },
+    /// Rows read so far, sent a few times a second while a Result Set streams.
+    #[serde(rename_all = "camelCase")]
+    ResultSetRows { index: usize, rows: u64 },
     #[serde(rename_all = "camelCase")]
     ResultSetFinished { index: usize, rows: u64 },
     #[serde(rename_all = "camelCase")]
@@ -78,6 +76,9 @@ pub enum ExecutionEvent {
 
 const CANCELLED: &str = "Query was cancelled by user.";
 
+/// How often streaming Result Sets report their row count.
+const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
+
 impl Session {
     /// Runs `script`, whose first line is line `base_line` (zero-based) of the
     /// editor: the whole text, or the selection. Every Batch runs even when
@@ -87,9 +88,12 @@ impl Session {
         script: &str,
         base_line: u32,
         cancel: &CancelToken,
+        results: &SharedResults,
+        limits: ResultLimits,
         mut emit: impl FnMut(ExecutionEvent),
     ) -> Outcome {
         let started = Instant::now();
+        results.write().unwrap().clear();
         let mut outcome = Outcome::Succeeded;
         let mut result_sets = 0;
 
@@ -121,7 +125,7 @@ impl Session {
                             }
                         }
                         Ok(StatementResult::Rows) => {
-                            let columns = self
+                            let columns: Vec<_> = self
                                 .client
                                 .get_metadata()
                                 .iter()
@@ -129,18 +133,58 @@ impl Session {
                                     name: column.column_name.clone(),
                                 })
                                 .collect();
+                            results
+                                .write()
+                                .unwrap()
+                                .push(StoredResultSet::new(columns.clone()));
                             emit(ExecutionEvent::ResultSetStarted {
                                 index: result_sets,
                                 columns,
                             });
-                            let mut rows = 0;
+                            let mut rows = 0u64;
+                            let mut limited = false;
+                            let mut last_progress = Instant::now();
                             let read = loop {
                                 match self.client.next_row().await {
-                                    Ok(Some(_)) => rows += 1,
+                                    Ok(Some(row)) => {
+                                        results.write().unwrap()[result_sets]
+                                            .push_row(&row, limits.max_cell_bytes);
+                                        rows += 1;
+                                        if rows as usize >= limits.max_rows {
+                                            limited = true;
+                                            break Ok(());
+                                        }
+                                        if rows.is_multiple_of(1024)
+                                            && last_progress.elapsed() >= PROGRESS_EVERY
+                                        {
+                                            last_progress = Instant::now();
+                                            emit(ExecutionEvent::ResultSetRows {
+                                                index: result_sets,
+                                                rows,
+                                            });
+                                        }
+                                    }
                                     Ok(None) => break Ok(()),
                                     Err(error) => break Err(error),
                                 }
                             };
+                            if limited {
+                                // Stop the Server too: reading on would only be thrown away.
+                                let _ = self.client.cancel_query(0).await;
+                                emit(ExecutionEvent::ResultSetFinished {
+                                    index: result_sets,
+                                    rows,
+                                });
+                                emit(message(
+                                    &format!(
+                                        "Stopped at the limit of {} rows per result set; the rest of the query was cancelled.",
+                                        limits.max_rows
+                                    ),
+                                    true,
+                                ));
+                                outcome = Outcome::Cancelled;
+                                break 'batches;
+                            }
                             emit(ExecutionEvent::ResultSetFinished {
                                 index: result_sets,
                                 rows,

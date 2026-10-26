@@ -27,6 +27,48 @@ const item = (name: string, extra: Partial<CatalogItem> = {}): CatalogItem => ({
 
 const server = { serverName: "mock", version: "16.0.0.0", database: "master" };
 
+const MOCK_ROWS = 1_000_000;
+const COLUMNS = ["Id", "Name", "Notes", "Payload"];
+
+/** Synthetic cell: NULL every 7th Notes, long JSON in Payload. */
+function mockCell(row: number, column: number): string | null {
+  switch (column) {
+    case 0:
+      return String(row + 1);
+    case 1:
+      return `Customer ${row + 1}`;
+    case 2:
+      return row % 7 === 0 ? null : `note | line one\nline two ${row}`;
+    default:
+      return JSON.stringify({ id: row, tags: ["a", "b"], text: "x".repeat(600) });
+  }
+}
+
+function encodeWindow(start: number, count: number): ArrayBuffer {
+  const encoder = new TextEncoder();
+  const rows = Math.max(0, Math.min(count, MOCK_ROWS - start));
+  const parts: number[] = [];
+  const u32 = (n: number) => parts.push(n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >>> 24) & 255);
+  u32(rows);
+  u32(COLUMNS.length);
+  for (let r = start; r < start + rows; r++) {
+    for (let c = 0; c < COLUMNS.length; c++) {
+      const text = mockCell(r, c);
+      if (text === null) {
+        parts.push(1);
+        u32(0);
+        continue;
+      }
+      const preview = text.length > 500 ? text.slice(0, 500) : text;
+      const bytes = encoder.encode(preview);
+      parts.push(text.length > 500 ? 2 : 0);
+      u32(bytes.length);
+      for (const b of bytes) parts.push(b);
+    }
+  }
+  return new Uint8Array(parts).buffer;
+}
+
 mockIPC(async (cmd, args) => {
   const a = args as Record<string, unknown>;
   switch (cmd) {
@@ -47,20 +89,23 @@ mockIPC(async (cmd, args) => {
       const channel = a.onEvent as Channel<ExecutionEvent>;
       const send = (event: ExecutionEvent) => channel.onmessage(event);
       send({ type: "batchStarted", batch: 0, firstLine: 0 });
-      send({ type: "resultSetStarted", index: 0, columns: [{ name: "CustomerId" }, { name: "Name" }] });
-      send({ type: "resultSetFinished", index: 0, rows: 2 });
-      send({ type: "rowsAffected", count: 2 });
-      send({ type: "message", text: "ciao", isError: false, header: null, line: null });
-      send({
-        type: "message",
-        text: "Invalid object name 'missing'.",
-        isError: true,
-        header: "Msg 208, Level 16, State 1, Line 2",
-        line: 2,
-      });
-      send({ type: "finished", outcome: "failed", elapsedMs: 42, database: "master", openTransactions: 0 });
-      return "failed";
+      send({ type: "resultSetStarted", index: 0, columns: COLUMNS.map((name) => ({ name })) });
+      send({ type: "resultSetFinished", index: 0, rows: MOCK_ROWS });
+      send({ type: "rowsAffected", count: MOCK_ROWS });
+      send({ type: "finished", outcome: "succeeded", elapsedMs: 1234, database: "master", openTransactions: 0 });
+      return "succeeded";
     }
+    case "result_rows":
+      return encodeWindow(a.start as number, a.count as number);
+    case "result_cell": {
+      const text = mockCell(a.row as number, a.column as number);
+      return { text, clipped: false };
+    }
+    case "result_copy":
+      return {
+        rows: (a.rows as number[])[1] - (a.rows as number[])[0],
+        columns: (a.columns as number[])[1] - (a.columns as number[])[0],
+      };
     default:
       return null;
   }

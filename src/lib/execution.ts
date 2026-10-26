@@ -6,6 +6,7 @@ export type ExecutionEvent =
   | { type: "message"; text: string; isError: boolean; header: string | null; line: number | null }
   | { type: "rowsAffected"; count: number }
   | { type: "resultSetStarted"; index: number; columns: { name: string }[] }
+  | { type: "resultSetRows"; index: number; rows: number }
   | { type: "resultSetFinished"; index: number; rows: number }
   | {
       type: "finished";

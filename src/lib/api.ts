@@ -35,6 +35,8 @@ export interface CatalogItem {
   system: boolean;
 }
 
+export type CopyFormat = "text" | "textWithHeaders" | "markdown";
+
 export type ObjectFolder = "tables" | "views" | "storedProcedures" | "functions";
 export type TableFolder = "columns" | "keys" | "indexes" | "triggers";
 
@@ -59,6 +61,20 @@ export const api = {
   executeQuery: (tabId: string, script: string, baseLine: number, onEvent: Channel<ExecutionEvent>) =>
     invoke<Outcome>("query_execute", { tabId, script, baseLine, onEvent }),
   cancelQuery: (tabId: string) => invoke<void>("query_cancel", { tabId }),
+
+  resultRows: (tabId: string, set: number, start: number, count: number) =>
+    invoke<ArrayBuffer>("result_rows", { tabId, set, start, count }),
+  resultCell: (tabId: string, set: number, row: number, column: number) =>
+    invoke<{ text: string | null; clipped: boolean } | null>("result_cell", { tabId, set, row, column }),
+  resultCopy: (
+    tabId: string,
+    set: number,
+    rows: [number, number],
+    columns: [number, number],
+    format: CopyFormat,
+  ) => invoke<{ rows: number; columns: number }>("result_copy", { tabId, set, rows, columns, format }),
+  resultExportMarkdown: (tabId: string, set: number, path: string) =>
+    invoke<void>("result_export_markdown", { tabId, set, path }),
 };
 
 export function displayName(connection: SavedConnection) {
