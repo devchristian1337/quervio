@@ -1,0 +1,11 @@
+[package]
+name = "querydeck-core"
+description = "Querydeck domain logic, independent of Tauri"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mssql-tds.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
