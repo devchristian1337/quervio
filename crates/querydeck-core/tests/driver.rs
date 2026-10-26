@@ -12,46 +12,15 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mssql_tds::connection::client_context::ClientContext;
 use mssql_tds::connection::tds_client::{
     BatchErrorMode, ExecuteOptions, ResultSet, StatementResult, TdsClient,
 };
-use mssql_tds::connection_provider::tds_connection_provider::TdsConnectionProvider;
-use mssql_tds::core::{CancelHandle, EncryptionSetting};
+use mssql_tds::core::CancelHandle;
 use mssql_tds::datatypes::column_values::ColumnValues;
 use mssql_tds::error::Error;
 
-/// Reads a test setting from the environment, falling back to the
-/// workspace `.env` file.
-fn setting(key: &str) -> String {
-    if let Ok(value) = std::env::var(key) {
-        return value;
-    }
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.env");
-    let contents = std::fs::read_to_string(path)
-        .unwrap_or_else(|_| panic!("{key} not set and no .env (copy .env.example)"));
-    contents
-        .lines()
-        .filter_map(|line| line.split_once('='))
-        .find(|(name, _)| name.trim() == key)
-        .map(|(_, value)| value.trim().to_string())
-        .unwrap_or_else(|| panic!("{key} missing from .env"))
-}
-
-async fn connect() -> TdsClient {
-    let mut context = ClientContext::default();
-    context.user_name = setting("QUERYDECK_TEST_USER");
-    context.password = setting("QUERYDECK_TEST_PASSWORD");
-    context.database = "master".into();
-    // Querydeck's default for a Saved Connection: Mandatory + Trust server certificate.
-    context.encryption_options.mode = EncryptionSetting::Required;
-    context.encryption_options.trust_server_certificate = true;
-
-    TdsConnectionProvider {}
-        .create_client(context, &setting("QUERYDECK_TEST_SERVER"), None)
-        .await
-        .expect("connect to the test SQL Server")
-}
+mod common;
+use common::connect;
 
 async fn count_rows(client: &mut TdsClient) -> Result<u64, Error> {
     let mut rows = 0;
