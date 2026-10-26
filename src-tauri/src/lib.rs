@@ -6,6 +6,8 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             app.manage(explorer::ExplorerState::open(&data_dir)?);
@@ -26,6 +28,10 @@ pub fn run() {
             query::query_close,
             query::query_execute,
             query::query_cancel,
+            query::result_rows,
+            query::result_cell,
+            query::result_copy,
+            query::result_export_markdown,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

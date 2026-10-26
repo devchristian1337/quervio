@@ -12,19 +12,20 @@ use querydeck_core::session::Session;
 mod common;
 use common::{password, run_scripts, saved_connection};
 
-const DATABASE: &str = "Querydeck Catalog]Test";
+const DATABASE: &str = "Querydeck Tests]Catalog";
 
-/// A database with one of every Object the Object Explorer lists. Its name
-/// has a space and a `]` to prove names are quoted.
+/// A database with one of every Object the Object Explorer lists, dropped and
+/// recreated on every run, so keep nothing in it. Its name has a space and a
+/// `]` to prove names are quoted.
 async fn create_test_database() {
     run_scripts(&[
-        "IF DB_ID(N'Querydeck Catalog]Test') IS NOT NULL
+        "IF DB_ID(N'Querydeck Tests]Catalog') IS NOT NULL
          BEGIN
-             ALTER DATABASE [Querydeck Catalog]]Test] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-             DROP DATABASE [Querydeck Catalog]]Test];
+             ALTER DATABASE [Querydeck Tests]]Catalog] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+             DROP DATABASE [Querydeck Tests]]Catalog];
          END
-         CREATE DATABASE [Querydeck Catalog]]Test];",
-        "USE [Querydeck Catalog]]Test];
+         CREATE DATABASE [Querydeck Tests]]Catalog];",
+        "USE [Querydeck Tests]]Catalog];
          EXEC('CREATE SCHEMA sales');
          CREATE TABLE sales.Customer (
              CustomerId int IDENTITY PRIMARY KEY,

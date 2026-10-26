@@ -13,6 +13,7 @@ import { useExplorer } from "@/stores/explorer";
 import { useQueries, type QueryTab } from "@/stores/queries";
 
 const SqlEditor = lazy(() => import("@/components/SqlEditor"));
+const ResultGrid = lazy(() => import("@/components/ResultGrid"));
 
 export function QueryWorkspace() {
   useGlobalShortcuts();
@@ -196,7 +197,7 @@ function OutputPanel({ tab }: { tab: QueryTab }) {
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className={cn("min-h-0 flex-1", tab.view === "messages" && "overflow-auto")}>
         {tab.view === "messages" ? <Messages tab={tab} /> : <Results tab={tab} />}
       </div>
     </div>
@@ -234,23 +235,16 @@ function Results({ tab }: { tab: QueryTab }) {
     return <Centered>{tab.status === "executing" ? "Waiting for results…" : "No result sets."}</Centered>;
   }
   return (
-    <div className="space-y-3 p-3">
+    <div className="flex h-full flex-col gap-1 overflow-auto p-1">
       {tab.resultSets.map((set) => (
-        <div key={set.index} className="rounded border">
-          <div className="flex items-center justify-between border-b px-2 py-1 text-xs text-muted-foreground">
-            <span>Result {set.index + 1}</span>
-            <span>{set.rows === null ? "Reading…" : `${set.rows} row${set.rows === 1 ? "" : "s"}`}</span>
-          </div>
-          <div className="flex gap-0 overflow-x-auto font-mono text-xs">
-            {set.columns.map((column, index) => (
-              <div key={index} className="shrink-0 border-r px-2 py-1 font-semibold last:border-r-0">
-                {column || "(No column name)"}
-              </div>
-            ))}
-          </div>
+        <div key={`${tab.runId}:${set.index}`} className="min-h-44 flex-1 overflow-hidden rounded border">
+          <ErrorBoundary label="The results grid">
+            <Suspense fallback={<Centered>Loading grid…</Centered>}>
+              <ResultGrid tabId={tab.id} set={set} />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       ))}
-      <p className="text-xs text-muted-foreground">The row grid arrives in the next milestone.</p>
     </div>
   );
 }
@@ -277,7 +271,7 @@ function StatusBar({ tab }: { tab: QueryTab }) {
   const connection = useConnections((s) => s.connections.find((c) => c.id === tab.connectionId));
   const elapsed = useElapsed(tab);
   const environment = connection ? ENVIRONMENTS[connection.environment] : null;
-  const rows = tab.resultSets.reduce((sum, set) => sum + (set.rows ?? 0), 0);
+  const rows = tab.resultSets.reduce((sum, set) => sum + set.rows, 0);
 
   let status: React.ReactNode;
   if (tab.status === "executing") {
@@ -325,7 +319,7 @@ function StatusBar({ tab }: { tab: QueryTab }) {
       <span>{tab.database}</span>
       <span className="tabular-nums">{formatElapsed(elapsed)}</span>
       <span className="tabular-nums">
-        {rows} {rows === 1 ? "row" : "rows"}
+        {rows.toLocaleString("en-US")} {rows === 1 ? "row" : "rows"}
       </span>
     </footer>
   );
