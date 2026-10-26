@@ -11,4 +11,10 @@ Il backend parla con SQL Server tramite `mssql-tds` (github.com/microsoft/mssql-
 ## Consequences
 
 - `mssql-tds` è 0.x e non accetta PR esterne: gli aggiornamenti di versione sono deliberati e coperti dai test di integrazione.
-- L'annullamento durante lo streaming delle righe e l'ordine dei Messaggi vanno verificati per primi: la ricerca li ha letti nel codice sorgente senza poterli eseguire.
+- La milestone 0 (2026-10-26) ha verificato `mssql-tds` 0.3.0 contro SQL Server 2022 in Docker, con i test in `crates/querydeck-core/tests/driver.rs`:
+  - Messaggi, Result set e righe interessate arrivano nell'ordine dello script.
+  - Con `BatchErrorMode::Continue` un errore non ferma il Batch e riporta il numero di riga.
+  - L'annullamento da un altro task funziona sia con il Server occupato (`WAITFOR`) sia durante lo streaming delle righe: circa 770k righe lette, annullamento completato in meno di 0,5 s, Sessione ancora viva con le sue tabelle temporanee.
+  - `money` e `decimal(38)` arrivano esatti.
+  - `USE` aggiorna il database corrente.
+- Restano da verificare su un server reale: l'autenticazione Windows (SSPI) e le istanze con nome tramite SQL Browser.
