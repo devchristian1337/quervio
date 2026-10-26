@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Querydeck",
+  "productName": "Quervio",
   "version": "0.1.0",
-  "identifier": "com.querydeck.app",
+  "identifier": "com.quervio.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Querydeck",
+        "title": "Quervio",
         "width": 1400,
         "height": 900,
         "minWidth": 900,

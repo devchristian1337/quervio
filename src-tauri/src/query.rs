@@ -5,15 +5,15 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use querydeck_core::execution::{CancelToken, ExecutionEvent, Outcome};
-use querydeck_core::results::{CellValue, ResultLimits, SharedResults};
-use querydeck_core::session::{ServerInfo, Session};
+use quervio_core::execution::{CancelToken, ExecutionEvent, Outcome};
+use quervio_core::results::{CellValue, ResultLimits, SharedResults};
+use quervio_core::session::{ServerInfo, Session};
 use tauri::State;
 use tauri::ipc::{Channel, Response};
 
 use crate::explorer::{CommandResult, ExplorerState, message};
 
-const APPLICATION_NAME: &str = "Querydeck - Query";
+const APPLICATION_NAME: &str = "Quervio - Query";
 
 #[derive(Default)]
 pub struct QueryState {
@@ -52,7 +52,7 @@ impl QueryState {
         &self,
         tab_id: &str,
         set: usize,
-        read: impl FnOnce(&querydeck_core::results::ResultSet) -> T,
+        read: impl FnOnce(&quervio_core::results::ResultSet) -> T,
     ) -> CommandResult<T> {
         let results = self.results(tab_id);
         let sets = results.read().unwrap();
@@ -242,8 +242,8 @@ pub fn result_export_markdown(
 
 /// Destructive Statements in a script, checked before running it on Production.
 #[tauri::command]
-pub fn query_check(script: String, base_line: u32) -> querydeck_core::guard::Check {
-    querydeck_core::guard::check(&script, base_line)
+pub fn query_check(script: String, base_line: u32) -> quervio_core::guard::Check {
+    quervio_core::guard::check(&script, base_line)
 }
 
 /// Switches the Query Tab's Session to `database` and returns the database

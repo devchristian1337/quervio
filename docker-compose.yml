@@ -1,13 +1,15 @@
-# SQL Server used by the querydeck-core integration tests.
+# SQL Server used by the quervio-core integration tests.
 # Start with: docker compose up -d
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
+    # Named after the app's first name, Querydeck. Renaming it would recreate
+    # the container, and it has no volume: its databases would be lost.
     container_name: querydeck-sqlserver
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: Developer
-      MSSQL_SA_PASSWORD: ${QUERYDECK_TEST_PASSWORD}
+      MSSQL_SA_PASSWORD: ${QUERVIO_TEST_PASSWORD}
     ports:
       - "14333:1433"
     healthcheck:

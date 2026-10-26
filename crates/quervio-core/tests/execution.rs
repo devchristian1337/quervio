@@ -2,20 +2,20 @@
 //!
 //! ```text
 //! docker compose up -d --wait
-//! cargo test -p querydeck-core --test execution -- --ignored
+//! cargo test -p quervio-core --test execution -- --ignored
 //! ```
 
 use std::time::{Duration, Instant};
 
-use querydeck_core::execution::{CancelToken, ExecutionEvent, Outcome};
-use querydeck_core::results::{ResultLimits, SharedResults};
-use querydeck_core::session::Session;
+use quervio_core::execution::{CancelToken, ExecutionEvent, Outcome};
+use quervio_core::results::{ResultLimits, SharedResults};
+use quervio_core::session::Session;
 
 mod common;
 use common::{password, saved_connection};
 
 async fn open() -> Session {
-    Session::open(&saved_connection(), password(), "Querydeck tests")
+    Session::open(&saved_connection(), password(), "Quervio tests")
         .await
         .expect("open session")
 }

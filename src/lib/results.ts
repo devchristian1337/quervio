@@ -1,4 +1,4 @@
-// Decodes the row windows sent by querydeck_core::results::ResultSet::window.
+// Decodes the row windows sent by quervio_core::results::ResultSet::window.
 export const enum CellKind {
   Text = 0,
   Null = 1,

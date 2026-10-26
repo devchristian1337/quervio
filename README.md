@@ -1,4 +1,4 @@
-# Querydeck
+# Quervio
 
 A fast, modern SQL Server management tool for Windows 11, inspired by SSMS. Built with Tauri v2, React and Rust.
 
@@ -9,7 +9,7 @@ A fast, modern SQL Server management tool for Windows 11, inspired by SSMS. Buil
 
 | Path | What lives there |
 |---|---|
-| `crates/querydeck-core` | Domain logic with no Tauri dependency: Server access (`mssql-tds`), Batch splitting, Destructive Statement detection, scripting, Result Set storage |
+| `crates/quervio-core` | Domain logic with no Tauri dependency: Server access (`mssql-tds`), Batch splitting, Destructive Statement detection, scripting, Result Set storage |
 | `src-tauri` | Thin Tauri shell: commands, events, window |
 | `src` | React + TypeScript frontend (shadcn/ui, Tailwind, Monaco, Glide Data Grid, Zustand) |
 

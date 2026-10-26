@@ -4,7 +4,7 @@ Le query si formattano con Poor Man's T-SQL Formatter (pacchetto npm `poor-mans-
 
 ## Consequences
 
-- La licenza è AGPL-3.0: se Querydeck viene distribuito fuori dal team, il suo sorgente va reso disponibile alle stesse condizioni.
+- La licenza è AGPL-3.0: se Quervio viene distribuito fuori dal team, il suo sorgente va reso disponibile alle stesse condizioni.
 - Il pacchetto non viene aggiornato dal 2022: è codice C# transpilato in JavaScript con Bridge.NET. Legge la variabile `global` di Node (vedi `src/lib/node-global.ts`) e contiene un `new Function` che il formatter non usa, quindi funziona anche con la CSP senza `unsafe-eval`.
 - Il formatter unisce `GO 5` alla riga precedente, perciò ogni Batch viene formattato da solo e le righe `GO` restano come sono scritte.
 - Un risultato viene accettato solo se ha gli stessi token dello script di partenza: un errore del formatter può cambiare l'impaginazione, mai il codice.

@@ -1,6 +1,6 @@
 [package]
-name = "querydeck-core"
-description = "Querydeck domain logic, independent of Tauri"
+name = "quervio-core"
+description = "Quervio domain logic, independent of Tauri"
 version.workspace = true
 edition.workspace = true
 

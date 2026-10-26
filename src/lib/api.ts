@@ -1,5 +1,5 @@
 // Typed wrappers around the Tauri commands in src-tauri/src/explorer.rs.
-// Shapes mirror querydeck-core's serde output.
+// Shapes mirror quervio-core's serde output.
 import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { ExecutionEvent, Outcome } from "@/lib/execution";
 
@@ -92,7 +92,7 @@ export const api = {
     invoke<number>("query_end_transactions", { tabId, commit }),
 };
 
-/** Mirrors querydeck_core::guard::Check. */
+/** Mirrors quervio_core::guard::Check. */
 export interface ScriptCheck {
   findings: {
     kind: "updateWithoutWhere" | "deleteWithoutWhere" | "truncate" | "drop" | "alterTable";

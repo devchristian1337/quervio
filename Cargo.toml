@@ -1,13 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["src-tauri", "crates/querydeck-core"]
+members = ["src-tauri", "crates/quervio-core"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
-querydeck-core = { path = "crates/querydeck-core" }
+quervio-core = { path = "crates/quervio-core" }
 # Pinned exactly: 0.x API, see docs/adr/0002-driver-mssql-tds.md
 mssql-tds = "=0.3.0"
 serde = { version = "1", features = ["derive"] }

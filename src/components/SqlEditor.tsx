@@ -32,13 +32,13 @@ import { openQueryFromContext } from "@/lib/shortcuts";
 registerMonaco(monaco);
 
 // Transparent background so the Mica effect shows through, as elsewhere.
-monaco.editor.defineTheme("querydeck-dark", {
+monaco.editor.defineTheme("quervio-dark", {
   base: "vs-dark",
   inherit: true,
   rules: [],
   colors: { "editor.background": "#00000000", "editorGutter.background": "#00000000" },
 });
-monaco.editor.defineTheme("querydeck-light", {
+monaco.editor.defineTheme("quervio-light", {
   base: "vs",
   inherit: true,
   rules: [],
@@ -120,7 +120,7 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
               useQueries.getState().setDirty(tabId, true);
               scheduleSave();
             }}
-            theme={dark ? "querydeck-dark" : "querydeck-light"}
+            theme={dark ? "quervio-dark" : "quervio-light"}
             options={{
               fontFamily: "'Cascadia Code', Consolas, monospace",
               fontSize: 13,
@@ -137,13 +137,13 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
               editor.focus();
               const { KeyCode, KeyMod } = monaco;
               editor.addAction({
-                id: "querydeck.execute",
+                id: "quervio.execute",
                 label: "Execute",
                 keybindings: [KeyCode.F5, KeyMod.CtrlCmd | KeyCode.KeyE],
                 run: execute,
               });
               editor.addAction({
-                id: "querydeck.cancel",
+                id: "quervio.cancel",
                 label: "Cancel Executing Query",
                 keybindings: [KeyMod.Alt | KeyCode.PauseBreak],
                 run: () => {
@@ -152,7 +152,7 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
                 },
               });
               editor.addAction({
-                id: "querydeck.newQuery",
+                id: "quervio.newQuery",
                 label: "New Query",
                 keybindings: [KeyMod.CtrlCmd | KeyCode.KeyN],
                 run: () => openQueryFromContext(),
