@@ -51,7 +51,7 @@ type Piece = { kind: "batch"; text: string } | { kind: "go"; line: string };
 /**
  * Splits on lines that are only `GO` (with an optional count and `--`
  * comment) outside strings, quoted identifiers and block comments: the
- * rules of crates/querydeck-core/src/batch.rs.
+ * rules of crates/quervio-core/src/batch.rs.
  */
 export function splitOnGo(script: string): Piece[] {
   const pieces: Piece[] = [];

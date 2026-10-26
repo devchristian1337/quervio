@@ -1,4 +1,4 @@
-// Mirrors querydeck_core::execution::ExecutionEvent.
+// Mirrors quervio_core::execution::ExecutionEvent.
 export type Outcome = "succeeded" | "failed" | "cancelled";
 
 export type ExecutionEvent =

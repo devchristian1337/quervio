@@ -36,6 +36,9 @@ import { useConnections } from "@/stores/connections";
 import { useExplorer } from "@/stores/explorer";
 import { useQueries, type QueryTab } from "@/stores/queries";
 
+import logoDark from "@/assets/quervio-logo-dark.png";
+import logoLight from "@/assets/quervio-logo-light.png";
+
 const SqlEditor = lazy(() => import("@/components/SqlEditor"));
 const ResultGrid = lazy(() => import("@/components/ResultGrid"));
 
@@ -92,6 +95,8 @@ function EmptyState() {
   return (
     <div className="grid flex-1 place-items-center">
       <div className="flex flex-col items-center gap-3 text-muted-foreground">
+        <img src={logoLight} alt="Quervio" className="mb-4 w-64 select-none dark:hidden" draggable={false} />
+        <img src={logoDark} alt="Quervio" className="mb-4 hidden w-64 select-none dark:block" draggable={false} />
         <p>Select a server or database in the Object Explorer, then open a query.</p>
         <Button variant="outline" size="sm" disabled={!context} onClick={() => openQueryFromContext()}>
           <Plus /> New query <span className="text-xs text-muted-foreground">Ctrl+N</span>

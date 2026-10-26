@@ -2,18 +2,18 @@
 //!
 //! ```text
 //! docker compose up -d --wait
-//! cargo test -p querydeck-core --test catalog -- --ignored
+//! cargo test -p quervio-core --test catalog -- --ignored
 //! ```
 
-use querydeck_core::catalog::{self, CatalogItem, ObjectFolder, TableFolder};
-use querydeck_core::connection::Authentication;
-use querydeck_core::scripting;
-use querydeck_core::session::Session;
+use quervio_core::catalog::{self, CatalogItem, ObjectFolder, TableFolder};
+use quervio_core::connection::Authentication;
+use quervio_core::scripting;
+use quervio_core::session::Session;
 
 mod common;
 use common::{password, run_scripts, saved_connection};
 
-const DATABASE: &str = "Querydeck Tests]Catalog";
+const DATABASE: &str = "Quervio Tests]Catalog";
 
 /// Tests that recreate the shared test database take turns.
 static DATABASE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -23,13 +23,13 @@ static DATABASE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(())
 /// `]` to prove names are quoted.
 async fn create_test_database() {
     run_scripts(&[
-        "IF DB_ID(N'Querydeck Tests]Catalog') IS NOT NULL
+        "IF DB_ID(N'Quervio Tests]Catalog') IS NOT NULL
          BEGIN
-             ALTER DATABASE [Querydeck Tests]]Catalog] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-             DROP DATABASE [Querydeck Tests]]Catalog];
+             ALTER DATABASE [Quervio Tests]]Catalog] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+             DROP DATABASE [Quervio Tests]]Catalog];
          END
-         CREATE DATABASE [Querydeck Tests]]Catalog];",
-        "USE [Querydeck Tests]]Catalog];
+         CREATE DATABASE [Quervio Tests]]Catalog];",
+        "USE [Quervio Tests]]Catalog];
          EXEC('CREATE SCHEMA sales');
          CREATE TABLE sales.Customer (
              CustomerId int IDENTITY PRIMARY KEY,
@@ -55,7 +55,7 @@ async fn create_test_database() {
 }
 
 async fn open() -> Session {
-    Session::open(&saved_connection(), password(), "Querydeck tests")
+    Session::open(&saved_connection(), password(), "Quervio tests")
         .await
         .expect("open session")
 }
@@ -206,7 +206,7 @@ async fn walks_the_object_explorer_tree() {
 #[tokio::test]
 #[ignore = "needs SQL Server: docker compose up -d --wait"]
 async fn wrong_password_is_a_clear_error() {
-    let error = Session::open(&saved_connection(), Some("wrong".into()), "Querydeck tests")
+    let error = Session::open(&saved_connection(), Some("wrong".into()), "Quervio tests")
         .await
         .err()
         .expect("login must fail");
@@ -216,7 +216,7 @@ async fn wrong_password_is_a_clear_error() {
 #[tokio::test]
 #[ignore = "needs SQL Server: docker compose up -d --wait"]
 async fn sql_login_without_a_password_is_refused_before_connecting() {
-    let error = Session::open(&saved_connection(), None, "Querydeck tests")
+    let error = Session::open(&saved_connection(), None, "Quervio tests")
         .await
         .err()
         .expect("must fail");
@@ -233,7 +233,7 @@ async fn bare_localhost_without_a_local_instance_explains_itself() {
     let mut connection = saved_connection();
     connection.server = "localhost".into();
     let started = std::time::Instant::now();
-    let error = Session::open(&connection, password(), "Querydeck tests")
+    let error = Session::open(&connection, password(), "Quervio tests")
         .await
         .err()
         .expect("no local instance on this machine");
@@ -287,19 +287,19 @@ async fn create_table_scripts_round_trip() {
         originals[1]
     );
 
-    const COPY: &str = "Querydeck Tests]Scripted";
+    const COPY: &str = "Quervio Tests]Scripted";
     run_scripts(&[
-        "IF DB_ID(N'Querydeck Tests]Scripted') IS NOT NULL
+        "IF DB_ID(N'Quervio Tests]Scripted') IS NOT NULL
          BEGIN
-             ALTER DATABASE [Querydeck Tests]]Scripted] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-             DROP DATABASE [Querydeck Tests]]Scripted];
+             ALTER DATABASE [Quervio Tests]]Scripted] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+             DROP DATABASE [Quervio Tests]]Scripted];
          END
-         CREATE DATABASE [Querydeck Tests]]Scripted];",
-        "USE [Querydeck Tests]]Scripted]; EXEC('CREATE SCHEMA sales');",
+         CREATE DATABASE [Quervio Tests]]Scripted];",
+        "USE [Quervio Tests]]Scripted]; EXEC('CREATE SCHEMA sales');",
     ])
     .await;
     for script in &originals {
-        run_scripts(&[&format!("USE [Querydeck Tests]]Scripted];\n{script}")]).await;
+        run_scripts(&[&format!("USE [Quervio Tests]]Scripted];\n{script}")]).await;
     }
 
     let copies = catalog::objects(&mut session, COPY, ObjectFolder::Tables)
@@ -329,7 +329,7 @@ async fn modules_script_as_create_and_alter() {
     assert_eq!(definition, "CREATE PROCEDURE dbo.usp_Touch AS SELECT 1");
     let alter = scripting::as_alter(&definition);
     run_scripts(&[&format!(
-        "USE [Querydeck Tests]]Catalog];\nEXEC('{}')",
+        "USE [Quervio Tests]]Catalog];\nEXEC('{}')",
         alter.replace('\'', "''")
     )])
     .await;

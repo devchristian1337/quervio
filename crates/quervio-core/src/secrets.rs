@@ -110,8 +110,9 @@ mod dpapi {
 
     use crate::error::{Error, Result};
 
-    /// Ties the ciphertext to Querydeck, so another app's DPAPI blob for the
-    /// same user cannot be swapped in.
+    /// Ties the ciphertext to Quervio, so another app's DPAPI blob for the
+    /// same user cannot be swapped in. It still says Querydeck, the app's
+    /// first name: changing it would make every saved password unreadable.
     const ENTROPY: &[u8] = b"Querydeck saved connection";
 
     fn blob(bytes: &[u8]) -> CRYPT_INTEGER_BLOB {

@@ -10,7 +10,7 @@ import { Toaster as Sonner, type ToasterProps } from "sonner"
 const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
-      // Querydeck follows the Windows light/dark setting.
+      // Quervio follows the Windows light/dark setting.
       theme="system"
       className="toaster group"
       icons={{

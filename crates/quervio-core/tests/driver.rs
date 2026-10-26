@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! docker compose up -d --wait
-//! cargo test -p querydeck-core --test driver -- --ignored
+//! cargo test -p quervio-core --test driver -- --ignored
 //! ```
 
 use std::sync::Arc;

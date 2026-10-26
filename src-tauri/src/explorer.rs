@@ -6,13 +6,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use querydeck_core::catalog::{self, CatalogItem, ObjectFolder, TableFolder};
-use querydeck_core::connection::{Authentication, ConnectionStore, SavedConnection};
-use querydeck_core::secrets::{DpapiSecretStore, SecretStore};
-use querydeck_core::session::{ServerInfo, Session};
+use quervio_core::catalog::{self, CatalogItem, ObjectFolder, TableFolder};
+use quervio_core::connection::{Authentication, ConnectionStore, SavedConnection};
+use quervio_core::secrets::{DpapiSecretStore, SecretStore};
+use quervio_core::session::{ServerInfo, Session};
 use tauri::State;
 
-const APPLICATION_NAME: &str = "Querydeck - Object Explorer";
+const APPLICATION_NAME: &str = "Quervio - Object Explorer";
 
 type SharedSession = Arc<tokio::sync::Mutex<Session>>;
 
@@ -25,7 +25,7 @@ pub struct ExplorerState {
 }
 
 impl ExplorerState {
-    pub fn open(data_dir: &Path) -> querydeck_core::Result<Self> {
+    pub fn open(data_dir: &Path) -> quervio_core::Result<Self> {
         Ok(Self {
             connections: Mutex::new(ConnectionStore::open(data_dir.join("connections.json"))?),
             secrets: DpapiSecretStore::new(data_dir.join("secrets.json")),
@@ -231,7 +231,7 @@ pub async fn explorer_script(
     object_id: i64,
     kind: ScriptKind,
 ) -> CommandResult<String> {
-    use querydeck_core::scripting;
+    use quervio_core::scripting;
     let session = state.session(&id).await?;
     let mut session = session.lock().await;
     let script = match kind {
@@ -254,13 +254,13 @@ pub async fn explorer_script(
 /// Reads a `.sql` file chosen in the Open dialog.
 #[tauri::command]
 pub fn file_read(path: std::path::PathBuf) -> CommandResult<String> {
-    querydeck_core::files::read_script(&path).map_err(message)
+    quervio_core::files::read_script(&path).map_err(message)
 }
 
 /// Writes a `.sql` file chosen in the Save dialog.
 #[tauri::command]
 pub fn file_write(path: std::path::PathBuf, text: String) -> CommandResult<()> {
-    querydeck_core::files::write_script(&path, &text).map_err(message)
+    quervio_core::files::write_script(&path, &text).map_err(message)
 }
 
 /// The Query Tabs snapshot saved by the last run, if any.

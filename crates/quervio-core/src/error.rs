@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-/// Everything that can go wrong inside querydeck-core.
+/// Everything that can go wrong inside quervio-core.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("{0}")]

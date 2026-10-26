@@ -1,4 +1,4 @@
-# Querydeck
+# Quervio
 
 Strumento desktop per chi fa supporto e sviluppo su SQL Server: navigare i database, scrivere ed eseguire T-SQL, leggere i risultati. Ispirato a SQL Server Management Studio, con un'interfaccia moderna e veloce.
 
