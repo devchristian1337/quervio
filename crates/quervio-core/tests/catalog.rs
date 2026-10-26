@@ -11,26 +11,20 @@ use quervio_core::scripting;
 use quervio_core::session::Session;
 
 mod common;
-use common::{password, run_scripts, saved_connection};
+use common::{password, run_scripts, saved_connection, TestDatabase};
 
 const DATABASE: &str = "Quervio Tests]Catalog";
 
 /// Tests that recreate the shared test database take turns.
 static DATABASE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// A database with one of every Object the Object Explorer lists, dropped and
-/// recreated on every run, so keep nothing in it. Its name has a space and a
-/// `]` to prove names are quoted.
-async fn create_test_database() {
-    run_scripts(&[
-        "IF DB_ID(N'Quervio Tests]Catalog') IS NOT NULL
-         BEGIN
-             ALTER DATABASE [Quervio Tests]]Catalog] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-             DROP DATABASE [Quervio Tests]]Catalog];
-         END
-         CREATE DATABASE [Quervio Tests]]Catalog];",
-        "USE [Quervio Tests]]Catalog];
-         EXEC('CREATE SCHEMA sales');
+/// A database with one of every Object the Object Explorer lists, dropped at
+/// the end of the test. Its name has a space and a `]` to prove names are
+/// quoted.
+async fn create_test_database() -> TestDatabase {
+    TestDatabase::create(
+        DATABASE,
+        "EXEC('CREATE SCHEMA sales');
          CREATE TABLE sales.Customer (
              CustomerId int IDENTITY PRIMARY KEY,
              Name nvarchar(100) NOT NULL,
@@ -50,8 +44,8 @@ async fn create_test_database() {
          EXEC('CREATE PROCEDURE dbo.usp_Touch AS SELECT 1');
          EXEC('CREATE FUNCTION dbo.fn_Double (@x int) RETURNS int AS BEGIN RETURN @x * 2 END');
          EXEC('CREATE FUNCTION dbo.fn_Customers () RETURNS TABLE AS RETURN SELECT CustomerId FROM sales.Customer');",
-    ])
-    .await;
+    )
+    .await
 }
 
 async fn open() -> Session {
@@ -81,7 +75,7 @@ fn details(items: &[CatalogItem]) -> Vec<(String, String)> {
 #[ignore = "needs SQL Server: docker compose up -d --wait"]
 async fn walks_the_object_explorer_tree() {
     let _turn = DATABASE_LOCK.lock().await;
-    create_test_database().await;
+    let _database = create_test_database().await;
     let mut session = open().await;
 
     let info = session.server_info().await.unwrap();
@@ -251,7 +245,7 @@ async fn bare_localhost_without_a_local_instance_explains_itself() {
 #[ignore = "needs SQL Server: docker compose up -d --wait"]
 async fn create_table_scripts_round_trip() {
     let _turn = DATABASE_LOCK.lock().await;
-    create_test_database().await;
+    let _database = create_test_database().await;
     let mut session = open().await;
     let tables = catalog::objects(&mut session, DATABASE, ObjectFolder::Tables)
         .await
@@ -288,16 +282,7 @@ async fn create_table_scripts_round_trip() {
     );
 
     const COPY: &str = "Quervio Tests]Scripted";
-    run_scripts(&[
-        "IF DB_ID(N'Quervio Tests]Scripted') IS NOT NULL
-         BEGIN
-             ALTER DATABASE [Quervio Tests]]Scripted] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-             DROP DATABASE [Quervio Tests]]Scripted];
-         END
-         CREATE DATABASE [Quervio Tests]]Scripted];",
-        "USE [Quervio Tests]]Scripted]; EXEC('CREATE SCHEMA sales');",
-    ])
-    .await;
+    let _copy = TestDatabase::create(COPY, "EXEC('CREATE SCHEMA sales');").await;
     for script in &originals {
         run_scripts(&[&format!("USE [Quervio Tests]]Scripted];\n{script}")]).await;
     }
@@ -317,7 +302,7 @@ async fn create_table_scripts_round_trip() {
 #[ignore = "needs SQL Server: docker compose up -d --wait"]
 async fn modules_script_as_create_and_alter() {
     let _turn = DATABASE_LOCK.lock().await;
-    create_test_database().await;
+    let _database = create_test_database().await;
     let mut session = open().await;
     let procedures = catalog::objects(&mut session, DATABASE, ObjectFolder::StoredProcedures)
         .await
