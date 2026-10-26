@@ -2,6 +2,7 @@
 // reachable from shortcuts and the Messages panel without prop drilling.
 import type * as Monaco from "monaco-editor";
 import type { editor } from "monaco-editor";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { Script } from "@/stores/queries";
 
 let current: editor.IStandaloneCodeEditor | null = null;
@@ -15,13 +16,47 @@ export function registerMonaco(api: typeof Monaco) {
   monaco = api;
 }
 
-export function editorHasTextFocus(): boolean {
-  return current?.hasTextFocus() ?? false;
+// The editor's context menu clipboard commands. Monaco's own read the
+// clipboard with navigator.clipboard, which WebView2 refuses, and only run
+// while the editor has the keyboard focus, which the menu has taken.
+
+export function hasSelection(): boolean {
+  return !(current?.getSelection()?.isEmpty() ?? true);
 }
 
-/** Inserts `text` as if pasted at the cursor. */
-export function pasteIntoEditor(text: string) {
-  current?.trigger("keyboard", "paste", { text });
+export async function copySelection() {
+  const selection = current?.getSelection();
+  const model = current?.getModel();
+  if (!selection || selection.isEmpty() || !model) return;
+  await writeText(model.getValueInRange(selection));
+}
+
+export async function cutSelection() {
+  const selection = current?.getSelection();
+  if (!current || !selection || selection.isEmpty()) return;
+  await copySelection();
+  current.executeEdits("cut", [{ range: selection, text: "" }]);
+  current.pushUndoStop();
+  current.focus();
+}
+
+export async function pasteClipboard() {
+  const text = inTauri() ? await readText() : await navigator.clipboard.readText();
+  if (!current || !text) return;
+  current.focus();
+  current.trigger("keyboard", "paste", { text });
+}
+
+export function selectAll() {
+  const model = current?.getModel();
+  if (!current || !model) return;
+  current.setSelection(model.getFullModelRange());
+  current.focus();
+}
+
+// Absent in a plain browser and in the dev mock.
+function inTauri() {
+  return Boolean((window as { __TAURI_INTERNALS__?: { metadata?: unknown } }).__TAURI_INTERNALS__?.metadata);
 }
 
 /** The selection when there is one, otherwise the whole script. */
