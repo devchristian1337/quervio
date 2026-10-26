@@ -267,7 +267,8 @@ pub fn file_write(path: std::path::PathBuf, text: String) -> CommandResult<()> {
 #[tauri::command]
 pub fn tabs_load(state: State<'_, ExplorerState>) -> CommandResult<Option<String>> {
     match std::fs::read_to_string(&state.tabs_path) {
-        Ok(text) => Ok(Some(text)),
+        // Tolerate a BOM, e.g. if the file was edited with Notepad or PowerShell.
+        Ok(text) => Ok(Some(text.trim_start_matches('\u{feff}').to_string())),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(message(error)),
     }
