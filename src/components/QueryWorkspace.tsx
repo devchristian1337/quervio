@@ -1,11 +1,24 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { CheckCircle2, Circle, Database, Loader2, Play, Plus, Square, X, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  Database,
+  FolderOpen,
+  Loader2,
+  Play,
+  Plus,
+  Save,
+  Square,
+  X,
+  XCircle,
+} from "lucide-react";
+import { closeTab as closeTabSafely, openFile, saveTab } from "@/lib/files";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api, displayName, errorMessage } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { currentScript, disposeModel, focusEditor, revealLine } from "@/lib/editor";
+import { currentScript, focusEditor, revealLine } from "@/lib/editor";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { openQueryFromContext, useGlobalShortcuts } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
@@ -18,7 +31,7 @@ const ResultGrid = lazy(() => import("@/components/ResultGrid"));
 
 export function QueryWorkspace() {
   useGlobalShortcuts();
-  const { tabs, activeId } = useQueries();
+  const { tabs, activeId, resultsVisible } = useQueries();
   const active = tabs.find((t) => t.id === activeId) ?? null;
 
   return (
@@ -27,20 +40,29 @@ export function QueryWorkspace() {
       {active ? (
         <>
           <Toolbar tab={active} />
-          <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
-            <ResizablePanel defaultSize="60%" minSize={80}>
+          {/* Remounted when Ctrl+R hides or shows the results pane. */}
+          <ResizablePanelGroup
+            key={resultsVisible ? "split" : "editor"}
+            orientation="vertical"
+            className="min-h-0 flex-1"
+          >
+            <ResizablePanel defaultSize={resultsVisible ? "60%" : "100%"} minSize={80}>
               <ErrorBoundary label="The editor">
                 <Suspense fallback={<Centered>Loading editor…</Centered>}>
-                  <SqlEditor tabId={active.id} />
+                  <SqlEditor tabId={active.id} initialText={active.initialText} />
                 </Suspense>
               </ErrorBoundary>
             </ResizablePanel>
-            <ResizableHandle />
-            <ResizablePanel minSize={60}>
-              <ErrorBoundary label="The results panel">
-                <OutputPanel tab={active} />
-              </ErrorBoundary>
-            </ResizablePanel>
+            {resultsVisible && (
+              <>
+                <ResizableHandle />
+                <ResizablePanel minSize={60}>
+                  <ErrorBoundary label="The results panel">
+                    <OutputPanel tab={active} />
+                  </ErrorBoundary>
+                </ResizablePanel>
+              </>
+            )}
           </ResizablePanelGroup>
           <StatusBar tab={active} />
         </>
@@ -70,7 +92,7 @@ function EmptyState() {
 }
 
 async function closeTab(tab: QueryTab) {
-  if (await useQueries.getState().closeSafely(tab.id)) await disposeModel(tab.id);
+  await closeTabSafely(tab.id);
 }
 
 function TabBar() {
@@ -108,7 +130,10 @@ function TabBar() {
             ) : tab.openTransactions > 0 ? (
               <Circle className="size-2.5 shrink-0 fill-amber-500 text-amber-500" aria-label="Open transaction" />
             ) : null}
-            <span className="truncate">{tab.title}</span>
+            <span className="truncate" title={tab.filePath ?? undefined}>
+              {tab.title}
+              {tab.dirty ? "*" : ""}
+            </span>
             {connection && <span className="truncate text-xs text-muted-foreground">{displayName(connection)}</span>}
             <button
               title="Close"
@@ -174,6 +199,19 @@ function Toolbar({ tab }: { tab: QueryTab }) {
   );
   return (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
+      <Button size="icon" variant="ghost" className="size-7" title="Open script (Ctrl+O)" onClick={() => void openFile()}>
+        <FolderOpen />
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-7"
+        title="Save script (Ctrl+S)"
+        onClick={() => void saveTab(tab.id)}
+      >
+        <Save />
+      </Button>
+      <div className="mx-1 h-5 w-px bg-border" />
       <Button
         size="sm"
         variant="ghost"

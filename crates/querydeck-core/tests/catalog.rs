@@ -7,12 +7,16 @@
 
 use querydeck_core::catalog::{self, CatalogItem, ObjectFolder, TableFolder};
 use querydeck_core::connection::Authentication;
+use querydeck_core::scripting;
 use querydeck_core::session::Session;
 
 mod common;
 use common::{password, run_scripts, saved_connection};
 
 const DATABASE: &str = "Querydeck Tests]Catalog";
+
+/// Tests that recreate the shared test database take turns.
+static DATABASE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// A database with one of every Object the Object Explorer lists, dropped and
 /// recreated on every run, so keep nothing in it. Its name has a space and a
@@ -32,11 +36,12 @@ async fn create_test_database() {
              Name nvarchar(100) NOT NULL,
              Notes nvarchar(max) NULL,
              Balance decimal(18, 2) NOT NULL DEFAULT 0,
-             Email varchar(200) NULL CONSTRAINT UQ_Customer_Email UNIQUE
+             Email varchar(200) NULL CONSTRAINT UQ_Customer_Email UNIQUE,
+             CONSTRAINT CK_Customer_Balance CHECK (Balance >= 0)
          );
          CREATE TABLE sales.[Order] (
              OrderId bigint PRIMARY KEY NONCLUSTERED,
-             CustomerId int NOT NULL CONSTRAINT FK_Order_Customer REFERENCES sales.Customer (CustomerId),
+             CustomerId int NOT NULL CONSTRAINT FK_Order_Customer REFERENCES sales.Customer (CustomerId) ON DELETE CASCADE,
              PlacedAt datetime2(3) NOT NULL
          );
          CREATE CLUSTERED INDEX IX_Order_PlacedAt ON sales.[Order] (PlacedAt);
@@ -75,6 +80,7 @@ fn details(items: &[CatalogItem]) -> Vec<(String, String)> {
 #[tokio::test]
 #[ignore = "needs SQL Server: docker compose up -d --wait"]
 async fn walks_the_object_explorer_tree() {
+    let _turn = DATABASE_LOCK.lock().await;
     create_test_database().await;
     let mut session = open().await;
 
@@ -231,4 +237,105 @@ async fn bare_localhost_without_a_local_instance_explains_itself() {
         .err()
         .expect("no local instance on this machine");
     assert!(error.to_string().contains("host,port"), "{error}");
+}
+
+/// Scripts a table, runs the script in a fresh database and scripts the
+/// copy: both must match, so the CREATE TABLE is complete and valid.
+#[tokio::test]
+#[ignore = "needs SQL Server: docker compose up -d --wait"]
+async fn create_table_scripts_round_trip() {
+    let _turn = DATABASE_LOCK.lock().await;
+    create_test_database().await;
+    let mut session = open().await;
+    let tables = catalog::objects(&mut session, DATABASE, ObjectFolder::Tables)
+        .await
+        .unwrap();
+    let mut originals = Vec::new();
+    for table in &tables {
+        let script = scripting::create_table(&mut session, DATABASE, table.object_id.unwrap())
+            .await
+            .unwrap();
+        originals.push(script);
+    }
+    assert!(
+        originals[0].contains("IDENTITY(1, 1) NOT NULL"),
+        "{}",
+        originals[0]
+    );
+    assert!(originals[0].contains("DEFAULT ((0))"), "{}", originals[0]);
+    assert!(
+        originals[0].contains("CONSTRAINT [CK_Customer_Balance] CHECK ([Balance]>=(0))"),
+        "{}",
+        originals[0]
+    );
+    assert!(
+        originals[0].contains("CONSTRAINT [UQ_Customer_Email] UNIQUE NONCLUSTERED ([Email])"),
+        "{}",
+        originals[0]
+    );
+    assert!(
+        originals[1].contains(
+            "CONSTRAINT [FK_Order_Customer] FOREIGN KEY ([CustomerId]) REFERENCES [sales].[Customer] ([CustomerId]) ON DELETE CASCADE"
+        ),
+        "{}",
+        originals[1]
+    );
+
+    const COPY: &str = "Querydeck Tests]Scripted";
+    run_scripts(&[
+        "IF DB_ID(N'Querydeck Tests]Scripted') IS NOT NULL
+         BEGIN
+             ALTER DATABASE [Querydeck Tests]]Scripted] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+             DROP DATABASE [Querydeck Tests]]Scripted];
+         END
+         CREATE DATABASE [Querydeck Tests]]Scripted];",
+        "USE [Querydeck Tests]]Scripted]; EXEC('CREATE SCHEMA sales');",
+    ])
+    .await;
+    for script in &originals {
+        run_scripts(&[&format!("USE [Querydeck Tests]]Scripted];\n{script}")]).await;
+    }
+
+    let copies = catalog::objects(&mut session, COPY, ObjectFolder::Tables)
+        .await
+        .unwrap();
+    for (copy, original) in copies.iter().zip(&originals) {
+        let script = scripting::create_table(&mut session, COPY, copy.object_id.unwrap())
+            .await
+            .unwrap();
+        assert_eq!(&script, original);
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs SQL Server: docker compose up -d --wait"]
+async fn modules_script_as_create_and_alter() {
+    let _turn = DATABASE_LOCK.lock().await;
+    create_test_database().await;
+    let mut session = open().await;
+    let procedures = catalog::objects(&mut session, DATABASE, ObjectFolder::StoredProcedures)
+        .await
+        .unwrap();
+    let id = procedures[0].object_id.unwrap();
+    let definition = scripting::module_definition(&mut session, DATABASE, id)
+        .await
+        .unwrap();
+    assert_eq!(definition, "CREATE PROCEDURE dbo.usp_Touch AS SELECT 1");
+    let alter = scripting::as_alter(&definition);
+    run_scripts(&[&format!(
+        "USE [Querydeck Tests]]Catalog];\nEXEC('{}')",
+        alter.replace('\'', "''")
+    )])
+    .await;
+
+    let tables = catalog::objects(&mut session, DATABASE, ObjectFolder::Tables)
+        .await
+        .unwrap();
+    let select = scripting::select_top(&mut session, DATABASE, tables[0].object_id.unwrap(), 1000)
+        .await
+        .unwrap();
+    assert_eq!(
+        select,
+        "SELECT TOP (1000)\n      [CustomerId]\n     ,[Name]\n     ,[Notes]\n     ,[Balance]\n     ,[Email]\n  FROM [sales].[Customer];\n"
+    );
 }

@@ -37,6 +37,9 @@ export interface CatalogItem {
 
 export type CopyFormat = "text" | "textWithHeaders" | "markdown";
 
+/** Mirrors explorer::ScriptKind. */
+export type ScriptKind = "selectTop" | "createTable" | "create" | "alter";
+
 export type ObjectFolder = "tables" | "views" | "storedProcedures" | "functions";
 export type TableFolder = "columns" | "keys" | "indexes" | "triggers";
 
@@ -75,6 +78,13 @@ export const api = {
   ) => invoke<{ rows: number; columns: number }>("result_copy", { tabId, set, rows, columns, format }),
   resultExportMarkdown: (tabId: string, set: number, path: string) =>
     invoke<void>("result_export_markdown", { tabId, set, path }),
+
+  script: (id: string, database: string, objectId: number, kind: ScriptKind) =>
+    invoke<string>("explorer_script", { id, database, objectId, kind }),
+  fileRead: (path: string) => invoke<string>("file_read", { path }),
+  fileWrite: (path: string, text: string) => invoke<void>("file_write", { path, text }),
+  tabsLoad: () => invoke<string | null>("tabs_load"),
+  tabsSave: (snapshot: string) => invoke<void>("tabs_save", { snapshot }),
 
   checkScript: (script: string, baseLine: number) => invoke<ScriptCheck>("query_check", { script, baseLine }),
   useDatabase: (tabId: string, database: string) => invoke<string>("query_use_database", { tabId, database }),

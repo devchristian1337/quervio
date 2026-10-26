@@ -42,6 +42,23 @@ export interface QueryTab {
   startedAt: number | null;
   elapsedMs: number | null;
   view: "results" | "messages";
+  /** Text the tab's editor starts with (restored, opened from a file or scripted). */
+  initialText: string;
+  /** The .sql file the tab was opened from or saved to. */
+  filePath: string | null;
+  /** Edited since it was opened or last saved. */
+  dirty: boolean;
+}
+
+export interface OpenOptions {
+  title?: string;
+  text?: string;
+  filePath?: string | null;
+  dirty?: boolean;
+  /** Run the text as soon as the Session is open (Select Top 1000 Rows). */
+  execute?: boolean;
+  /** Bring the new tab to the front (default true). */
+  activate?: boolean;
 }
 
 /** The script to run: the editor's selection or its whole text. */
@@ -54,7 +71,14 @@ export interface Script {
 interface QueriesState {
   tabs: QueryTab[];
   activeId: string | null;
-  open: (connectionId: string, database?: string | null) => Promise<void>;
+  open: (connectionId: string, database?: string | null, options?: OpenOptions) => Promise<void>;
+  /** Whether the Results/Messages pane is shown (Ctrl+R). */
+  resultsVisible: boolean;
+  toggleResults: () => void;
+  /** Activates the next (1) or previous (-1) tab. */
+  cycle: (step: 1 | -1) => void;
+  setDirty: (id: string, dirty: boolean) => void;
+  markSaved: (id: string, filePath: string) => void;
   close: (id: string) => Promise<void>;
   activate: (id: string) => void;
   setView: (id: string, view: QueryTab["view"]) => void;
@@ -68,6 +92,10 @@ interface QueriesState {
 }
 
 let counter = 0;
+
+export function fileName(path: string) {
+  return path.split(/[\\/]/).pop() || path;
+}
 
 /** Commits or rolls back the tabs' transactions; false (with a toast) if any fails. */
 async function endTransactions(tabs: QueryTab[], commit: boolean) {
@@ -96,13 +124,32 @@ export const useQueries = create<QueriesState>((set, get) => {
   return {
     tabs: [],
     activeId: null,
+    resultsVisible: true,
 
-    open: async (connectionId, database = null) => {
-      counter += 1;
+    toggleResults: () => set((s) => ({ resultsVisible: !s.resultsVisible })),
+
+    cycle: (step) => {
+      const { tabs, activeId } = get();
+      if (tabs.length < 2) return;
+      const index = tabs.findIndex((t) => t.id === activeId);
+      set({ activeId: tabs[(index + step + tabs.length) % tabs.length].id });
+    },
+
+    setDirty: (id, dirty) => {
+      if (get().tabs.find((t) => t.id === id)?.dirty !== dirty) patch(id, { dirty });
+    },
+
+    markSaved: (id, filePath) => patch(id, { filePath, dirty: false, title: fileName(filePath) }),
+
+    open: async (connectionId, database = null, options = {}) => {
+      // Restored "Query 7" keeps new tabs numbering after it.
+      const number = /^Query (\d+)$/.exec(options.title ?? "");
+      counter = number ? Math.max(counter, Number(number[1])) : counter + 1;
       const id = crypto.randomUUID();
+      const text = options.text ?? "";
       const tab: QueryTab = {
         id,
-        title: `Query ${counter}`,
+        title: options.title ?? (options.filePath ? fileName(options.filePath) : `Query ${counter}`),
         connectionId,
         status: "connecting",
         error: null,
@@ -116,14 +163,19 @@ export const useQueries = create<QueriesState>((set, get) => {
         startedAt: null,
         elapsedMs: null,
         view: "messages",
+        initialText: text,
+        filePath: options.filePath ?? null,
+        dirty: options.dirty ?? false,
       };
-      set((s) => ({ tabs: [...s.tabs, tab], activeId: id }));
+      set((s) => ({ tabs: [...s.tabs, tab], activeId: options.activate === false ? s.activeId : id }));
       try {
         const server = await api.openQuery(id, connectionId, database);
         patch(id, { status: "ready", server, database: server.database });
       } catch (error) {
         patch(id, { status: "disconnected", error: errorMessage(error) });
+        return;
       }
+      if (options.execute) await get().execute(id, { text, baseLine: 0 });
     },
 
     close: async (id) => {

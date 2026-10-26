@@ -1,12 +1,18 @@
 // The single Monaco editor shared by all Query Tabs (one model per tab),
 // reachable from shortcuts and the Messages panel without prop drilling.
+import type * as Monaco from "monaco-editor";
 import type { editor } from "monaco-editor";
 import type { Script } from "@/stores/queries";
 
 let current: editor.IStandaloneCodeEditor | null = null;
+let monaco: typeof Monaco | null = null;
 
 export function registerEditor(instance: editor.IStandaloneCodeEditor | null) {
   current = instance;
+}
+
+export function registerMonaco(api: typeof Monaco) {
+  monaco = api;
 }
 
 /** The selection when there is one, otherwise the whole script. */
@@ -18,6 +24,11 @@ export function currentScript(): Script | null {
     return { text: model.getValueInRange(selection), baseLine: selection.startLineNumber - 1 };
   }
   return { text: model.getValue(), baseLine: 0 };
+}
+
+/** A tab's text, if its editor model exists yet (it does once shown). */
+export function modelText(tabId: string): string | null {
+  return monaco?.editor.getModel(monaco.Uri.parse(tabId))?.getValue() ?? null;
 }
 
 export function revealLine(line: number) {
@@ -33,7 +44,6 @@ export function focusEditor() {
 }
 
 /** Monaco keeps models after the editor switches path; free a closed tab's. */
-export async function disposeModel(tabId: string) {
-  const { monaco } = await import("@/lib/monaco");
-  monaco.editor.getModel(monaco.Uri.parse(tabId))?.dispose();
+export function disposeModel(tabId: string) {
+  monaco?.editor.getModel(monaco.Uri.parse(tabId))?.dispose();
 }

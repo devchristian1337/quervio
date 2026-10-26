@@ -164,7 +164,7 @@ pub async fn table_children(
         TableFolder::Triggers => {
             let rows = session
                 .query(&format!(
-                    "SELECT name, is_disabled FROM {db}.sys.triggers
+                    "SELECT name, is_disabled, object_id FROM {db}.sys.triggers
                      WHERE parent_id = {object_id}
                      ORDER BY name"
                 ))
@@ -173,6 +173,8 @@ pub async fn table_children(
                 .map(|row| {
                     Ok(CatalogItem {
                         detail: flag(row, 1)?.then(|| "disabled".to_string()),
+                        // Triggers are Modules: scripting needs their id.
+                        object_id: Some(int(row, 2)?),
                         ..CatalogItem::named(text(row, 0)?)
                     })
                 })
@@ -249,11 +251,11 @@ pub fn quote_name(name: &str) -> String {
 }
 
 /// A column type as `sys.columns` describes it.
-struct SqlType {
-    name: String,
-    max_length: i64,
-    precision: i64,
-    scale: i64,
+pub(crate) struct SqlType {
+    pub(crate) name: String,
+    pub(crate) max_length: i64,
+    pub(crate) precision: i64,
+    pub(crate) scale: i64,
 }
 
 impl std::fmt::Display for SqlType {

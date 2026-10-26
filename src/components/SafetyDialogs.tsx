@@ -21,7 +21,7 @@ const KIND_LABELS: Record<ScriptCheck["findings"][number]["kind"], string> = {
 };
 
 export function SafetyDialogs() {
-  const { destructive, transactions } = useDialogs();
+  const { destructive, transactions, unsaved } = useDialogs();
 
   return (
     <>
@@ -98,6 +98,24 @@ export function SafetyDialogs() {
               Roll back
             </Button>
             <Button onClick={() => transactions?.resolve("commit")}>Commit</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!unsaved} onOpenChange={(open) => !open && unsaved?.resolve("cancel")}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Save changes to {unsaved?.title}?</DialogTitle>
+            <DialogDescription>Your changes are lost if you close without saving.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button autoFocus variant="outline" onClick={() => unsaved?.resolve("cancel")}>
+              Cancel
+            </Button>
+            <Button variant="ghost" onClick={() => unsaved?.resolve("discard")}>
+              Don't save
+            </Button>
+            <Button onClick={() => unsaved?.resolve("save")}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

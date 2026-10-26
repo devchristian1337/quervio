@@ -2,9 +2,12 @@
 import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { monaco } from "@/lib/monaco";
-import { currentScript, registerEditor } from "@/lib/editor";
+import { currentScript, registerEditor, registerMonaco } from "@/lib/editor";
+import { scheduleSave } from "@/lib/session-restore";
 import { useQueries } from "@/stores/queries";
 import { openQueryFromContext } from "@/lib/shortcuts";
+
+registerMonaco(monaco);
 
 // Transparent background so the Mica effect shows through, as elsewhere.
 monaco.editor.defineTheme("querydeck-dark", {
@@ -32,7 +35,7 @@ function useDarkMode() {
   return dark;
 }
 
-export default function SqlEditor({ tabId }: { tabId: string }) {
+export default function SqlEditor({ tabId, initialText }: { tabId: string; initialText: string }) {
   const dark = useDarkMode();
 
   useEffect(() => () => registerEditor(null), []);
@@ -41,7 +44,12 @@ export default function SqlEditor({ tabId }: { tabId: string }) {
     <Editor
       path={tabId}
       defaultLanguage="sql"
-      defaultValue=""
+      // Only used when the tab's model is first created.
+      defaultValue={initialText}
+      onChange={() => {
+        useQueries.getState().setDirty(tabId, true);
+        scheduleSave();
+      }}
       theme={dark ? "querydeck-dark" : "querydeck-light"}
       options={{
         fontFamily: "'Cascadia Code', Consolas, monospace",

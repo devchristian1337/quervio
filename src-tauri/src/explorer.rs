@@ -20,6 +20,8 @@ pub struct ExplorerState {
     connections: Mutex<ConnectionStore>,
     secrets: DpapiSecretStore,
     sessions: tokio::sync::Mutex<HashMap<String, SharedSession>>,
+    /// Snapshot of the open Query Tabs, restored on the next start.
+    tabs_path: std::path::PathBuf,
 }
 
 impl ExplorerState {
@@ -28,6 +30,7 @@ impl ExplorerState {
             connections: Mutex::new(ConnectionStore::open(data_dir.join("connections.json"))?),
             secrets: DpapiSecretStore::new(data_dir.join("secrets.json")),
             sessions: tokio::sync::Mutex::new(HashMap::new()),
+            tabs_path: data_dir.join("tabs.json"),
         })
     }
 
@@ -206,4 +209,75 @@ pub async fn explorer_table_children(
     catalog::table_children(&mut session, &database, object_id, folder)
         .await
         .map_err(message)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScriptKind {
+    SelectTop,
+    CreateTable,
+    /// A Module's definition as it was created.
+    Create,
+    /// A Module's definition as ALTER, for Modify.
+    Alter,
+}
+
+/// A script for an Object, opened by the Object Explorer in a new Query Tab.
+#[tauri::command]
+pub async fn explorer_script(
+    state: State<'_, ExplorerState>,
+    id: String,
+    database: String,
+    object_id: i64,
+    kind: ScriptKind,
+) -> CommandResult<String> {
+    use querydeck_core::scripting;
+    let session = state.session(&id).await?;
+    let mut session = session.lock().await;
+    let script = match kind {
+        ScriptKind::SelectTop => {
+            scripting::select_top(&mut session, &database, object_id, 1000).await
+        }
+        ScriptKind::CreateTable => {
+            scripting::create_table(&mut session, &database, object_id).await
+        }
+        ScriptKind::Create => {
+            scripting::module_definition(&mut session, &database, object_id).await
+        }
+        ScriptKind::Alter => scripting::module_definition(&mut session, &database, object_id)
+            .await
+            .map(|definition| scripting::as_alter(&definition)),
+    };
+    script.map_err(message)
+}
+
+/// Reads a `.sql` file chosen in the Open dialog.
+#[tauri::command]
+pub fn file_read(path: std::path::PathBuf) -> CommandResult<String> {
+    querydeck_core::files::read_script(&path).map_err(message)
+}
+
+/// Writes a `.sql` file chosen in the Save dialog.
+#[tauri::command]
+pub fn file_write(path: std::path::PathBuf, text: String) -> CommandResult<()> {
+    querydeck_core::files::write_script(&path, &text).map_err(message)
+}
+
+/// The Query Tabs snapshot saved by the last run, if any.
+#[tauri::command]
+pub fn tabs_load(state: State<'_, ExplorerState>) -> CommandResult<Option<String>> {
+    match std::fs::read_to_string(&state.tabs_path) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(message(error)),
+    }
+}
+
+/// Saves the Query Tabs snapshot (JSON written by the frontend), through a
+/// temporary file so a crash never leaves half of it.
+#[tauri::command]
+pub fn tabs_save(state: State<'_, ExplorerState>, snapshot: String) -> CommandResult<()> {
+    let temporary = state.tabs_path.with_extension("json.tmp");
+    std::fs::write(&temporary, snapshot).map_err(message)?;
+    std::fs::rename(&temporary, &state.tabs_path).map_err(message)
 }

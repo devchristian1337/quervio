@@ -1,7 +1,10 @@
-// App-wide SSMS shortcuts. Monaco handles them itself while it has focus;
-// this listener covers the rest of the window.
+// App-wide SSMS shortcuts: F5/Ctrl+E execute, Alt+Break cancel, Ctrl+N new
+// query, Ctrl+R toggle results, Ctrl+O/Ctrl+S/Ctrl+Shift+S open and save,
+// Ctrl+W/Ctrl+F4 close, Ctrl+Tab switch tabs. Monaco handles its own while
+// it has focus (Ctrl+K Ctrl+C/U comment and uncomment).
 import { useEffect } from "react";
 import { currentScript } from "@/lib/editor";
+import { closeTab, openFile, saveTab } from "@/lib/files";
 import { useExplorer } from "@/stores/explorer";
 import { useQueries } from "@/stores/queries";
 
@@ -28,14 +31,25 @@ export function useGlobalShortcuts() {
         if (reload) event.preventDefault();
         return;
       }
-      const { activeId, execute, cancel } = useQueries.getState();
-      if (key === "f5" || (event.ctrlKey && key === "e")) {
+      const { activeId, execute, cancel, toggleResults, cycle } = useQueries.getState();
+      const ctrl = event.ctrlKey && !event.altKey;
+      if (key === "f5" || (ctrl && key === "e")) {
         const script = currentScript();
         if (activeId && script) void execute(activeId, script);
       } else if (event.altKey && key === "pause") {
         if (activeId) void cancel(activeId);
-      } else if (event.ctrlKey && key === "n") {
+      } else if (ctrl && key === "n") {
         openQueryFromContext();
+      } else if (ctrl && key === "r") {
+        toggleResults();
+      } else if (ctrl && key === "o") {
+        void openFile();
+      } else if (ctrl && key === "s") {
+        if (activeId) void saveTab(activeId, event.shiftKey);
+      } else if ((ctrl && key === "w") || (ctrl && key === "f4")) {
+        if (activeId) void closeTab(activeId);
+      } else if (ctrl && key === "tab") {
+        cycle(event.shiftKey ? -1 : 1);
       } else if (!reload) {
         return;
       }
