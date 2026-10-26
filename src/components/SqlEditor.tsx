@@ -1,7 +1,7 @@
 // Loaded lazily: importing it pulls in Monaco.
 import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
-import { Play } from "lucide-react";
+import { Play, WandSparkles } from "lucide-react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -16,6 +16,7 @@ import {
   currentScript,
   cutSelection,
   focusEditor,
+  formatInEditor,
   hasSelection,
   pasteClipboard,
   registerEditor,
@@ -42,6 +43,32 @@ monaco.editor.defineTheme("querydeck-light", {
   inherit: true,
   rules: [],
   colors: { "editor.background": "#00000000", "editorGutter.background": "#00000000" },
+});
+
+// Format Document (Shift+Alt+F) and Format Selection (Ctrl+K Ctrl+F). The
+// formatter is large, so it loads on first use. An edit is all or nothing,
+// and Ctrl+Z undoes it.
+async function formatEdits(text: string, range: monaco.IRange): Promise<monaco.languages.TextEdit[]> {
+  const { formatScript, FormatError } = await import("@/lib/format-sql");
+  try {
+    const formatted = formatScript(text);
+    return formatted === text ? [] : [{ range, text: formatted }];
+  } catch (error) {
+    toast.error("Could not format", {
+      description: error instanceof FormatError ? error.message : errorMessage(error),
+    });
+    return [];
+  }
+}
+monaco.languages.registerDocumentFormattingEditProvider("sql", {
+  provideDocumentFormattingEdits: (model) => formatEdits(model.getValue(), model.getFullModelRange()),
+});
+monaco.languages.registerDocumentRangeFormattingEditProvider("sql", {
+  provideDocumentRangeFormattingEdits: (model, range) => {
+    // Whole lines, so a statement is never cut in the middle of a word.
+    const lines = new monaco.Range(range.startLineNumber, 1, range.endLineNumber, model.getLineMaxColumn(range.endLineNumber));
+    return formatEdits(model.getValueInRange(lines), lines);
+  },
 });
 
 function useDarkMode() {
@@ -135,7 +162,7 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent
-        className="w-52"
+        className="w-64"
         // Keep the keyboard in the editor, not on the menu's trigger.
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -158,6 +185,11 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={selectAll}>
           Select All <ContextMenuShortcut>Ctrl+A</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => formatInEditor(selected)}>
+          <WandSparkles /> {selected ? "Format Selection" : "Format Document"}
+          <ContextMenuShortcut>{selected ? "Ctrl+K Ctrl+F" : "Shift+Alt+F"}</ContextMenuShortcut>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

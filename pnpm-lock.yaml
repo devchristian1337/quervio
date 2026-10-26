@@ -44,6 +44,9 @@ importers:
       monaco-editor:
         specifier: 0.57.0
         version: 0.57.0
+      poor-mans-t-sql-formatter:
+        specifier: 1.6.10
+        version: 1.6.10
       radix-ui:
         specifier: ^1.8.1
         version: 1.8.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -2409,6 +2412,9 @@ packages:
   pkg-up@3.1.0:
     resolution: {integrity: sha512-nDywThFk1i4BQK4twPQ6TA4RT8bDY96yeuCVBWL3ePARCiEKDRSrNGbFIgUJpLp+XeIR65v8ra7WuJOFUBtkMA==}
     engines: {node: '>=8'}
+
+  poor-mans-t-sql-formatter@1.6.10:
+    resolution: {integrity: sha512-HmfV88y4tmtR9JsLzdtNwJea+cQdGt+ozeDWdlxHbCiPcoG+/iSAnJ1mEAYdOqITgCoFIT67o3VdY684Ed3FWA==}
 
   postcss-selector-parser@7.1.7:
     resolution: {integrity: sha512-wWBro/7hJ40ye6TPiXkUQoXKCw23xSsjriUvqd7Uls9Sso3oLiON1flc18cCdnjgCRXw4fBVqUJJeOdDTh3P3g==}
@@ -5176,6 +5182,8 @@ snapshots:
   pkg-up@3.1.0:
     dependencies:
       find-up: 3.0.0
+
+  poor-mans-t-sql-formatter@1.6.10: {}
 
   postcss-selector-parser@7.1.7:
     dependencies:
