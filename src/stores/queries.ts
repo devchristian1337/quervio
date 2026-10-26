@@ -2,7 +2,10 @@
 // The script text lives in the tab's Monaco model, not here.
 import { Channel } from "@tauri-apps/api/core";
 import { create } from "zustand";
-import { api, errorMessage, type ServerInfo } from "@/lib/api";
+import { toast } from "sonner";
+import { api, displayName, errorMessage, type ServerInfo } from "@/lib/api";
+import { useConnections } from "@/stores/connections";
+import { useDialogs } from "@/stores/dialogs";
 import type { ExecutionEvent, Outcome } from "@/lib/execution";
 
 export interface MessageLine {
@@ -57,9 +60,32 @@ interface QueriesState {
   setView: (id: string, view: QueryTab["view"]) => void;
   execute: (id: string, script: Script) => Promise<void>;
   cancel: (id: string) => Promise<void>;
+  useDatabase: (id: string, database: string) => Promise<void>;
+  /** Closes the tab, first asking what to do with open transactions. */
+  closeSafely: (id: string) => Promise<boolean>;
+  /** Ends open transactions in every tab, asking once; false if the user cancels. */
+  settleAllTransactions: () => Promise<boolean>;
 }
 
 let counter = 0;
+
+/** Commits or rolls back the tabs' transactions; false (with a toast) if any fails. */
+async function endTransactions(tabs: QueryTab[], commit: boolean) {
+  for (const tab of tabs) {
+    try {
+      const remaining = await api.endTransactions(tab.id, commit);
+      useQueries.setState((s) => ({
+        tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, openTransactions: remaining } : t)),
+      }));
+      if (remaining > 0) throw new Error(`${remaining} transaction(s) are still open`);
+    } catch (error) {
+      toast.error(`${commit ? "Commit" : "Rollback"} failed in ${tab.title}`, { description: errorMessage(error) });
+      return false;
+    }
+  }
+  toast.success(commit ? "Transactions committed" : "Transactions rolled back");
+  return true;
+}
 
 export const useQueries = create<QueriesState>((set, get) => {
   const patch = (id: string, change: Partial<QueryTab> | ((tab: QueryTab) => Partial<QueryTab>)) =>
@@ -118,6 +144,20 @@ export const useQueries = create<QueriesState>((set, get) => {
     execute: async (id, script) => {
       const tab = get().tabs.find((t) => t.id === id);
       if (!tab || tab.status !== "ready" || script.text.trim() === "") return;
+
+      // On Production, Destructive Statements need an explicit go-ahead.
+      const connection = useConnections.getState().connections.find((c) => c.id === tab.connectionId);
+      if (connection?.environment === "production") {
+        const check = await api.checkScript(script.text, script.baseLine);
+        if (check.findings.length > 0 || check.uncertain) {
+          const run = await useDialogs.getState().confirmDestructive({
+            tabTitle: tab.title,
+            connectionName: displayName(connection),
+            check,
+          });
+          if (!run) return;
+        }
+      }
       patch(id, {
         status: "executing",
         messages: [],
@@ -194,6 +234,33 @@ export const useQueries = create<QueriesState>((set, get) => {
 
     cancel: async (id) => {
       await api.cancelQuery(id);
+    },
+
+    useDatabase: async (id, database) => {
+      try {
+        const current = await api.useDatabase(id, database);
+        patch(id, { database: current });
+      } catch (error) {
+        toast.error("Could not switch database", { description: errorMessage(error) });
+      }
+    },
+
+    closeSafely: async (id) => {
+      const tab = get().tabs.find((t) => t.id === id);
+      if (!tab) return true;
+      if (tab.openTransactions > 0) {
+        const choice = await useDialogs.getState().confirmTransactions([tab]);
+        if (choice === "cancel" || !(await endTransactions([tab], choice === "commit"))) return false;
+      }
+      await get().close(id);
+      return true;
+    },
+
+    settleAllTransactions: async () => {
+      const open = get().tabs.filter((t) => t.openTransactions > 0);
+      if (open.length === 0) return true;
+      const choice = await useDialogs.getState().confirmTransactions(open);
+      return choice !== "cancel" && endTransactions(open, choice === "commit");
     },
   };
 });

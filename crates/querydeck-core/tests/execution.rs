@@ -328,3 +328,40 @@ async fn large_result_sets_report_progress() {
     assert_eq!(results.read().unwrap()[0].row_count(), 300_000);
     assert!(progress > 0, "no progress events while streaming");
 }
+
+#[tokio::test]
+#[ignore = "needs SQL Server: docker compose up -d --wait"]
+async fn ending_transactions_commits_or_rolls_back_all_levels() {
+    let mut session = open().await;
+    run(
+        &mut session,
+        "CREATE TABLE #t (x int);\nBEGIN TRAN; INSERT #t VALUES (1); BEGIN TRAN; INSERT #t VALUES (2);",
+        0,
+    )
+    .await;
+    assert_eq!(session.end_transactions(true).await.unwrap(), 0);
+    let (_, log) = run(&mut session, "BEGIN TRAN; INSERT #t VALUES (3);", 0).await;
+    assert_eq!(log.last().unwrap(), "done Succeeded in master, tran 1");
+    assert_eq!(session.end_transactions(false).await.unwrap(), 0);
+
+    let results = SharedResults::default();
+    session
+        .execute(
+            "SELECT x FROM #t ORDER BY x",
+            0,
+            &CancelToken::new(),
+            &results,
+            ResultLimits::default(),
+            |_| {},
+        )
+        .await;
+    let sets = results.read().unwrap();
+    let values: Vec<_> = (0..sets[0].row_count())
+        .map(|row| sets[0].cell(row, 0).unwrap().text.unwrap())
+        .collect();
+    assert_eq!(
+        values,
+        ["1", "2"],
+        "committed rows stay, the rolled back one is gone"
+    );
+}

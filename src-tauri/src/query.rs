@@ -239,3 +239,39 @@ pub fn result_export_markdown(
         .and_then(|()| writer.flush())
         .map_err(message)
 }
+
+/// Destructive Statements in a script, checked before running it on Production.
+#[tauri::command]
+pub fn query_check(script: String, base_line: u32) -> querydeck_core::guard::Check {
+    querydeck_core::guard::check(&script, base_line)
+}
+
+/// Switches the Query Tab's Session to `database` and returns the database
+/// it is now in.
+#[tauri::command]
+pub async fn query_use_database(
+    state: State<'_, QueryState>,
+    tab_id: String,
+    database: String,
+) -> CommandResult<String> {
+    if state.running.lock().unwrap().contains_key(&tab_id) {
+        return Err("wait for the running query to finish".into());
+    }
+    let session = state.session(&tab_id).await?;
+    let mut session = session.lock().await;
+    session.use_database(&database).await.map_err(message)?;
+    Ok(session.database().to_string())
+}
+
+/// Commits or rolls back every open transaction of the Query Tab's Session;
+/// returns how many remain.
+#[tauri::command]
+pub async fn query_end_transactions(
+    state: State<'_, QueryState>,
+    tab_id: String,
+    commit: bool,
+) -> CommandResult<i64> {
+    let session = state.session(&tab_id).await?;
+    let mut session = session.lock().await;
+    session.end_transactions(commit).await.map_err(message)
+}

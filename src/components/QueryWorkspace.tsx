@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { CheckCircle2, Circle, Loader2, Play, Plus, Square, X, XCircle } from "lucide-react";
+import { CheckCircle2, Circle, Database, Loader2, Play, Plus, Square, X, XCircle } from "lucide-react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { displayName } from "@/lib/api";
+import { api, displayName, errorMessage } from "@/lib/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { currentScript, disposeModel, focusEditor, revealLine } from "@/lib/editor";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { openQueryFromContext, useGlobalShortcuts } from "@/lib/shortcuts";
@@ -69,16 +70,7 @@ function EmptyState() {
 }
 
 async function closeTab(tab: QueryTab) {
-  if (
-    tab.openTransactions > 0 &&
-    !window.confirm(
-      `${tab.title} has ${tab.openTransactions} open transaction(s). Closing it rolls them back. Close anyway?`,
-    )
-  ) {
-    return;
-  }
-  await useQueries.getState().close(tab.id);
-  await disposeModel(tab.id);
+  if (await useQueries.getState().closeSafely(tab.id)) await disposeModel(tab.id);
 }
 
 function TabBar() {
@@ -133,9 +125,53 @@ function TabBar() {
   );
 }
 
+function DatabaseSelector({ tab }: { tab: QueryTab }) {
+  const useDatabase = useQueries((s) => s.useDatabase);
+  const [databases, setDatabases] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Listed when the menu opens, so new databases show up without a refresh.
+  async function load(open: boolean) {
+    if (!open) return;
+    try {
+      setDatabases((await api.databases(tab.connectionId)).map((d) => d.name));
+      setError(null);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  const current = tab.database ?? "";
+  const options = databases ?? (current ? [current] : []);
+  return (
+    <Select
+      value={current}
+      onOpenChange={(open) => void load(open)}
+      onValueChange={(database) => void useDatabase(tab.id, database)}
+      disabled={tab.status !== "ready"}
+    >
+      <SelectTrigger size="sm" className="h-7 w-56 gap-1.5 text-xs" title="Current database (USE)">
+        <Database className="size-3.5 text-muted-foreground" />
+        <SelectValue placeholder="Database" />
+      </SelectTrigger>
+      <SelectContent>
+        {error && <div className="px-2 py-1.5 text-xs text-destructive">{error}</div>}
+        {options.map((name) => (
+          <SelectItem key={name} value={name} className="text-xs">
+            {name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function Toolbar({ tab }: { tab: QueryTab }) {
   const { execute, cancel } = useQueries();
   const executing = tab.status === "executing";
+  const production = useConnections(
+    (s) => s.connections.find((c) => c.id === tab.connectionId)?.environment === "production",
+  );
   return (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
       <Button
@@ -162,6 +198,16 @@ function Toolbar({ tab }: { tab: QueryTab }) {
       >
         <Square className="fill-current" /> Cancel
       </Button>
+      <div className="mx-1 h-5 w-px bg-border" />
+      <DatabaseSelector tab={tab} />
+      {production && (
+        <span
+          className="ml-2 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-red-500"
+          title="Destructive statements ask for confirmation on this server"
+        >
+          PRODUCTION
+        </span>
+      )}
       {tab.status === "connecting" && (
         <span className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground">
           <Loader2 className="size-3 animate-spin" /> Connecting…
