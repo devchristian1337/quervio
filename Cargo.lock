@@ -2869,6 +2869,7 @@ dependencies = [
 name = "querydeck-core"
 version = "0.1.0"
 dependencies = [
+ "encoding_rs",
  "mssql-tds",
  "serde",
  "serde_json",

@@ -16,17 +16,37 @@ export interface TransactionTab {
 
 export type TransactionChoice = "commit" | "rollback" | "cancel";
 
+export type UnsavedChoice = "save" | "discard" | "cancel";
+
 interface DialogsState {
   destructive: (DestructiveRequest & { resolve: (run: boolean) => void }) | null;
   transactions: { tabs: TransactionTab[]; resolve: (choice: TransactionChoice) => void } | null;
   /** Resolves true when the user chooses to run the script anyway. */
   confirmDestructive: (request: DestructiveRequest) => Promise<boolean>;
   confirmTransactions: (tabs: TransactionTab[]) => Promise<TransactionChoice>;
+  unsaved: { title: string; resolve: (choice: UnsavedChoice) => void } | null;
+  confirmUnsaved: (title: string) => Promise<UnsavedChoice>;
 }
 
 export const useDialogs = create<DialogsState>((set, get) => ({
   destructive: null,
   transactions: null,
+  unsaved: null,
+
+  confirmUnsaved: (title) => {
+    if (get().unsaved) return Promise.resolve("cancel");
+    return new Promise((resolve) =>
+      set({
+        unsaved: {
+          title,
+          resolve: (choice) => {
+            set({ unsaved: null });
+            resolve(choice);
+          },
+        },
+      }),
+    );
+  },
 
   confirmDestructive: (request) => {
     // One prompt at a time: a second F5 while it is open is ignored.

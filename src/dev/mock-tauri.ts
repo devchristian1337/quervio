@@ -116,6 +116,19 @@ mockIPC(async (cmd, args) => {
       );
       return { findings, uncertain: false };
     }
+    case "explorer_script":
+      return a.kind === "selectTop"
+        ? "SELECT TOP (1000)\n      [Id]\n     ,[Name]\n  FROM [dbo].[Customer];\n"
+        : "CREATE TABLE [dbo].[Customer] (\n    [Id] int IDENTITY(1, 1) NOT NULL,\n    [Name] nvarchar(100) NOT NULL\n);\n";
+    case "tabs_load":
+      return localStorage.getItem("querydeck.mock.tabs");
+    case "tabs_save":
+      localStorage.setItem("querydeck.mock.tabs", a.snapshot as string);
+      return null;
+    case "file_read":
+      return "SELECT 'from a file';\n";
+    case "file_write":
+      return null;
     case "query_use_database":
       return a.database;
     case "query_end_transactions":

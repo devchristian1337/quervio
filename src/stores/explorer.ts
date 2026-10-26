@@ -30,7 +30,14 @@ export type NodeKind =
       objectId: number;
       folder: TableFolder;
     }
-  | { type: "leaf"; folder: TableFolder };
+  | {
+      type: "leaf";
+      folder: TableFolder;
+      connectionId: string;
+      database: string;
+      /** Set for triggers, which can be scripted. */
+      objectId: number | null;
+    };
 
 export interface TreeNode {
   key: string;
@@ -159,7 +166,13 @@ async function loadChildren(node: TreeNode, cache: Record<string, Children>): Pr
         key: `${key}/${item.name}`,
         label: item.name,
         detail: item.detail,
-        kind: { type: "leaf", folder: kind.folder },
+        kind: {
+          type: "leaf",
+          folder: kind.folder,
+          connectionId: kind.connectionId,
+          database: kind.database,
+          objectId: item.objectId,
+        },
         expandable: false,
       }));
     }

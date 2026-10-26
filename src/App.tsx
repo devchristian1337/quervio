@@ -10,6 +10,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { SafetyDialogs } from "@/components/SafetyDialogs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useQueries } from "@/stores/queries";
+import { useConnections } from "@/stores/connections";
+import { restoreTabs, saveNow } from "@/lib/session-restore";
 
 // Follow the Windows light/dark setting.
 function useSystemTheme() {
@@ -31,8 +33,11 @@ function useCloseGuard() {
     const appWindow = getCurrentWindow();
     let closing = false;
     const unlisten = appWindow.onCloseRequested(async (event) => {
-      if (closing || useQueries.getState().tabs.every((t) => t.openTransactions === 0)) return;
+      if (closing) return;
+      // Held open until the tabs are saved (they come back on the next
+      // start) and open transactions are settled.
       event.preventDefault();
+      await saveNow();
       if (await useQueries.getState().settleAllTransactions()) {
         closing = true;
         await appWindow.destroy();
@@ -42,9 +47,18 @@ function useCloseGuard() {
   }, []);
 }
 
+// Reopens last run's Query Tabs once the Saved Connections are known.
+function useRestoreTabs() {
+  const loaded = useConnections((s) => s.loaded);
+  useEffect(() => {
+    if (loaded) void restoreTabs();
+  }, [loaded]);
+}
+
 export default function App() {
   useSystemTheme();
   useCloseGuard();
+  useRestoreTabs();
 
   return (
     <>

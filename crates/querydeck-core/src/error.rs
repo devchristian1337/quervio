@@ -20,6 +20,12 @@ pub enum Error {
     )]
     NoLocalInstance(String),
 
+    #[error("object {0} no longer exists; refresh the Object Explorer")]
+    ObjectNotFound(i64),
+
+    #[error("this module is encrypted (WITH ENCRYPTION), so its definition cannot be scripted")]
+    EncryptedModule,
+
     #[error("no saved connection with id {0}")]
     UnknownConnection(String),
 

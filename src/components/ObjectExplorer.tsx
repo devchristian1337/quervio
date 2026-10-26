@@ -28,7 +28,8 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { ConnectDialog } from "@/components/ConnectDialog";
-import { displayName, type SavedConnection } from "@/lib/api";
+import { api, displayName, errorMessage, type SavedConnection, type ScriptKind } from "@/lib/api";
+import { toast } from "sonner";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
@@ -318,6 +319,7 @@ export function ObjectExplorer() {
                 </div>
               </ContextMenuTrigger>
               <ContextMenuContent className="w-48">
+                <ScriptItems node={node} />
                 {contextOf(node.kind) && (
                   <>
                     <ContextMenuItem
@@ -386,6 +388,38 @@ export function ObjectExplorer() {
         }}
       />
     </section>
+  );
+}
+
+/** Opens a script for an Object in a new Query Tab on its database. */
+async function openScript(kind: ScriptKind, connectionId: string, database: string, objectId: number) {
+  try {
+    const text = await api.script(connectionId, database, objectId, kind);
+    await useQueries.getState().open(connectionId, database, { text, execute: kind === "selectTop" });
+  } catch (error) {
+    toast.error("Could not script the object", { description: errorMessage(error) });
+  }
+}
+
+/** Scripting actions for tables, views and Modules, as in SSMS. */
+function ScriptItems({ node }: { node: TreeNode }) {
+  const { kind } = node;
+  if (!(kind.type === "object" || (kind.type === "leaf" && kind.folder === "triggers")) || kind.objectId === null) {
+    return null;
+  }
+  const { connectionId, database, objectId } = kind;
+  const folder = kind.type === "object" ? kind.folder : "triggers";
+  const run = (script: ScriptKind) => () => void openScript(script, connectionId, database, objectId);
+  const hasRows = folder === "tables" || folder === "views";
+  const isModule = folder !== "tables";
+  return (
+    <>
+      {hasRows && <ContextMenuItem onSelect={run("selectTop")}>Select Top 1000 Rows</ContextMenuItem>}
+      {isModule && <ContextMenuItem onSelect={run("alter")}>Modify</ContextMenuItem>}
+      <ContextMenuItem onSelect={run(isModule ? "create" : "createTable")}>Script as CREATE</ContextMenuItem>
+      {isModule && <ContextMenuItem onSelect={run("alter")}>Script as ALTER</ContextMenuItem>}
+      <ContextMenuSeparator />
+    </>
   );
 }
 
