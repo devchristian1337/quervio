@@ -190,7 +190,12 @@ function DatabaseSelector({ tab }: { tab: QueryTab }) {
       onValueChange={(database) => void useDatabase(tab.id, database)}
       disabled={tab.status !== "ready"}
     >
-      <SelectTrigger size="sm" className="h-7 w-56 gap-1.5 px-2 text-xs" title="Current database (USE)">
+      <SelectTrigger
+        size="sm"
+        // As tall as the toolbar buttons; the size="sm" rule alone is 32 px.
+        className="w-56 gap-1.5 px-2 py-0 text-xs data-[size=sm]:h-7"
+        title="Current database (USE)"
+      >
         <Database className="size-3.5 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-left">
           <SelectValue placeholder="Database" />
