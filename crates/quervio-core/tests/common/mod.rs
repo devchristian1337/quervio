@@ -61,6 +61,59 @@ pub fn password() -> Option<String> {
     Some(setting("QUERVIO_TEST_PASSWORD"))
 }
 
+/// A database created for one test and dropped when this goes out of
+/// scope, also when the test fails, so the server keeps no test leftovers.
+pub struct TestDatabase {
+    name: &'static str,
+}
+
+impl TestDatabase {
+    /// Drops any copy left by an interrupted run, creates the database and
+    /// runs `setup` in it.
+    pub async fn create(name: &'static str, setup: &str) -> Self {
+        let quoted = name.replace(']', "]]");
+        run_scripts(&[
+            &drop_script(name),
+            &format!("CREATE DATABASE [{quoted}];"),
+            &format!("USE [{quoted}];\n{setup}"),
+        ])
+        .await;
+        Self { name }
+    }
+}
+
+impl Drop for TestDatabase {
+    fn drop(&mut self) {
+        // Drop cannot await, and the test's runtime may be the current
+        // thread: drop the database from a thread with its own runtime.
+        let script = drop_script(self.name);
+        let dropped = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime for dropping a test database")
+                .block_on(run_scripts(&[&script]));
+        })
+        .join();
+        // Never panic here: it may already be unwinding from a failed test.
+        if dropped.is_err() {
+            eprintln!("could not drop test database {}", self.name);
+        }
+    }
+}
+
+fn drop_script(name: &str) -> String {
+    let literal = name.replace('\'', "''");
+    let quoted = name.replace(']', "]]");
+    format!(
+        "IF DB_ID(N'{literal}') IS NOT NULL
+         BEGIN
+             ALTER DATABASE [{quoted}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+             DROP DATABASE [{quoted}];
+         END"
+    )
+}
+
 /// Runs each script in order on a fresh connection, failing on any error.
 pub async fn run_scripts(scripts: &[&str]) {
     let mut client = connect().await;
