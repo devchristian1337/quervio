@@ -29,6 +29,13 @@ cargo test --workspace
 pnpm test
 ```
 
+Integration tests run against SQL Server 2022 in Docker. Copy `.env.example` to `.env` first, then:
+
+```bash
+docker compose up -d --wait
+cargo test --workspace -- --ignored
+```
+
 ## Build the installer
 
 ```bash
