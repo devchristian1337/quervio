@@ -46,6 +46,9 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
       defaultLanguage="sql"
       // Only used when the tab's model is first created.
       defaultValue={initialText}
+      // The editor unmounts on Ctrl+R and when the last tab closes; its
+      // model must survive that. Models are disposed when their tab closes.
+      keepCurrentModel
       onChange={() => {
         useQueries.getState().setDirty(tabId, true);
         scheduleSave();

@@ -232,11 +232,17 @@ async fn sql_login_without_a_password_is_refused_before_connecting() {
 async fn bare_localhost_without_a_local_instance_explains_itself() {
     let mut connection = saved_connection();
     connection.server = "localhost".into();
+    let started = std::time::Instant::now();
     let error = Session::open(&connection, password(), "Querydeck tests")
         .await
         .err()
         .expect("no local instance on this machine");
     assert!(error.to_string().contains("host,port"), "{error}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "took {:?}",
+        started.elapsed()
+    );
 }
 
 /// Scripts a table, runs the script in a fresh database and scripts the

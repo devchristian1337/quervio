@@ -62,6 +62,12 @@ impl Session {
         };
         context.encryption_options.trust_server_certificate = connection.trust_server_certificate;
 
+        // A bare local name goes to the local default instance; without
+        // one the driver would only give up after the login timeout.
+        if is_bare_local(&connection.server) && !local_default_instance_installed() {
+            return Err(Error::NoLocalInstance(connection.server.clone()));
+        }
+
         let result = TdsConnectionProvider {}
             .create_client(context, &connection.server, None)
             .await;
@@ -120,6 +126,50 @@ impl Session {
     }
 }
 
+/// `localhost`, `.`, `(local)`, a loopback address or this machine's
+/// name, with no instance, port or protocol prefix.
+fn is_bare_local(server: &str) -> bool {
+    let name = server.trim();
+    if name.is_empty() || name.contains(['\\', ',', ':']) {
+        return false;
+    }
+    let machine = std::env::var("COMPUTERNAME").unwrap_or_default();
+    ["localhost", ".", "(local)", "127.0.0.1", "::1"]
+        .iter()
+        .any(|local| name.eq_ignore_ascii_case(local))
+        || (!machine.is_empty() && name.eq_ignore_ascii_case(&machine))
+}
+
+/// Whether SQL Server's default instance (MSSQLSERVER) is installed here.
+#[cfg(windows)]
+fn local_default_instance_installed() -> bool {
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_ANY, RegGetValueW};
+
+    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let key = wide(r"SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL");
+    let value = wide("MSSQLSERVER");
+    // SAFETY: both strings are NUL-terminated and outlive the call; no
+    // output buffers are passed, so only the value's existence is checked.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_ANY,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    status == ERROR_SUCCESS
+}
+
+#[cfg(not(windows))]
+fn local_default_instance_installed() -> bool {
+    true
+}
+
 pub(crate) fn text(row: &[ColumnValues], column: usize) -> Result<String> {
     match row.get(column) {
         Some(ColumnValues::String(value)) => Ok(value.to_utf8_string()),
@@ -155,5 +205,33 @@ fn unexpected(column: usize, found: Option<&ColumnValues>) -> Error {
     Error::UnexpectedValue {
         column,
         found: format!("{found:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_local_names() {
+        for name in [
+            "localhost",
+            "LOCALHOST",
+            ".",
+            "(local)",
+            "127.0.0.1",
+            " localhost ",
+        ] {
+            assert!(is_bare_local(name), "{name}");
+        }
+        for name in [
+            "localhost,14333",
+            r"localhost\SQLEXPRESS",
+            "tcp:localhost",
+            "srv01",
+            r"(localdb)\MSSQLLocalDB",
+        ] {
+            assert!(!is_bare_local(name), "{name}");
+        }
     }
 }

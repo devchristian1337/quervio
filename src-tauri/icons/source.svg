@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Querydeck app icon: a deck of query cards over a database.
+       Regenerate every size with: pnpm tauri icon src-tauri/icons/source.svg -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="0.55" stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#c026d3"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e9e5ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="216" fill="url(#bg)"/>
+  <!-- Cards behind -->
+  <rect x="300" y="196" width="520" height="560" rx="64" fill="#ffffff" opacity="0.22" transform="rotate(8 560 476)"/>
+  <rect x="252" y="220" width="520" height="560" rx="64" fill="#ffffff" opacity="0.38" transform="rotate(-6 512 500)"/>
+  <!-- Front card -->
+  <rect x="232" y="252" width="520" height="560" rx="64" fill="url(#card)"/>
+  <!-- Database cylinder on the card -->
+  <g fill="none" stroke="#5b3fd6" stroke-width="40" stroke-linecap="round">
+    <ellipse cx="492" cy="400" rx="150" ry="52"/>
+    <path d="M342 400v240c0 29 67 52 150 52s150-23 150-52V400"/>
+    <path d="M342 520c0 29 67 52 150 52s150-23 150-52"/>
+  </g>
+  <!-- Query cursor -->
+  <rect x="610" y="610" width="40" height="120" rx="12" fill="#c026d3"/>
+</svg>
