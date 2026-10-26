@@ -12,6 +12,8 @@ export default defineConfig(() => ({
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),
+      // Deep imports into Monaco, which its exports map does not allow (src/lib/monaco-core.js).
+      "monaco-esm": path.resolve(import.meta.dirname, "./node_modules/monaco-editor/esm/vs"),
     },
   },
 

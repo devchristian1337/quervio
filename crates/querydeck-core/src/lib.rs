@@ -5,9 +5,11 @@
 //!
 //! Terms follow `GLOSSARY.md` at the repository root.
 
+pub mod batch;
 pub mod catalog;
 pub mod connection;
 pub mod error;
+pub mod execution;
 pub mod secrets;
 pub mod session;
 

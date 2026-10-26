@@ -168,8 +168,21 @@ async function loadChildren(node: TreeNode, cache: Record<string, Children>): Pr
   }
 }
 
+/** Server and database of the selected node, for New Query. */
+export interface SelectionContext {
+  connectionId: string;
+  database: string | null;
+}
+
+export function contextOf(kind: NodeKind): SelectionContext | null {
+  if (!("connectionId" in kind)) return null;
+  return { connectionId: kind.connectionId, database: "database" in kind ? kind.database : null };
+}
+
 interface ExplorerState {
   expanded: Record<string, boolean>;
+  context: SelectionContext | null;
+  setContext: (context: SelectionContext | null) => void;
   children: Record<string, Children>;
   filters: Record<string, string>;
   selected: string | null;
@@ -213,6 +226,8 @@ export const useExplorer = create<ExplorerState>((set, get) => {
 
   return {
     expanded: {},
+    context: null,
+    setContext: (context) => set({ context }),
     children: {},
     filters: {},
     selected: null,

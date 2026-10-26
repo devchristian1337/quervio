@@ -1,4 +1,5 @@
 mod explorer;
+mod query;
 
 use tauri::Manager;
 
@@ -8,6 +9,7 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             app.manage(explorer::ExplorerState::open(&data_dir)?);
+            app.manage(query::QueryState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -20,6 +22,10 @@ pub fn run() {
             explorer::explorer_databases,
             explorer::explorer_objects,
             explorer::explorer_table_children,
+            query::query_open,
+            query::query_close,
+            query::query_execute,
+            query::query_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
