@@ -17,6 +17,7 @@ import {
 import { closeTab as closeTabSafely, openFile, saveTab } from "@/lib/files";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Button } from "@/components/ui/button";
+import { LoaderGooeyBlobs } from "@/components/ui/loaders-gooey-blobs";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -337,6 +338,7 @@ function Messages({ tab }: { tab: QueryTab }) {
     if (list.current) window.getSelection()?.selectAllChildren(list.current);
   };
 
+  if (tab.status === "executing" && tab.messages.length === 0) return <Running />;
   return (
     <ContextMenu onOpenChange={(open) => open && setSelection(window.getSelection()?.toString() ?? "")}>
       <ContextMenuTrigger asChild>
@@ -377,9 +379,21 @@ function Messages({ tab }: { tab: QueryTab }) {
   );
 }
 
+/** Fills the output panel while a query runs and nothing has come back yet. */
+function Running() {
+  return (
+    <Centered>
+      <div className="flex flex-col items-center gap-4">
+        <LoaderGooeyBlobs size={14} className="text-sky-500" aria-label="Executing query" />
+        <span className="text-xs">Executing query…</span>
+      </div>
+    </Centered>
+  );
+}
+
 function Results({ tab }: { tab: QueryTab }) {
   if (tab.resultSets.length === 0) {
-    return <Centered>{tab.status === "executing" ? "Waiting for results…" : "No result sets."}</Centered>;
+    return tab.status === "executing" ? <Running /> : <Centered>No result sets.</Centered>;
   }
   return (
     <div className="flex h-full flex-col gap-1 overflow-auto p-1">
