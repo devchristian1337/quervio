@@ -278,7 +278,7 @@ export function ObjectExplorer() {
                   }
                   style={{ paddingLeft: depth * INDENT + 4 }}
                   className={cn(
-                    "group flex h-6 cursor-default items-center gap-1 pr-2 whitespace-nowrap",
+                    "group flex h-6 cursor-pointer items-center gap-1 pr-2 whitespace-nowrap",
                     selected
                       ? "bg-accent text-accent-foreground group-focus-visible/tree:outline-1 group-focus-visible/tree:-outline-offset-1 group-focus-visible/tree:outline-ring"
                       : "hover:bg-accent/50",

@@ -175,6 +175,15 @@
     @apply text-foreground select-none;
     background: var(--app-background, transparent);
     }
+  /* A hand on everything clickable. Tailwind 4 gives buttons the arrow, so it
+     is put back here for buttons, switches, checkboxes, dropdown triggers and
+     disclosures; menu items, tabs and tree rows set cursor-pointer themselves,
+     and the results grid shows the hand on its headers and row numbers. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary {
+    cursor: pointer;
+  }
   /* Panel groups size themselves with height: 100%, so the chain needs one. */
   html,
   body,
@@ -210,13 +219,6 @@
 ::-webkit-scrollbar-thumb:hover {
   border-width: 2px;
   background-color: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
-}
-
-/* The results grid (Glide) sets a hand cursor on its headers and row numbers,
-   with no option to change it; the app keeps the arrow on everything that is
-   not a link. Only "pointer" is replaced, so col-resize and the rest stay. */
-[data-testid="data-grid-canvas"][style*="cursor: pointer"] {
-  cursor: default !important;
 }
 
 /* A lit key on the Settings › Shortcuts keyboard (components/ui/glowing-keyboard.tsx):
