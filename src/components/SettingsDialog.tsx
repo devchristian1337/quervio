@@ -458,7 +458,8 @@ function ShortcutsSection() {
       </div>
       {/* Stays in view while the list scrolls, so every row can light it. */}
       <div className="sticky -top-6 z-10 -mx-8 mb-4 bg-background px-8 pt-6 pb-3 -mt-6">
-        <GlowingKeyboard highlight={preview?.shortcut.split("+") ?? []} />
+        {/* Split on a "+" that has a key after it, so Ctrl++ (the + key) keeps its "+". */}
+        <GlowingKeyboard highlight={preview?.shortcut.split(/\+(?=.)/) ?? []} />
         <p className="mt-2 h-5 text-xs text-muted-foreground">
           {preview ? (
             <>
