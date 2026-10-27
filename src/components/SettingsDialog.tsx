@@ -51,7 +51,16 @@ export function SettingsDialog() {
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? show() : hide())}>
-      <DialogContent className="flex h-[min(640px,calc(100vh-4rem))] gap-0 overflow-hidden p-0 sm:max-w-4xl">
+      <DialogContent
+        className="flex h-[min(640px,calc(100vh-4rem))] gap-0 overflow-hidden p-0 sm:max-w-4xl"
+        // Focus starts on the section the dialog opens at, not on the first one, so
+        // a keyboard user's focus ring sits on the item that is selected.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          event.currentTarget instanceof HTMLElement &&
+            event.currentTarget.querySelector<HTMLElement>(`[data-section="${section}"]`)?.focus();
+        }}
+      >
         <nav className="flex w-48 shrink-0 flex-col gap-0.5 border-r bg-muted/40 p-2">
           <DialogTitle className="px-2 pt-2 pb-3 text-sm">Settings</DialogTitle>
           <DialogDescription className="sr-only">Quervio settings</DialogDescription>
@@ -59,6 +68,8 @@ export function SettingsDialog() {
             <button
               key={item.id}
               type="button"
+              data-section={item.id}
+              aria-current={section === item.id ? "page" : undefined}
               onClick={() => show(item.id)}
               className={cn(
                 "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-4",
