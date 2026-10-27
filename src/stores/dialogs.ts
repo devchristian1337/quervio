@@ -26,12 +26,31 @@ interface DialogsState {
   confirmTransactions: (tabs: TransactionTab[]) => Promise<TransactionChoice>;
   unsaved: { title: string; resolve: (choice: UnsavedChoice) => void } | null;
   confirmUnsaved: (title: string) => Promise<UnsavedChoice>;
+  deleteConnection: { name: string; resolve: (remove: boolean) => void } | null;
+  /** Resolves true when the user confirms deleting the Saved Connection. */
+  confirmDeleteConnection: (name: string) => Promise<boolean>;
 }
 
 export const useDialogs = create<DialogsState>((set, get) => ({
   destructive: null,
   transactions: null,
   unsaved: null,
+  deleteConnection: null,
+
+  confirmDeleteConnection: (name) => {
+    if (get().deleteConnection) return Promise.resolve(false);
+    return new Promise((resolve) =>
+      set({
+        deleteConnection: {
+          name,
+          resolve: (remove) => {
+            set({ deleteConnection: null });
+            resolve(remove);
+          },
+        },
+      }),
+    );
+  },
 
   confirmUnsaved: (title) => {
     if (get().unsaved) return Promise.resolve("cancel");

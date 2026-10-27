@@ -171,7 +171,8 @@ function AppearanceSection() {
       <div className="grid grid-cols-3 gap-3">
         <ThemeCard
           name="System"
-          note={`Follows Windows · now ${systemDark ? "Dark" : "Light"}`}
+          // Short enough for the narrowest card, like "Dark · Mica" beside it.
+          note={`Windows · ${systemDark ? "Dark" : "Light"}`}
           selected={current === "system"}
           onSelect={() => choose("system")}
           preview={[findTheme("light", false), findTheme("dark", true)]}
@@ -222,7 +223,9 @@ function ThemeCard({
       <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
         <div className="min-w-0">
           <div className="truncate text-sm font-medium">{name}</div>
-          <div className="truncate text-xs text-muted-foreground">{note}</div>
+          <div className="truncate text-xs text-muted-foreground" title={note}>
+            {note}
+          </div>
         </div>
         {selected && <Check className="size-4 shrink-0 text-primary" />}
       </div>
