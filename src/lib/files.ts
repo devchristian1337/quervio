@@ -12,11 +12,14 @@ const FILTERS = [
   { name: "All files", extensions: ["*"] },
 ];
 
-/** Opens a .sql file in a new tab on the selected server, or the active tab's. */
-export async function openFile() {
+/**
+ * Opens a .sql file in a new tab on `target` (a start screen row), else on the
+ * selected server, or the active tab's.
+ */
+export async function openFile(target?: { connectionId: string; database: string | null }) {
   const { tabs, activeId } = useQueries.getState();
   const active = tabs.find((t) => t.id === activeId);
-  const context = useExplorer.getState().context;
+  const context = target ?? useExplorer.getState().context;
   const connectionId = context?.connectionId ?? active?.connectionId;
   if (!connectionId) {
     toast.error("Select a server first", {

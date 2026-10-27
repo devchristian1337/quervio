@@ -8,7 +8,6 @@ import {
   FolderOpen,
   Loader2,
   Play,
-  Plus,
   Save,
   Square,
   X,
@@ -16,6 +15,7 @@ import {
 } from "lucide-react";
 import { closeTab as closeTabSafely, openFile, saveTab } from "@/lib/files";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { StartScreen } from "@/components/StartScreen";
 import { Button } from "@/components/ui/button";
 import { LoaderGooeyBlobs } from "@/components/ui/loaders-gooey-blobs";
 import {
@@ -31,15 +31,11 @@ import { api, displayName, errorMessage } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { currentScript, focusEditor, revealLine } from "@/lib/editor";
 import { ENVIRONMENTS } from "@/lib/environment";
-import { openQueryFromContext, useGlobalShortcuts } from "@/lib/shortcuts";
+import { useGlobalShortcuts } from "@/lib/shortcuts";
 import { useShortcutLabel } from "@/lib/commands";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
-import { useExplorer } from "@/stores/explorer";
 import { useQueries, type QueryTab } from "@/stores/queries";
-
-// Q Prisma v2 (design/branding); the transparent cut keeps its centre open on any theme.
-import prisma from "@/assets/quervio-q-prisma-v2-trasparente.png";
 
 const SqlEditor = lazy(() => import("@/components/SqlEditor"));
 const ResultGrid = lazy(() => import("@/components/ResultGrid"));
@@ -82,7 +78,7 @@ export function QueryWorkspace() {
           <StatusBar tab={active} />
         </>
       ) : (
-        <EmptyState />
+        <StartScreen />
       )}
     </section>
   );
@@ -90,25 +86,6 @@ export function QueryWorkspace() {
 
 function Centered({ children }: { children: React.ReactNode }) {
   return <div className="grid h-full place-items-center text-muted-foreground">{children}</div>;
-}
-
-function EmptyState() {
-  const context = useExplorer((s) => s.context);
-  const newQueryKey = useShortcutLabel("newQuery");
-  return (
-    <div className="grid flex-1 place-items-center">
-      <div className="flex flex-col items-center gap-3 text-muted-foreground">
-        <div className="mb-4 flex items-center gap-3 text-foreground">
-          <img src={prisma} alt="" className="size-16 object-contain select-none" draggable={false} />
-          <span className="text-3xl font-semibold tracking-tight">Quervio</span>
-        </div>
-        <p>Select a server or database in the Object Explorer, then open a query.</p>
-        <Button variant="outline" size="sm" disabled={!context} onClick={() => openQueryFromContext()}>
-          <Plus /> New query <span className="text-xs text-muted-foreground">{newQueryKey}</span>
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 async function closeTab(tab: QueryTab) {
@@ -123,7 +100,6 @@ function TabBar() {
     <div className="flex h-9 shrink-0 items-end overflow-x-auto border-b bg-panel">
       {tabs.map((tab) => {
         const connection = connections.find((c) => c.id === tab.connectionId);
-        const environment = connection ? ENVIRONMENTS[connection.environment] : null;
         const selected = tab.id === activeId;
         return (
           <div
@@ -141,14 +117,14 @@ function TabBar() {
             }}
             className={cn(
               "group flex h-full min-w-0 max-w-56 shrink-0 cursor-default items-center gap-2 border-r border-t-2 px-3",
-              selected ? "bg-background" : "border-t-transparent text-muted-foreground hover:bg-accent/40",
-              selected && (environment ? environment.bar.replace("border-l-", "border-t-") : "border-t-primary"),
+              selected ? "border-t-primary bg-background" : "border-t-transparent text-muted-foreground hover:bg-accent/40",
             )}
           >
             {tab.status === "executing" ? (
               <Loader2 className="size-3 shrink-0 animate-spin" />
             ) : tab.openTransactions > 0 ? (
-              <Circle className="size-2.5 shrink-0 fill-amber-500 text-amber-500" aria-label="Open transaction" />
+              // The brand's second colour, as for activity: amber is the Test Environment's.
+              <Circle className="size-2.5 shrink-0 fill-brand-secondary text-brand-secondary" aria-label="Open transaction" />
             ) : null}
             <span className="truncate" title={tab.filePath ?? undefined}>
               {tab.title}
@@ -238,9 +214,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
   };
   const { execute, cancel } = useQueries();
   const executing = tab.status === "executing";
-  const production = useConnections(
-    (s) => s.connections.find((c) => c.id === tab.connectionId)?.environment === "production",
-  );
+  const environment = useConnections((s) => s.connections.find((c) => c.id === tab.connectionId)?.environment);
   return (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
       <Button size="icon" variant="ghost" className="size-7" title={`Open script (${keys.openFile})`} onClick={() => void openFile()}>
@@ -259,7 +233,8 @@ function Toolbar({ tab }: { tab: QueryTab }) {
       <Button
         size="sm"
         variant="ghost"
-        className="h-7 text-emerald-500 hover:text-emerald-400"
+        // The screen's one coloured control: the brand's, never an Environment's.
+        className="h-7 text-primary hover:text-primary"
         disabled={tab.status !== "ready"}
         title={`Execute (${keys.execute})`}
         onClick={() => {
@@ -273,7 +248,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
       <Button
         size="sm"
         variant="ghost"
-        className="h-7 text-red-500 hover:text-red-400 dark:text-red-400 dark:hover:text-red-300"
+        className="h-7"
         disabled={!executing}
         title={`Cancel executing query (${keys.cancel})`}
         onClick={() => void cancel(tab.id)}
@@ -282,12 +257,14 @@ function Toolbar({ tab }: { tab: QueryTab }) {
       </Button>
       <div className="mx-1 h-5 w-px bg-border" />
       <DatabaseSelector tab={tab} />
-      {production && (
+      {environment && (
         <span
-          className="ml-2 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-red-500 dark:text-red-400"
-          title="Destructive statements ask for confirmation on this server"
+          className={cn("ml-2 shrink-0 rounded px-2 py-0.5 text-xs font-medium", ENVIRONMENTS[environment].pill)}
+          title={
+            environment === "production" ? "Destructive statements ask for confirmation on this server" : undefined
+          }
         >
-          PRODUCTION
+          {ENVIRONMENTS[environment].label}
         </span>
       )}
       {tab.status === "connecting" && (
@@ -358,7 +335,7 @@ function Messages({ tab }: { tab: QueryTab }) {
             return (
               <div
                 key={index}
-                className={cn(message.isError && "text-red-500 dark:text-red-400", line && "cursor-pointer hover:underline")}
+                className={cn(message.isError && "text-destructive", line && "cursor-pointer hover:underline")}
                 title={line ? `Go to line ${line}` : undefined}
                 onDoubleClick={line ? () => revealLine(line) : undefined}
                 onClick={line ? () => revealLine(line) : undefined}
@@ -441,7 +418,6 @@ function formatElapsed(ms: number | null) {
 function StatusBar({ tab }: { tab: QueryTab }) {
   const connection = useConnections((s) => s.connections.find((c) => c.id === tab.connectionId));
   const elapsed = useElapsed(tab);
-  const environment = connection ? ENVIRONMENTS[connection.environment] : null;
   const rows = tab.resultSets.reduce((sum, set) => sum + set.rows, 0);
 
   let status: React.ReactNode;
@@ -480,10 +456,7 @@ function StatusBar({ tab }: { tab: QueryTab }) {
   return (
     <footer className="flex h-6 shrink-0 items-center gap-4 border-t bg-panel px-3 text-xs text-muted-foreground">
       <span className="flex items-center gap-1.5">{status}</span>
-      <span className="ml-auto flex items-center gap-1.5">
-        {environment && <span className={cn("size-2 rounded-full", environment.dot)} title={environment.label} />}
-        {tab.server?.serverName}
-      </span>
+      <span className="ml-auto">{tab.server?.serverName}</span>
       {connection && (
         <span>{connection.authentication.kind === "sql" ? connection.authentication.userName : "Windows"}</span>
       )}

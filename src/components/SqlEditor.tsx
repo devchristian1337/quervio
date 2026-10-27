@@ -173,7 +173,7 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
         }}
       >
         <ContextMenuItem onSelect={execute}>
-          <Play className="text-emerald-500" /> Execute <ContextMenuShortcut>{executeKey}</ContextMenuShortcut>
+          <Play className="text-primary" /> Execute <ContextMenuShortcut>{executeKey}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!selected} onSelect={clipboard(cutSelection)}>

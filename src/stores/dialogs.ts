@@ -1,7 +1,7 @@
 // Safety prompts that code awaits like window.confirm, rendered by
 // SafetyDialogs.tsx.
 import { create } from "zustand";
-import type { ScriptCheck } from "@/lib/api";
+import type { SavedConnection, ScriptCheck } from "@/lib/api";
 
 export interface DestructiveRequest {
   tabTitle: string;
@@ -93,4 +93,17 @@ export const useSettingsDialog = create<{
   section: "appearance",
   show: (section) => set((s) => ({ open: true, section: section ?? s.section })),
   hide: () => set({ open: false }),
+}));
+
+/** The Connect dialog, opened from the Object Explorer and the start screen. */
+export const useConnectDialog = create<{
+  open: boolean;
+  editing: SavedConnection | null;
+  show: (editing?: SavedConnection | null) => void;
+  setOpen: (open: boolean) => void;
+}>()((set) => ({
+  open: false,
+  editing: null,
+  show: (editing = null) => set({ open: true, editing }),
+  setOpen: (open) => set({ open }),
 }));
