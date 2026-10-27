@@ -1,30 +1,39 @@
+// The app's switch: Radix for the keyboard, focus and screen readers, with a
+// thumb that slides on a spring (after the Framer Motion switch). The track
+// takes the theme's second brand colour when on.
 import * as React from "react"
+import { motion, useReducedMotion } from "motion/react"
 import { cn } from "cn"
 import { Switch as SwitchPrimitive } from "radix-ui"
 
-function Switch({
-  className,
-  size = "default",
-  ...props
-}: React.ComponentProps<typeof SwitchPrimitive.Root> & {
-  size?: "sm" | "default"
-}) {
+// Track 40×22 with 1px border and 2px padding; the thumb is 16px.
+const THUMB = 16
+const TRAVEL = 40 - 2 - 4 - THUMB
+
+function Switch({ className, checked, ...props }: React.ComponentProps<typeof SwitchPrimitive.Root>) {
+  const still = useReducedMotion()
+  const on = checked ?? false
   return (
     <SwitchPrimitive.Root
       data-slot="switch"
-      data-size={size}
+      checked={checked}
       className={cn(
-        "peer group/switch inline-flex shrink-0 items-center rounded-full border border-transparent shadow-xs transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-[1.15rem] data-[size=default]:w-8 data-[size=sm]:h-3.5 data-[size=sm]:w-6 data-[state=checked]:bg-primary data-[state=unchecked]:bg-input dark:data-[state=unchecked]:bg-input/80",
+        "peer relative inline-flex h-[22px] w-10 shrink-0 cursor-pointer items-center rounded-full border px-0.5 shadow-[inset_0_0_8px_rgb(0_0_0/0.25)] transition duration-200 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50",
+        "data-[state=checked]:border-transparent data-[state=checked]:bg-brand-secondary data-[state=unchecked]:border-border data-[state=unchecked]:bg-muted-foreground/25",
         className
       )}
       {...props}
     >
-      <SwitchPrimitive.Thumb
-        data-slot="switch-thumb"
-        className={cn(
-          "pointer-events-none block rounded-full bg-background ring-0 transition-transform group-data-[size=default]/switch:size-4 group-data-[size=sm]/switch:size-3 data-[state=checked]:translate-x-[calc(100%-2px)] data-[state=unchecked]:translate-x-0 dark:data-[state=checked]:bg-primary-foreground dark:data-[state=unchecked]:bg-foreground"
-        )}
-      />
+      <SwitchPrimitive.Thumb asChild>
+        <motion.span
+          data-slot="switch-thumb"
+          initial={false}
+          animate={{ x: on ? TRAVEL : 0 }}
+          // Starts at once and settles without bouncing.
+          transition={still ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 45 }}
+          className="pointer-events-none z-10 block size-4 rounded-full bg-white shadow-md data-[state=checked]:bg-background"
+        />
+      </SwitchPrimitive.Thumb>
     </SwitchPrimitive.Root>
   )
 }
