@@ -152,7 +152,7 @@ function NumberField({
     <div className="flex items-center gap-2">
       <Input
         type="number"
-        className="h-8 w-28 text-right"
+        className="w-28 text-right"
         min={min}
         max={max}
         step={step}
@@ -295,7 +295,7 @@ function EditorSection() {
       <Heading title="Editor" description="The SQL editor of every query tab." />
       <Row label="Font" help="JetBrains Mono comes with Quervio; the others fall back to Consolas if not installed.">
         <Select value={editor.fontFamily} onValueChange={(fontFamily) => update("editor", { fontFamily })}>
-          <SelectTrigger size="sm" className="w-52">
+          <SelectTrigger className="w-52">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -312,7 +312,7 @@ function EditorSection() {
       </Row>
       <Row label="Tab size">
         <Select value={String(editor.tabSize)} onValueChange={(size) => update("editor", { tabSize: Number(size) })}>
-          <SelectTrigger size="sm" className="w-28">
+          <SelectTrigger className="w-28">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -347,7 +347,7 @@ function EditorSection() {
       </Row>
       <Row label="Indentation">
         <Select value={formatting.indent} onValueChange={(indent) => update("formatting", { indent: indent as Indent })}>
-          <SelectTrigger size="sm" className="w-28">
+          <SelectTrigger className="w-28">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -371,7 +371,7 @@ function ResultsSection() {
       <Heading title="Results" description="How result sets look in the grid." />
       <Row label="Row density">
         <Select value={results.density} onValueChange={(density) => update("results", { density: density as Density })}>
-          <SelectTrigger size="sm" className="w-36">
+          <SelectTrigger className="w-36">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -460,7 +460,6 @@ function ShortcutsSection() {
         />
         <Button
           variant="outline"
-          size="sm"
           className="shrink-0"
           disabled={Object.keys(shortcuts).length === 0}
           onClick={() => resetShortcuts()}
