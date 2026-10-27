@@ -133,11 +133,15 @@ function TabBar() {
             {connection && <span className="truncate text-xs text-muted-foreground">{displayName(connection)}</span>}
             <button
               title="Close"
-              className={cn("ml-1 rounded p-0.5 hover:bg-accent", !selected && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
+              // A 20 px target; -mr-1 keeps the tab's right padding where it was.
+              className={cn(
+                "-mr-1 ml-1 grid size-5 shrink-0 place-items-center rounded hover:bg-accent",
+                !selected && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+              )}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={() => void closeTab(tab)}
             >
-              <X className="size-3" />
+              <X className="size-3.5" />
             </button>
           </div>
         );
