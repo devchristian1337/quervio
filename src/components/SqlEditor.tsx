@@ -27,10 +27,10 @@ import { errorMessage } from "@/lib/api";
 import { toast } from "sonner";
 import { scheduleSave } from "@/lib/session-restore";
 import { useQueries } from "@/stores/queries";
+import { useShortcutLabel } from "@/lib/commands";
 import { editorThemeName, registerEditorThemes } from "@/lib/themes";
 import { useTheme } from "@/lib/use-theme";
 import { useSettings } from "@/stores/settings";
-import { openQueryFromContext } from "@/lib/shortcuts";
 
 registerMonaco(monaco);
 
@@ -77,6 +77,8 @@ function execute() {
 export default function SqlEditor({ tabId, initialText }: { tabId: string; initialText: string }) {
   const theme = useTheme();
   const options = useSettings((s) => s.settings.editor);
+  const executeKey = useShortcutLabel("execute");
+  const formatKey = useShortcutLabel("format");
   // Read when the menu opens, to disable Cut and Copy without a selection.
   const [selected, setSelected] = useState(false);
 
@@ -117,28 +119,8 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
             onMount={(editor) => {
               registerEditor(editor);
               editor.focus();
-              const { KeyCode, KeyMod } = monaco;
-              editor.addAction({
-                id: "quervio.execute",
-                label: "Execute",
-                keybindings: [KeyCode.F5, KeyMod.CtrlCmd | KeyCode.KeyE],
-                run: execute,
-              });
-              editor.addAction({
-                id: "quervio.cancel",
-                label: "Cancel Executing Query",
-                keybindings: [KeyMod.Alt | KeyCode.PauseBreak],
-                run: () => {
-                  const { activeId, cancel } = useQueries.getState();
-                  if (activeId) void cancel(activeId);
-                },
-              });
-              editor.addAction({
-                id: "quervio.newQuery",
-                label: "New Query",
-                keybindings: [KeyMod.CtrlCmd | KeyCode.KeyN],
-                run: () => openQueryFromContext(),
-              });
+              // Execute, Cancel, New Query and the rest are app shortcuts
+              // (src/lib/shortcuts.ts), so they work everywhere and can be changed.
             }}
           />
         </div>
@@ -152,7 +134,7 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
         }}
       >
         <ContextMenuItem onSelect={execute}>
-          <Play className="text-emerald-500" /> Execute <ContextMenuShortcut>F5</ContextMenuShortcut>
+          <Play className="text-emerald-500" /> Execute <ContextMenuShortcut>{executeKey}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!selected} onSelect={clipboard(cutSelection)}>
@@ -171,7 +153,7 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => formatInEditor(selected)}>
           <WandSparkles /> {selected ? "Format Selection" : "Format Document"}
-          <ContextMenuShortcut>{selected ? "Ctrl+K Ctrl+F" : "Shift+Alt+F"}</ContextMenuShortcut>
+          <ContextMenuShortcut>{formatKey}</ContextMenuShortcut>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

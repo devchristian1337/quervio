@@ -36,6 +36,7 @@ import { useConnections } from "@/stores/connections";
 import { contextOf, isFilterable, serverKey, useExplorer, type TreeNode } from "@/stores/explorer";
 import { useQueries } from "@/stores/queries";
 import { openQueryFromContext } from "@/lib/shortcuts";
+import { useShortcutLabel } from "@/lib/commands";
 
 type Row =
   | { type: "node"; node: TreeNode; depth: number; parent: string | null }
@@ -47,6 +48,7 @@ const INDENT = 14;
 export function ObjectExplorer() {
   const { connections, loaded, load } = useConnections();
   const explorer = useExplorer();
+  const newQueryKey = useShortcutLabel("newQuery");
   const [dialog, setDialog] = useState<{ open: boolean; editing: SavedConnection | null }>({
     open: false,
     editing: null,
@@ -167,7 +169,7 @@ export function ObjectExplorer() {
           variant="ghost"
           size="icon"
           className="size-7"
-          title="New query (Ctrl+N)"
+          title={`New query (${newQueryKey})`}
           disabled={!explorer.context}
           onClick={() => openQueryFromContext()}
         >
@@ -189,6 +191,8 @@ export function ObjectExplorer() {
         ref={treeRef}
         role="tree"
         tabIndex={0}
+        // F5 here refreshes instead of executing (src/lib/shortcuts.ts).
+        data-explorer
         onKeyDown={onKeyDown}
         className="min-h-0 flex-1 overflow-auto py-1 outline-none select-none"
       >
@@ -328,7 +332,7 @@ export function ObjectExplorer() {
                         if (context) void useQueries.getState().open(context.connectionId, context.database);
                       }}
                     >
-                      New Query <ContextMenuShortcut>Ctrl+N</ContextMenuShortcut>
+                      New Query <ContextMenuShortcut>{newQueryKey}</ContextMenuShortcut>
                     </ContextMenuItem>
                     <ContextMenuSeparator />
                   </>

@@ -32,6 +32,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { currentScript, focusEditor, revealLine } from "@/lib/editor";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { openQueryFromContext, useGlobalShortcuts } from "@/lib/shortcuts";
+import { useShortcutLabel } from "@/lib/commands";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
 import { useExplorer } from "@/stores/explorer";
@@ -93,6 +94,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 function EmptyState() {
   const context = useExplorer((s) => s.context);
+  const newQueryKey = useShortcutLabel("newQuery");
   return (
     <div className="grid flex-1 place-items-center">
       <div className="flex flex-col items-center gap-3 text-muted-foreground">
@@ -100,7 +102,7 @@ function EmptyState() {
         <img src={logoDark} alt="Quervio" className="mb-4 hidden w-64 select-none dark:block" draggable={false} />
         <p>Select a server or database in the Object Explorer, then open a query.</p>
         <Button variant="outline" size="sm" disabled={!context} onClick={() => openQueryFromContext()}>
-          <Plus /> New query <span className="text-xs text-muted-foreground">Ctrl+N</span>
+          <Plus /> New query <span className="text-xs text-muted-foreground">{newQueryKey}</span>
         </Button>
       </div>
     </div>
@@ -226,6 +228,12 @@ function DatabaseSelector({ tab }: { tab: QueryTab }) {
 }
 
 function Toolbar({ tab }: { tab: QueryTab }) {
+  const keys = {
+    openFile: useShortcutLabel("openFile"),
+    save: useShortcutLabel("save"),
+    execute: useShortcutLabel("execute"),
+    cancel: useShortcutLabel("cancel"),
+  };
   const { execute, cancel } = useQueries();
   const executing = tab.status === "executing";
   const production = useConnections(
@@ -233,14 +241,14 @@ function Toolbar({ tab }: { tab: QueryTab }) {
   );
   return (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
-      <Button size="icon" variant="ghost" className="size-7" title="Open script (Ctrl+O)" onClick={() => void openFile()}>
+      <Button size="icon" variant="ghost" className="size-7" title={`Open script (${keys.openFile})`} onClick={() => void openFile()}>
         <FolderOpen />
       </Button>
       <Button
         size="icon"
         variant="ghost"
         className="size-7"
-        title="Save script (Ctrl+S)"
+        title={`Save script (${keys.save})`}
         onClick={() => void saveTab(tab.id)}
       >
         <Save />
@@ -251,7 +259,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
         variant="ghost"
         className="h-7 text-emerald-500 hover:text-emerald-400"
         disabled={tab.status !== "ready"}
-        title="Execute (F5)"
+        title={`Execute (${keys.execute})`}
         onClick={() => {
           const script = currentScript();
           if (script) void execute(tab.id, script);
@@ -265,7 +273,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
         variant="ghost"
         className="h-7 text-red-500 hover:text-red-400"
         disabled={!executing}
-        title="Cancel executing query (Alt+Break)"
+        title={`Cancel executing query (${keys.cancel})`}
         onClick={() => void cancel(tab.id)}
       >
         <Square className="fill-current" /> Cancel

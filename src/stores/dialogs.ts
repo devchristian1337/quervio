@@ -79,3 +79,18 @@ export const useDialogs = create<DialogsState>((set, get) => ({
     );
   },
 }));
+
+export type SettingsSection = "appearance" | "editor" | "results" | "query" | "shortcuts" | "about";
+
+/** The Settings dialog, opened from the Object Explorer, Ctrl+, or the About link. */
+export const useSettingsDialog = create<{
+  open: boolean;
+  section: SettingsSection;
+  show: (section?: SettingsSection) => void;
+  hide: () => void;
+}>()((set) => ({
+  open: false,
+  section: "appearance",
+  show: (section) => set((s) => ({ open: true, section: section ?? s.section })),
+  hide: () => set({ open: false }),
+}));
