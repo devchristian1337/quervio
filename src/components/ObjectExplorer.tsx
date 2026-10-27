@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   ChevronRight,
   Columns3,
@@ -38,7 +38,7 @@ import { contextOf, isFilterable, serverKey, useExplorer, type TreeNode } from "
 import { useQueries } from "@/stores/queries";
 import { openQueryFromContext } from "@/lib/shortcuts";
 import { useShortcutLabel } from "@/lib/commands";
-import { useSettingsDialog } from "@/stores/dialogs";
+import { useConnectDialog, useSettingsDialog } from "@/stores/dialogs";
 
 type Row =
   | { type: "node"; node: TreeNode; depth: number; parent: string | null }
@@ -52,10 +52,7 @@ export function ObjectExplorer() {
   const explorer = useExplorer();
   const settingsKey = useShortcutLabel("settings");
   const newQueryKey = useShortcutLabel("newQuery");
-  const [dialog, setDialog] = useState<{ open: boolean; editing: SavedConnection | null }>({
-    open: false,
-    editing: null,
-  });
+  const dialog = useConnectDialog();
   const treeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -166,7 +163,7 @@ export function ObjectExplorer() {
   return (
     <section className="flex h-full flex-col bg-panel">
       <header className="flex h-9 shrink-0 items-center justify-between border-b px-3">
-        <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Object Explorer</h2>
+        <h2 className="text-xs font-medium text-muted-foreground">Object Explorer</h2>
         <div className="flex items-center">
         <Button
           variant="ghost"
@@ -183,7 +180,7 @@ export function ObjectExplorer() {
           size="icon"
           className="size-7"
           title="New connection"
-          onClick={() => setDialog({ open: true, editing: null })}
+          onClick={() => dialog.show()}
         >
           <Plus />
         </Button>
@@ -202,7 +199,7 @@ export function ObjectExplorer() {
         {loaded && connections.length === 0 && (
           <div className="flex flex-col items-start gap-2 p-3 text-muted-foreground">
             <p>No saved connections yet.</p>
-            <Button size="sm" variant="outline" onClick={() => setDialog({ open: true, editing: null })}>
+            <Button size="sm" variant="outline" onClick={() => dialog.show()}>
               <Plus /> New connection
             </Button>
           </div>
@@ -279,7 +276,6 @@ export function ObjectExplorer() {
                   className={cn(
                     "group flex h-6 cursor-default items-center gap-1 pr-2 whitespace-nowrap",
                     selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
-                    connection && `border-l-2 ${ENVIRONMENTS[connection.environment].bar}`,
                   )}
                   onMouseDown={() => {
                     explorer.select(node.key);
@@ -295,19 +291,20 @@ export function ObjectExplorer() {
                   >
                     <ChevronRight className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
                   </button>
-                  <NodeIcon node={node} />
+                  {connection ? (
+                    <span className="grid size-3.5 shrink-0 place-items-center">
+                      <span className={cn("size-2 rounded-full", ENVIRONMENTS[connection.environment].dot)} />
+                    </span>
+                  ) : (
+                    <NodeIcon node={node} />
+                  )}
                   <span className="shrink-0">{node.label}</span>
                   {node.detail && (
                     <span className="min-w-0 truncate text-muted-foreground">({node.detail})</span>
                   )}
                   {connection && (
-                    <span
-                      className={cn(
-                        "ml-auto pl-2 text-[10px] font-semibold tracking-wider",
-                        ENVIRONMENTS[connection.environment].text,
-                      )}
-                    >
-                      {ENVIRONMENTS[connection.environment].badge}
+                    <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground">
+                      {ENVIRONMENTS[connection.environment].label}
                     </span>
                   )}
                   {isFilterable(node.kind) && expanded && explorer.filters[node.key] === undefined && (
@@ -358,7 +355,7 @@ export function ObjectExplorer() {
                 {connection && (
                   <>
                     <ContextMenuSeparator />
-                    <ContextMenuItem onSelect={() => setDialog({ open: true, editing: connection })}>
+                    <ContextMenuItem onSelect={() => dialog.show(connection)}>
                       Edit connection…
                     </ContextMenuItem>
                     <ContextMenuItem disabled={!info} onSelect={() => void explorer.disconnect(connection.id)}>
@@ -379,7 +376,7 @@ export function ObjectExplorer() {
       <ConnectDialog
         open={dialog.open}
         editing={dialog.editing}
-        onOpenChange={(open) => setDialog((d) => ({ ...d, open }))}
+        onOpenChange={dialog.setOpen}
         onSaved={(saved) => {
           const node: TreeNode = {
             key: serverKey(saved.id),

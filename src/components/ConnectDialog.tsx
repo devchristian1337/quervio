@@ -262,7 +262,7 @@ function TestResult({ state }: { state: TestState }) {
   }
   if (state.status === "ok") {
     return (
-      <p className="flex items-center gap-2 text-sm text-emerald-500">
+      <p className="flex items-center gap-2 text-sm text-foreground">
         <CheckCircle2 className="size-4 shrink-0" /> {state.text}
       </p>
     );

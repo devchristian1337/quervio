@@ -467,7 +467,7 @@ function ShortcutsSection() {
       </div>
       {groups.map((group) => (
         <div key={group} className="mb-6">
-          <h4 className="mb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">{group}</h4>
+          <h4 className="mb-1 text-xs font-medium text-muted-foreground">{group}</h4>
           {COMMANDS.filter((command) => command.group === group).map((command) => (
             <ShortcutRow key={command.id} command={command} onPreview={setPreview} />
           ))}
