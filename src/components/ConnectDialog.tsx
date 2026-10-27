@@ -224,7 +224,7 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
           </label>
 
           {test.status !== "idle" && <TestResult state={test} />}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p className="text-sm text-destructive select-text">{error}</p>}
 
           <DialogFooter>
             <Button
@@ -279,14 +279,14 @@ function TestResult({ state }: { state: TestState }) {
   }
   if (state.status === "ok") {
     return (
-      <p className="flex items-center gap-2 text-sm text-foreground">
+      <p className="flex items-center gap-2 text-sm text-foreground select-text">
         <CheckCircle2 className="size-4 shrink-0" /> {state.text}
       </p>
     );
   }
   if (state.status === "failed") {
     return (
-      <p className="flex items-start gap-2 text-sm text-destructive">
+      <p className="flex items-start gap-2 text-sm text-destructive select-text">
         <XCircle className="mt-0.5 size-4 shrink-0" /> {state.text}
       </p>
     );

@@ -217,7 +217,7 @@ export function ObjectExplorer() {
                 style={{ paddingLeft: row.depth * INDENT + 26 }}
                 className={cn(
                   "flex items-start gap-1.5 py-0.5 pr-2 text-xs",
-                  row.tone === "error" ? "text-destructive" : "text-muted-foreground",
+                  row.tone === "error" ? "text-destructive select-text" : "text-muted-foreground",
                 )}
               >
                 {row.tone === "loading" && <Loader2 className="mt-0.5 size-3 animate-spin" />}

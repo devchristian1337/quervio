@@ -273,7 +273,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
         </span>
       )}
       {tab.status === "disconnected" && tab.error && (
-        <span className="ml-2 truncate text-xs text-destructive" title={tab.error}>
+        <span className="ml-2 truncate text-xs text-destructive select-text" title={tab.error}>
           {tab.error}
         </span>
       )}
@@ -329,7 +329,7 @@ function Messages({ tab }: { tab: QueryTab }) {
   return (
     <ContextMenu onOpenChange={(open) => open && setSelection(window.getSelection()?.toString() ?? "")}>
       <ContextMenuTrigger asChild>
-        <div ref={list} className="min-h-full space-y-1 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+        <div ref={list} className="min-h-full space-y-1 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap select-text">
           {tab.messages.map((message, index) => {
             const { line } = message;
             return (

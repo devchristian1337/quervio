@@ -645,14 +645,14 @@ function AboutSection() {
         </div>
       </div>
       <Row label="Version">
-        <span className="font-mono text-sm">{versions?.app ?? "…"}</span>
+        <span className="font-mono text-sm select-text">{versions?.app ?? "…"}</span>
       </Row>
       <Row label="Tauri">
-        <span className="font-mono text-sm">{versions?.tauri ?? "…"}</span>
+        <span className="font-mono text-sm select-text">{versions?.tauri ?? "…"}</span>
       </Row>
       <Row label="Data folder" help="Saved connections, encrypted passwords, open tabs and settings.">
         <div className="flex max-w-80 items-center gap-1.5">
-          <span className="truncate font-mono text-xs" title={dataDir}>
+          <span className="truncate font-mono text-xs select-text" title={dataDir}>
             {dataDir || "—"}
           </span>
           <Button variant="ghost" size="icon" className="size-7" disabled={!dataDir} title="Copy path" onClick={() => void copyDataDir()}>
@@ -686,7 +686,7 @@ function AboutSection() {
               <span>{name}</span>
               <span className="font-mono text-xs text-muted-foreground">OFL-1.1</span>
             </summary>
-            <pre className="mt-2 max-h-56 overflow-auto font-mono text-xs whitespace-pre-wrap text-muted-foreground">{text}</pre>
+            <pre className="mt-2 max-h-56 overflow-auto font-mono text-xs whitespace-pre-wrap text-muted-foreground select-text">{text}</pre>
           </details>
         ))}
       </div>
