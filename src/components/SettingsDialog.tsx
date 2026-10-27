@@ -10,6 +10,7 @@ import {
   Info,
   Keyboard,
   Palette,
+  Plus,
   RotateCcw,
   Table2,
   Timer,
@@ -84,7 +85,7 @@ export function SettingsDialog() {
             <Button
               variant="ghost"
               size="sm"
-              className="w-full justify-start gap-2 text-xs text-muted-foreground"
+              className="w-full justify-start gap-2 px-2 font-normal text-muted-foreground has-[>svg]:px-2"
               onClick={() => {
                 reset();
                 toast.success("Settings reset to their defaults");
@@ -579,8 +580,11 @@ function ShortcutRow({ command, onPreview }: { command: Command; onPreview: (pre
         {keys.length === 0 && !recording && <span className="text-xs text-muted-foreground">None</span>}
         <Button
           variant={recording ? "default" : "ghost"}
-          size="sm"
-          className="h-7 px-2 text-xs"
+          size={recording ? "sm" : "icon"}
+          // The same 28 px square as the reset button beside it until it records.
+          className={recording ? "h-7 px-2 text-xs" : "size-7"}
+          title={recording ? undefined : `Add keys for ${command.label}`}
+          aria-label={recording ? undefined : `Add keys for ${command.label}`}
           onClick={() => {
             onPreview(
               recording
@@ -590,7 +594,7 @@ function ShortcutRow({ command, onPreview }: { command: Command; onPreview: (pre
             setRecording(!recording);
           }}
         >
-          {recording ? "Press keys…" : "+"}
+          {recording ? "Press keys…" : <Plus />}
         </Button>
         <Button
           variant="ghost"
