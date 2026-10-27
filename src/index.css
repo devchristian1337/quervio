@@ -166,10 +166,13 @@
     @apply border-border outline-ring/50;
     }
   /* Transparent so the Windows 11 Mica effect shows through, unless a
-     theme paints its own background (src/lib/themes.ts). */
+     theme paints its own background (src/lib/themes.ts). Interface text is not
+     selectable, as in a native app; fields and the editor still are, and the
+     text worth copying (messages, values, errors, paths) opts back in with
+     select-text. */
   html,
   body {
-    @apply text-foreground;
+    @apply text-foreground select-none;
     background: var(--app-background, transparent);
     }
   /* Panel groups size themselves with height: 100%, so the chain needs one. */
@@ -179,6 +182,13 @@
     @apply h-full overflow-hidden;
     }
 }
+/* Selected text in the theme's colour, like a selection in the SQL editor,
+   instead of the browser's blue. */
+::selection {
+  background-color: color-mix(in oklch, var(--primary) 35%, transparent);
+  color: inherit;
+}
+
 /* Thin, arrowless scrollbars in the app's colours instead of the Windows default. */
 ::-webkit-scrollbar {
   width: 10px;

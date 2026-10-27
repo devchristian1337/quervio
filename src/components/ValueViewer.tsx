@@ -71,7 +71,7 @@ export function ValueViewer({ tabId, set, row, column, columnName, onClose }: Pr
             {state.status === "ready" && state.clipped && " · value cut at 2 MB"}
           </DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-auto rounded border bg-muted/30 p-3">
+        <div className="min-h-0 flex-1 overflow-auto rounded border bg-muted/30 p-3 select-text">
           {state.status === "loading" && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
           {state.status === "error" && <p className="text-sm text-destructive">{state.error}</p>}
           {state.status === "ready" &&
