@@ -36,6 +36,14 @@ registerMonaco(monaco);
 
 registerEditorThemes(monaco.editor);
 
+// Monaco measures character widths once; the bundled JetBrains Mono may still
+// be loading then, which would put the cursor off its characters. Measure
+// again once the fonts are in.
+void Promise.all([
+  document.fonts.load('400 14px "JetBrains Mono"'),
+  document.fonts.load('700 14px "JetBrains Mono"'),
+]).then(() => monaco.editor.remeasureFonts());
+
 // Format Document (Shift+Alt+F) and Format Selection (Ctrl+K Ctrl+F). The
 // formatter is large, so it loads on first use. An edit is all or nothing,
 // and Ctrl+Z undoes it.
@@ -106,6 +114,7 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
             options={{
               fontFamily: options.fontFamily,
               fontSize: options.fontSize,
+              fontLigatures: options.ligatures,
               minimap: { enabled: options.minimap },
               wordWrap: options.wordWrap ? "on" : "off",
               lineNumbers: options.lineNumbers ? "on" : "off",

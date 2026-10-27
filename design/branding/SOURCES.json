@@ -1,0 +1,54 @@
+{
+  "assets": [
+    {
+      "file": "assets/quervio-q-prisma-v2.png",
+      "source": "Q Prisma v2 approved in the design conversation; copied without image alteration",
+      "sha256": "c14ffbcf604a73974be7b345aebd60df28a84b9e9a6e112ec49d7eeedb8d6aaf"
+    },
+    {
+      "file": "assets/quervio-q-prisma-v2-trasparente.png",
+      "source": "Q Prisma v2 approved in the design conversation; copied without image alteration",
+      "sha256": "43873c63aad347cf017ce313bddfea117ce8c3bbee22895ec726eec6a1c2a423"
+    },
+    {
+      "file": "fonts/InterVariable.woff2",
+      "source": "https://raw.githubusercontent.com/rsms/inter/master/docs/font-files/InterVariable.woff2",
+      "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3"
+    },
+    {
+      "file": "licenses/Inter-LICENSE.txt",
+      "source": "https://raw.githubusercontent.com/rsms/inter/master/LICENSE.txt",
+      "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+    },
+    {
+      "file": "fonts/JetBrainsMono-Regular.woff2",
+      "source": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Regular.woff2",
+      "sha256": "f1a7a03672cdd494ce0d5543fac6e4360fe22403c6de297fdc2e55a815f7baff"
+    },
+    {
+      "file": "fonts/JetBrainsMono-Italic.woff2",
+      "source": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Italic.woff2",
+      "sha256": "9f158b85eca345daeee01dfffa602709a905ea08b0cc60dbf6153cbbd97da08f"
+    },
+    {
+      "file": "fonts/JetBrainsMono-Bold.woff2",
+      "source": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Bold.woff2",
+      "sha256": "08863c7964612257a90bd821e3127dc5ccb0b5046f881673a1ade5809eb21d0f"
+    },
+    {
+      "file": "fonts/JetBrainsMono-BoldItalic.woff2",
+      "source": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-BoldItalic.woff2",
+      "sha256": "7a0a901712a0b6b94914ac49c86168b4a0af32e623c7835840338c36e7eceb78"
+    },
+    {
+      "file": "licenses/JetBrainsMono-OFL.txt",
+      "source": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/OFL.txt",
+      "sha256": "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697"
+    }
+  ],
+  "documentation": [
+    "https://v2.tauri.app/develop/icons/",
+    "https://rsms.me/inter/",
+    "https://www.jetbrains.com/lp/mono/"
+  ]
+}

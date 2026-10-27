@@ -5,12 +5,13 @@
 // The look follows the app theme: quiet headers with a sort arrow, the sorted
 // column tinted, numbers right-aligned, horizontal rules only, and a footer
 // with the row count. Sorting happens in Rust over every row.
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CompactSelection,
   DataEditor,
   GridCellKind,
   type DataEditorRef,
+  type DrawCellCallback,
   type DrawHeaderCallback,
   type GridCell,
   type GridColumn,
@@ -40,8 +41,42 @@ import type { ResultSetSummary } from "@/stores/queries";
 import { useSettings, type Density } from "@/stores/settings";
 
 const BLOCK = 200;
-const MONO = "'Cascadia Code', Consolas, monospace";
-const SANS = "'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif";
+// The app's bundled faces (src/index.css): Inter, or JetBrains Mono on request.
+const MONO = "'JetBrains Mono', 'Cascadia Code', Consolas, monospace";
+const SANS = "Inter, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif";
+
+/** Whether the bundled fonts are in, so the canvas draws with them and not a fallback. */
+function useFontsReady() {
+  const [ready, setReady] = useState(() => document.fonts.check('13px "Inter"'));
+  useEffect(() => {
+    if (ready) return;
+    let live = true;
+    void Promise.all([document.fonts.load('400 13px "Inter"'), document.fonts.load('500 12px "Inter"')]).then(
+      () => live && setReady(true),
+    );
+    return () => {
+      live = false;
+    };
+  }, [ready]);
+  return ready;
+}
+
+/**
+ * Draws a number right-aligned with tabular figures: every digit takes the
+ * width of the widest one, so digits line up down the column. The canvas has
+ * no font-variant-numeric, and Inter's default digits are proportional.
+ */
+function drawTabular(ctx: CanvasRenderingContext2D, text: string, right: number, middle: number) {
+  const digit = Math.max(...[..."0123456789"].map((d) => ctx.measureText(d).width));
+  const widths = [...text].map((c) => (c >= "0" && c <= "9" ? digit : ctx.measureText(c).width));
+  let x = right - widths.reduce((sum, w) => sum + w, 0);
+  [...text].forEach((c, i) => {
+    const w = widths[i];
+    const own = c >= "0" && c <= "9" ? ctx.measureText(c).width : w;
+    ctx.fillText(c, x + (w - own) / 2, middle);
+    x += w;
+  });
+}
 /** Width of the sort arrow's click target at the right of a header. */
 const SORT_ZONE = 28;
 
@@ -147,6 +182,7 @@ export default function ResultGrid({ tabId, set }: Props) {
   const theme = useTheme();
   const { density, monospace } = useSettings((s) => s.settings.results);
   const p = theme.palette;
+  const fontsReady = useFontsReady();
   const gridRef = useRef<DataEditorRef>(null);
   const blocks = useRef(new Map<number, Cell[][]>());
   const pending = useRef(new Set<number>());
@@ -157,7 +193,11 @@ export default function ResultGrid({ tabId, set }: Props) {
   // Bumped after a sort so every cell is read again in the new order.
   const [order, setOrder] = useState(0);
 
-  const base = useMemo(() => gridTheme(p, theme.kind, density, monospace), [p, theme.kind, density, monospace]);
+  // fontsReady is a dependency on purpose: a new theme object redraws the canvas in the loaded font.
+  const base = useMemo(
+    () => gridTheme(p, theme.kind, density, monospace),
+    [p, theme.kind, density, monospace, fontsReady],
+  );
   const sortedTint = useMemo(() => mix(p.accent, p.bg, theme.kind === "dark" ? 0.09 : 0.06), [p, theme.kind]);
   const nullTheme = useMemo<Partial<GridTheme>>(
     () => ({ textDark: withAlpha(p.muted, 0.75), baseFontStyle: `italic ${base.baseFontStyle}` }),
@@ -269,6 +309,25 @@ export default function ResultGrid({ tabId, set }: Props) {
     }
   }
 
+  const drawCell = useCallback<DrawCellCallback>(
+    (args, drawContent) => {
+      const { ctx, cell, rect, theme: cellTheme, col } = args;
+      const text = cell.kind === GridCellKind.Text ? cell.displayData : "";
+      // Numbers only: NULL keeps its italic, other columns their normal drawing.
+      if (set.kinds[col] !== "number" || cell.kind !== GridCellKind.Text || cell.data === "NULL" || monospace) {
+        drawContent();
+        return;
+      }
+      ctx.save();
+      ctx.font = `${cellTheme.baseFontStyle} ${cellTheme.fontFamily}`;
+      ctx.fillStyle = cellTheme.textDark;
+      ctx.textBaseline = "middle";
+      drawTabular(ctx, text, rect.x + rect.width - cellTheme.cellHorizontalPadding, rect.y + rect.height / 2);
+      ctx.restore();
+    },
+    [set.kinds, monospace],
+  );
+
   const drawHeader = useCallback<DrawHeaderCallback>(
     (args, drawContent) => {
       drawContent();
@@ -352,6 +411,7 @@ export default function ResultGrid({ tabId, set }: Props) {
               theme={base}
               verticalBorder={false}
               drawHeader={drawHeader}
+              drawCell={drawCell}
               gridSelection={selection}
               onGridSelectionChange={setSelection}
               keybindings={{ copy: false, paste: false, search: false }}

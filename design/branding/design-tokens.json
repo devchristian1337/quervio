@@ -1,0 +1,25 @@
+{
+  "product": "Quervio",
+  "stack": ["Tauri 2", "React", "Vite"],
+  "integration": "Map these semantic roles to the existing theme system. Preserve the selected UI component library and existing light themes.",
+  "dark": {
+    "editorBackground": "#1E1E24",
+    "surfaceBackground": "#2A2A35",
+    "textPrimary": "#F3F2F7",
+    "accentPrimary": "#B4ADEA",
+    "accentSecondary": "#B7FDFE",
+    "textOnAccent": "#1E1E24"
+  },
+  "typography": {
+    "ui": {"family": "Inter", "sizeReferencePx": [13, 14], "weight": 400, "emphasisWeights": [500, 600]},
+    "editor": {"family": "JetBrains Mono", "sizeReferencePx": [14, 15], "weight": 400, "ligaturesDefault": false},
+    "results": {"family": "Inter", "sizeReferencePx": [13, 14], "numericVariant": "tabular-nums"},
+    "preferences": "Preserve explicit user font-size, zoom and editor preferences. Reference sizes are starting points, not forced overrides."
+  },
+  "icon": {
+    "name": "Q Prisma v2",
+    "transparent": "assets/quervio-q-prisma-v2-trasparente.png",
+    "graphite": "assets/quervio-q-prisma-v2.png",
+    "preserve": ["upright aligned shape", "aspect ratio", "lavender/aqua/violet gradients", "transparent central counter"]
+  }
+}

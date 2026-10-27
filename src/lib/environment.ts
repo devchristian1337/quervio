@@ -10,7 +10,7 @@ export const ENVIRONMENTS: Record<
     badge: "PROD",
     dot: "bg-red-500",
     bar: "border-l-red-500",
-    text: "text-red-500",
+    text: "text-red-500 dark:text-red-400",
   },
   test: {
     label: "Test",

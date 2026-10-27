@@ -32,8 +32,10 @@ export interface Palette {
   border: string;
   /** Buttons, focus, the sorted column, the cursor. */
   accent: string;
-  /** Text on the accent colour. */
+  /** Text on the accent colour (and on the secondary accent). */
   accentFg: string;
+  /** Second brand colour: activity, the editor cursor, matching brackets. */
+  accent2?: string;
   selection: string;
   lineHighlight: string;
   destructive: string;
@@ -86,21 +88,24 @@ export const THEMES: Theme[] = [
     },
   },
   {
+    // Quervio's own dark palette (design/branding/design-tokens.json).
+    // Muted text and the error red are derived for at least 4.5:1 contrast on
+    // both the editor background and the panels.
     id: "dark",
-    name: "Dark",
+    name: "Quervio Dark",
     kind: "dark",
-    mica: true,
     palette: {
-      bg: "#17161c",
-      panel: "#1f1e25",
-      fg: "#e6e6ea",
-      muted: "#a1a1aa",
-      border: "#ffffff1a",
-      accent: "#7c8cff",
-      accentFg: "#ffffff",
-      selection: "#264f78",
-      lineHighlight: "#ffffff0d",
-      destructive: "#f87171",
+      bg: "#1E1E24",
+      panel: "#2A2A35",
+      fg: "#F3F2F7",
+      muted: "#ABA9BC",
+      border: "#3A3A48",
+      accent: "#B4ADEA",
+      accentFg: "#1E1E24",
+      accent2: "#B7FDFE",
+      selection: "#B4ADEA40",
+      lineHighlight: "#2A2A3599",
+      destructive: "#FF7A8A",
       syntax: {
         keyword: "#569cd6",
         string: "#ce9178",
@@ -455,6 +460,8 @@ function cssVariables({ palette: p, kind }: Theme): Record<string, string> {
   const soft = mix(p.fg, kind === "dark" ? 10 : 7, p.bg);
   return {
     "--app-background": p.bg,
+    "--panel": p.panel,
+    "--brand-secondary": p.accent2 ?? p.accent,
     "--background": p.bg,
     "--foreground": p.fg,
     "--card": p.panel,
@@ -540,7 +547,7 @@ export function registerEditorThemes(editor: EditorApi) {
         "editor.lineHighlightBorder": "#00000000",
         "editor.selectionBackground": p.selection,
         "editor.inactiveSelectionBackground": p.selection,
-        "editorCursor.foreground": p.accent,
+        "editorCursor.foreground": p.accent2 ?? p.accent,
         "editorLineNumber.foreground": p.muted,
         "editorLineNumber.activeForeground": p.fg,
         "editorWidget.background": p.panel,
@@ -549,7 +556,7 @@ export function registerEditorThemes(editor: EditorApi) {
         "editorSuggestWidget.border": p.border,
         "editorSuggestWidget.selectedBackground": p.selection,
         "editorIndentGuide.background1": p.border,
-        "editorBracketMatch.border": p.muted,
+        "editorBracketMatch.border": p.accent2 ?? p.muted,
       },
     });
   }
