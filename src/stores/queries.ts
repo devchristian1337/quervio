@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { api, displayName, errorMessage, type ServerInfo } from "@/lib/api";
 import { useConnections } from "@/stores/connections";
 import { useDialogs } from "@/stores/dialogs";
-import type { ExecutionEvent, Outcome } from "@/lib/execution";
+import type { ColumnKind, ExecutionEvent, Outcome } from "@/lib/execution";
 
 export interface MessageLine {
   text: string;
@@ -18,6 +18,7 @@ export interface MessageLine {
 export interface ResultSetSummary {
   index: number;
   columns: string[];
+  kinds: ColumnKind[];
   /** Rows read so far; grows while the Result Set streams. */
   rows: number;
   done: boolean;
@@ -239,7 +240,13 @@ export const useQueries = create<QueriesState>((set, get) => {
             patch(id, (t) => ({
               resultSets: [
                 ...t.resultSets,
-                { index: event.index, columns: event.columns.map((c) => c.name), rows: 0, done: false },
+                {
+                  index: event.index,
+                  columns: event.columns.map((c) => c.name),
+                  kinds: event.columns.map((c) => c.kind),
+                  rows: 0,
+                  done: false,
+                },
               ],
               view: "results",
             }));

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use quervio_core::execution::{CancelToken, ExecutionEvent, Outcome};
-use quervio_core::results::{CellValue, ResultLimits, SharedResults};
+use quervio_core::results::{CellValue, ResultLimits, SharedResults, SortDirection};
 use quervio_core::session::{ServerInfo, Session};
 use tauri::State;
 use tauri::ipc::{Channel, Response};
@@ -158,6 +158,25 @@ pub fn result_rows(
     state
         .with_set(&tab_id, set, |set| set.window(start, count, PREVIEW_CHARS))
         .map(Response::new)
+}
+
+/// Sorts a Result Set by one column, or restores the Server's order with
+/// `None`. The grid then reads its rows again.
+#[tauri::command]
+pub fn result_sort(
+    state: State<'_, QueryState>,
+    tab_id: String,
+    set: usize,
+    column: Option<usize>,
+    direction: SortDirection,
+) -> CommandResult<()> {
+    let results = state.results(&tab_id);
+    let mut sets = results.write().unwrap();
+    let set = sets
+        .get_mut(set)
+        .ok_or("that result set no longer exists")?;
+    set.sort(column.map(|column| (column, direction)));
+    Ok(())
 }
 
 /// The full text of one cell, for the value viewer.

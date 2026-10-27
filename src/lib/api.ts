@@ -3,6 +3,8 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { ExecutionEvent, Outcome } from "@/lib/execution";
 
+export type SortDirection = "ascending" | "descending";
+
 export type Environment = "production" | "test" | "development";
 export type Encrypt = "mandatory" | "optional" | "strict";
 
@@ -67,6 +69,8 @@ export const api = {
 
   resultRows: (tabId: string, set: number, start: number, count: number) =>
     invoke<ArrayBuffer>("result_rows", { tabId, set, start, count }),
+  resultSort: (tabId: string, set: number, column: number | null, direction: SortDirection) =>
+    invoke<void>("result_sort", { tabId, set, column, direction }),
   resultCell: (tabId: string, set: number, row: number, column: number) =>
     invoke<{ text: string | null; clipped: boolean } | null>("result_cell", { tabId, set, row, column }),
   resultCopy: (
