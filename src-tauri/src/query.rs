@@ -108,6 +108,7 @@ pub async fn query_execute(
     tab_id: String,
     script: String,
     base_line: u32,
+    options: ExecuteOptions,
     on_event: Channel<ExecutionEvent>,
 ) -> CommandResult<Outcome> {
     let session = state.session(&tab_id).await?;
@@ -120,6 +121,15 @@ pub async fn query_execute(
         }
         running.insert(tab_id.clone(), cancel.clone());
     }
+    // The execution timeout cancels the query, as SSMS does.
+    let timer = (options.timeout_seconds > 0).then(|| {
+        let cancel = cancel.clone();
+        let seconds = options.timeout_seconds;
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(seconds)).await;
+            cancel.time_out();
+        })
+    });
     let outcome = session
         .lock()
         .await
@@ -128,15 +138,46 @@ pub async fn query_execute(
             base_line,
             &cancel,
             &results,
-            ResultLimits::default(),
+            options.limits(),
             |event| {
                 // The tab may have been closed meanwhile; nothing to deliver to.
                 let _ = on_event.send(event);
             },
         )
         .await;
+    if let Some(timer) = timer {
+        timer.abort();
+    }
     state.running.lock().unwrap().remove(&tab_id);
     Ok(outcome)
+}
+
+/// Per-Execution options from the user's settings.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecuteOptions {
+    /// Seconds before the query is cancelled; 0 waits forever.
+    timeout_seconds: u64,
+    max_rows: usize,
+    max_cell_bytes: usize,
+}
+
+impl ExecuteOptions {
+    fn limits(&self) -> ResultLimits {
+        let defaults = ResultLimits::default();
+        ResultLimits {
+            max_rows: if self.max_rows == 0 {
+                defaults.max_rows
+            } else {
+                self.max_rows
+            },
+            max_cell_bytes: if self.max_cell_bytes == 0 {
+                defaults.max_cell_bytes
+            } else {
+                self.max_cell_bytes
+            },
+        }
+    }
 }
 
 #[tauri::command]

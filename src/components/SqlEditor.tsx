@@ -42,7 +42,7 @@ registerEditorThemes(monaco.editor);
 async function formatEdits(text: string, range: monaco.IRange): Promise<monaco.languages.TextEdit[]> {
   const { formatScript, FormatError } = await import("@/lib/format-sql");
   try {
-    const formatted = formatScript(text);
+    const formatted = formatScript(text, useSettings.getState().settings.formatting);
     return formatted === text ? [] : [{ range, text: formatted }];
   } catch (error) {
     toast.error("Could not format", {

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api, displayName, errorMessage, type ServerInfo } from "@/lib/api";
 import { useConnections } from "@/stores/connections";
 import { useDialogs } from "@/stores/dialogs";
+import { executeOptions, useSettings } from "@/stores/settings";
 import type { ColumnKind, ExecutionEvent, Outcome } from "@/lib/execution";
 
 export interface MessageLine {
@@ -200,7 +201,7 @@ export const useQueries = create<QueriesState>((set, get) => {
 
       // On Production, Destructive Statements need an explicit go-ahead.
       const connection = useConnections.getState().connections.find((c) => c.id === tab.connectionId);
-      if (connection?.environment === "production") {
+      if (connection?.environment === "production" && useSettings.getState().settings.query.confirmDestructive) {
         const check = await api.checkScript(script.text, script.baseLine);
         if (check.findings.length > 0 || check.uncertain) {
           const run = await useDialogs.getState().confirmDestructive({
@@ -279,7 +280,7 @@ export const useQueries = create<QueriesState>((set, get) => {
       };
 
       try {
-        await api.executeQuery(id, script.text, script.baseLine, channel);
+        await api.executeQuery(id, script.text, script.baseLine, executeOptions(), channel);
       } catch (error) {
         patch(id, (t) => ({
           messages: [...t.messages, { text: errorMessage(error), isError: true }],

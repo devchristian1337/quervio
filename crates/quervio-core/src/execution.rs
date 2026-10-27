@@ -19,7 +19,10 @@ use crate::session::{Session, int};
 
 /// Cancels a running Execution from another task.
 #[derive(Clone, Default)]
-pub struct CancelToken(Arc<CancelHandle>);
+pub struct CancelToken {
+    handle: Arc<CancelHandle>,
+    timed_out: Arc<std::sync::atomic::AtomicBool>,
+}
 
 impl CancelToken {
     pub fn new() -> Self {
@@ -27,7 +30,22 @@ impl CancelToken {
     }
 
     pub fn cancel(&self) {
-        self.0.cancel();
+        self.handle.cancel();
+    }
+
+    /// Cancels because the execution timeout expired, which the Messages say.
+    pub fn time_out(&self) {
+        self.timed_out
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.handle.cancel();
+    }
+
+    fn message(&self) -> &'static str {
+        if self.timed_out.load(std::sync::atomic::Ordering::SeqCst) {
+            TIMED_OUT
+        } else {
+            CANCELLED
+        }
     }
 }
 
@@ -77,6 +95,8 @@ pub enum ExecutionEvent {
 }
 
 const CANCELLED: &str = "Query was cancelled by user.";
+const TIMED_OUT: &str =
+    "Execution Timeout Expired. The query ran longer than the timeout set in Settings > Query.";
 
 /// How often streaming Result Sets report their row count.
 const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
@@ -107,7 +127,7 @@ impl Session {
                     first_line: line_offset,
                 });
                 let options = ExecuteOptions {
-                    cancel: Some(&cancel.0),
+                    cancel: Some(&cancel.handle),
                     on_error: BatchErrorMode::Continue,
                     ..Default::default()
                 };
@@ -203,7 +223,7 @@ impl Session {
                         Err(DriverError::OperationCancelledError(_)) => {
                             let _ = self.client.close_query().await;
                             self.drain_messages(&mut emit);
-                            emit(message(CANCELLED, false));
+                            emit(message(cancel.message(), cancel.message() == TIMED_OUT));
                             outcome = Outcome::Cancelled;
                             break 'batches;
                         }
