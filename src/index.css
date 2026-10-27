@@ -201,3 +201,36 @@
   border-width: 2px;
   background-color: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
 }
+
+/* A lit key on the Settings › Shortcuts keyboard (components/ui/glowing-keyboard.tsx):
+   its border and glow take the key's text colour, the theme's primary. */
+.glowing-key {
+  border-color: currentColor !important;
+  box-shadow: 0 0 15px transparent;
+  animation: glowing-key 1000ms linear forwards;
+}
+@keyframes glowing-key {
+  to {
+    box-shadow: 0 0 20px currentColor;
+  }
+}
+.blur-in {
+  animation: blur-in 400ms ease-in-out forwards;
+}
+@keyframes blur-in {
+  from {
+    filter: blur(1px);
+  }
+  to {
+    filter: blur(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .glowing-key,
+  .blur-in {
+    animation: none;
+  }
+  .glowing-key {
+    box-shadow: 0 0 20px currentColor;
+  }
+}

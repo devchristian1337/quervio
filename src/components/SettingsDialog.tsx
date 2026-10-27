@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { GlowingKeyboard } from "@/components/ui/glowing-keyboard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -421,9 +422,17 @@ function QuerySection() {
 
 // ─── Shortcuts ──────────────────────────────────────────────────────────────
 
+/** What the keyboard lights: a shortcut, or the keys held while recording one. */
+interface Preview {
+  shortcut: string;
+  command: string;
+  recording?: boolean;
+}
+
 function ShortcutsSection() {
   const shortcuts = useSettings((s) => s.settings.shortcuts);
   const resetShortcuts = useSettings((s) => s.resetShortcuts);
+  const [preview, setPreview] = useState<Preview | null>(null);
   const groups = [...new Set(COMMANDS.map((command) => command.group))];
   return (
     <>
@@ -442,11 +451,25 @@ function ShortcutsSection() {
           <RotateCcw /> Reset all
         </Button>
       </div>
+      {/* Stays in view while the list scrolls, so every row can light it. */}
+      <div className="sticky -top-6 z-10 -mx-8 mb-4 bg-background px-8 pt-6 pb-3 -mt-6">
+        <GlowingKeyboard highlight={preview?.shortcut.split("+") ?? []} />
+        <p className="mt-2 h-5 text-xs text-muted-foreground">
+          {preview ? (
+            <>
+              <span className="font-mono text-foreground">{preview.shortcut || "…"}</span> · {preview.command}
+              {preview.recording && " (recording)"}
+            </>
+          ) : (
+            "Point at a command to see its keys."
+          )}
+        </p>
+      </div>
       {groups.map((group) => (
         <div key={group} className="mb-6">
           <h4 className="mb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">{group}</h4>
           {COMMANDS.filter((command) => command.group === group).map((command) => (
-            <ShortcutRow key={command.id} command={command} />
+            <ShortcutRow key={command.id} command={command} onPreview={setPreview} />
           ))}
         </div>
       ))}
@@ -454,7 +477,12 @@ function ShortcutsSection() {
   );
 }
 
-function ShortcutRow({ command }: { command: Command }) {
+/** Ctrl, Shift and Alt as held during a key event, in shortcut order. */
+function heldModifiers(event: KeyboardEvent) {
+  return [event.ctrlKey && "Ctrl", event.shiftKey && "Shift", event.altKey && "Alt"].filter(Boolean).join("+");
+}
+
+function ShortcutRow({ command, onPreview }: { command: Command; onPreview: (preview: Preview | null) => void }) {
   const shortcuts = useSettings((s) => s.settings.shortcuts);
   const setShortcut = useSettings((s) => s.setShortcut);
   const [recording, setRecording] = useState(false);
@@ -469,11 +497,16 @@ function ShortcutRow({ command }: { command: Command }) {
       event.stopPropagation();
       if (event.key === "Escape") {
         setRecording(false);
+        onPreview(null);
         return;
       }
       const shortcut = shortcutOf(event);
-      if (!shortcut) return;
+      if (!shortcut) {
+        onPreview({ shortcut: heldModifiers(event), command: command.label, recording: true });
+        return;
+      }
       setRecording(false);
+      onPreview({ shortcut, command: command.label });
       if (keys.includes(shortcut)) return;
       // A combination does one thing: take it from the command that had it.
       const other = commandFor(shortcut);
@@ -484,20 +517,37 @@ function ShortcutRow({ command }: { command: Command }) {
       }
       setShortcut(command.id, [...keys, shortcut]);
     };
+    // Letting go of a modifier unlights it.
+    const onKeyUp = (event: KeyboardEvent) =>
+      onPreview({ shortcut: heldModifiers(event), command: command.label, recording: true });
     // Capture, so the dialog and the global shortcuts never see these keys.
     window.addEventListener("keydown", onKeyDown, { capture: true });
+    window.addEventListener("keyup", onKeyUp, { capture: true });
     return () => {
       window.removeEventListener("keydown", onKeyDown, { capture: true });
+      window.removeEventListener("keyup", onKeyUp, { capture: true });
       pauseShortcuts(false);
     };
-  }, [recording, keys, command, setShortcut]);
+  }, [recording, keys, command, setShortcut, onPreview]);
+
+  const show = (shortcut: string | undefined) =>
+    !recording && onPreview(shortcut ? { shortcut, command: command.label } : null);
 
   return (
-    <div className="flex min-h-11 items-center justify-between gap-4 border-b py-1.5 last:border-b-0">
+    <div
+      className="flex min-h-11 items-center justify-between gap-4 border-b py-1.5 last:border-b-0"
+      onMouseEnter={() => show(keys[0])}
+      onMouseLeave={() => show(undefined)}
+    >
       <span className="text-sm">{command.label}</span>
       <div className="flex flex-wrap items-center justify-end gap-1.5">
         {keys.map((key) => (
-          <span key={key} className="group inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-0.5 font-mono text-xs">
+          <span
+            key={key}
+            className="group inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-0.5 font-mono text-xs"
+            onMouseEnter={() => show(key)}
+            onMouseLeave={() => show(keys[0])}
+          >
             {key}
             <button
               type="button"
@@ -514,7 +564,14 @@ function ShortcutRow({ command }: { command: Command }) {
           variant={recording ? "default" : "ghost"}
           size="sm"
           className="h-7 px-2 text-xs"
-          onClick={() => setRecording((value) => !value)}
+          onClick={() => {
+            onPreview(
+              recording
+                ? keys[0] ? { shortcut: keys[0], command: command.label } : null
+                : { shortcut: "", command: command.label, recording: true },
+            );
+            setRecording(!recording);
+          }}
         >
           {recording ? "Press keys…" : "+"}
         </Button>
