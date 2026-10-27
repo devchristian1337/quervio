@@ -1,5 +1,5 @@
 // Loaded lazily: importing it pulls in Monaco.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { Play, WandSparkles } from "lucide-react";
 import {
@@ -30,7 +30,7 @@ import { useQueries } from "@/stores/queries";
 import { useShortcutLabel } from "@/lib/commands";
 import { editorThemeName, registerEditorThemes } from "@/lib/themes";
 import { useTheme } from "@/lib/use-theme";
-import { useSettings } from "@/stores/settings";
+import { EDITOR_FONT_SIZE, useSettings } from "@/stores/settings";
 
 registerMonaco(monaco);
 
@@ -70,6 +70,33 @@ monaco.languages.registerDocumentRangeFormattingEditProvider("sql", {
   },
 });
 
+/**
+ * Ctrl+wheel zooms the editor: it changes the font size, the one in Settings,
+ * so it is kept. Captured before Monaco, which would scroll instead. A mouse
+ * notch is one step; a touchpad pinch sends small deltas, added up to a step.
+ */
+function zoomOnCtrlWheel(node: HTMLElement) {
+  let pending = 0;
+  const onWheel = (event: WheelEvent) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const delta = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? event.deltaY : event.deltaY * 40;
+    if (Math.abs(delta) >= 50) pending = Math.sign(delta);
+    else if (Math.sign(delta) !== Math.sign(pending)) pending = delta / 50;
+    else pending += delta / 50;
+    const steps = Math.trunc(pending);
+    if (!steps) return;
+    pending -= steps;
+    const { settings, update } = useSettings.getState();
+    // Wheel up makes the text bigger.
+    const fontSize = Math.min(EDITOR_FONT_SIZE.max, Math.max(EDITOR_FONT_SIZE.min, settings.editor.fontSize - steps));
+    if (fontSize !== settings.editor.fontSize) update("editor", { fontSize });
+  };
+  node.addEventListener("wheel", onWheel, { capture: true, passive: false });
+  return () => node.removeEventListener("wheel", onWheel, { capture: true });
+}
+
 function clipboard(action: () => Promise<void>) {
   return () =>
     void action().catch((error) => toast.error("Clipboard error", { description: errorMessage(error) }));
@@ -90,14 +117,17 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
   // Read when the menu opens, to disable Cut and Copy without a selection.
   const [selected, setSelected] = useState(false);
 
+  const container = useRef<HTMLDivElement>(null);
+
   useEffect(() => () => registerEditor(null), []);
+  useEffect(() => zoomOnCtrlWheel(container.current!), []);
 
   return (
     // The app's own menu instead of Monaco's, whose VS Code entries
     // (Command Palette, Change All Occurrences) do not belong here.
     <ContextMenu onOpenChange={(open) => open && setSelected(hasSelection())}>
       <ContextMenuTrigger asChild>
-        <div className="h-full">
+        <div ref={container} className="h-full">
           <Editor
             path={tabId}
             defaultLanguage="sql"

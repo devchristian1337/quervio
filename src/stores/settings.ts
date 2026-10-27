@@ -65,6 +65,9 @@ export const DEFAULT_SETTINGS: Settings = {
   shortcuts: {},
 };
 
+/** Bounds of the editor font size, in Settings and for Ctrl+wheel. */
+export const EDITOR_FONT_SIZE = { min: 9, max: 32 };
+
 type Section = Exclude<keyof Settings, "shortcuts" | "version">;
 
 interface SettingsState {
