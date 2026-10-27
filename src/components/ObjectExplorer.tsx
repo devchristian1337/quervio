@@ -194,7 +194,11 @@ export function ObjectExplorer() {
         // F5 here refreshes instead of executing (src/lib/shortcuts.ts).
         data-explorer
         onKeyDown={onKeyDown}
-        className="min-h-0 flex-1 overflow-auto py-1 outline-none select-none"
+        // Keyboard focus outlines the selected row, or the whole tree while nothing is selected.
+        className={cn(
+          "group/tree min-h-0 flex-1 overflow-auto py-1 outline-none select-none",
+          !selectedNode && "focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
+        )}
       >
         {loaded && connections.length === 0 && (
           <div className="flex flex-col items-start gap-2 p-3 text-muted-foreground">
@@ -275,7 +279,9 @@ export function ObjectExplorer() {
                   style={{ paddingLeft: depth * INDENT + 4 }}
                   className={cn(
                     "group flex h-6 cursor-default items-center gap-1 pr-2 whitespace-nowrap",
-                    selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+                    selected
+                      ? "bg-accent text-accent-foreground group-focus-visible/tree:outline-1 group-focus-visible/tree:-outline-offset-1 group-focus-visible/tree:outline-ring"
+                      : "hover:bg-accent/50",
                   )}
                   onMouseDown={() => {
                     explorer.select(node.key);
