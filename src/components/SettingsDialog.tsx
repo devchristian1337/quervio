@@ -29,7 +29,7 @@ import { THEMES, findTheme, type Theme, type ThemeId } from "@/lib/themes";
 import { useSystemDark } from "@/lib/use-theme";
 import { cn } from "@/lib/utils";
 import { useSettingsDialog, type SettingsSection } from "@/stores/dialogs";
-import { useSettings, type Density, type Indent } from "@/stores/settings";
+import { EDITOR_FONT_SIZE, useSettings, type Density, type Indent } from "@/stores/settings";
 // The app tile: Q Prisma v2 on its graphite ground, as on the desktop.
 import prismaTile from "@/assets/quervio-q-prisma-v2.png";
 import interLicence from "@/assets/fonts/Inter-LICENSE.txt?raw";
@@ -290,7 +290,7 @@ function EditorSection() {
         </Select>
       </Row>
       <Row label="Font size">
-        <NumberField value={editor.fontSize} min={9} max={32} suffix="px" onChange={(fontSize) => update("editor", { fontSize })} />
+        <NumberField value={editor.fontSize} min={EDITOR_FONT_SIZE.min} max={EDITOR_FONT_SIZE.max} suffix="px" onChange={(fontSize) => update("editor", { fontSize })} />
       </Row>
       <Row label="Tab size">
         <Select value={String(editor.tabSize)} onValueChange={(size) => update("editor", { tabSize: Number(size) })}>
