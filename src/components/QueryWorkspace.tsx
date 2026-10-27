@@ -116,7 +116,7 @@ function TabBar() {
               }
             }}
             className={cn(
-              "group flex h-full min-w-0 max-w-56 shrink-0 cursor-default items-center gap-2 border-r border-t-2 px-3",
+              "group flex h-full min-w-0 max-w-56 shrink-0 cursor-pointer items-center gap-2 border-r border-t-2 px-3",
               selected ? "border-t-primary bg-background" : "border-t-transparent text-muted-foreground hover:bg-accent/40",
             )}
           >

@@ -215,7 +215,7 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
             </Field>
           </div>
 
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
             <Checkbox
               checked={draft.trustServerCertificate}
               onCheckedChange={(checked) => update({ trustServerCertificate: checked === true })}
