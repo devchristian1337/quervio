@@ -27,23 +27,14 @@ import { errorMessage } from "@/lib/api";
 import { toast } from "sonner";
 import { scheduleSave } from "@/lib/session-restore";
 import { useQueries } from "@/stores/queries";
+import { editorThemeName, registerEditorThemes } from "@/lib/themes";
+import { useTheme } from "@/lib/use-theme";
+import { useSettings } from "@/stores/settings";
 import { openQueryFromContext } from "@/lib/shortcuts";
 
 registerMonaco(monaco);
 
-// Transparent background so the Mica effect shows through, as elsewhere.
-monaco.editor.defineTheme("quervio-dark", {
-  base: "vs-dark",
-  inherit: true,
-  rules: [],
-  colors: { "editor.background": "#00000000", "editorGutter.background": "#00000000" },
-});
-monaco.editor.defineTheme("quervio-light", {
-  base: "vs",
-  inherit: true,
-  rules: [],
-  colors: { "editor.background": "#00000000", "editorGutter.background": "#00000000" },
-});
+registerEditorThemes(monaco.editor);
 
 // Format Document (Shift+Alt+F) and Format Selection (Ctrl+K Ctrl+F). The
 // formatter is large, so it loads on first use. An edit is all or nothing,
@@ -71,18 +62,6 @@ monaco.languages.registerDocumentRangeFormattingEditProvider("sql", {
   },
 });
 
-function useDarkMode() {
-  const query = "(prefers-color-scheme: dark)";
-  const [dark, setDark] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    const update = () => setDark(media.matches);
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  return dark;
-}
-
 function clipboard(action: () => Promise<void>) {
   return () =>
     void action().catch((error) => toast.error("Clipboard error", { description: errorMessage(error) }));
@@ -96,7 +75,8 @@ function execute() {
 }
 
 export default function SqlEditor({ tabId, initialText }: { tabId: string; initialText: string }) {
-  const dark = useDarkMode();
+  const theme = useTheme();
+  const options = useSettings((s) => s.settings.editor);
   // Read when the menu opens, to disable Cut and Copy without a selection.
   const [selected, setSelected] = useState(false);
 
@@ -120,15 +100,17 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
               useQueries.getState().setDirty(tabId, true);
               scheduleSave();
             }}
-            theme={dark ? "quervio-dark" : "quervio-light"}
+            theme={editorThemeName(theme)}
             options={{
-              fontFamily: "'Cascadia Code', Consolas, monospace",
-              fontSize: 13,
-              minimap: { enabled: false },
+              fontFamily: options.fontFamily,
+              fontSize: options.fontSize,
+              minimap: { enabled: options.minimap },
+              wordWrap: options.wordWrap ? "on" : "off",
+              lineNumbers: options.lineNumbers ? "on" : "off",
               scrollBeyondLastLine: false,
               renderLineHighlight: "line",
               automaticLayout: true,
-              tabSize: 4,
+              tabSize: options.tabSize,
               padding: { top: 8 },
               contextmenu: false,
             }}

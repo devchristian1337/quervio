@@ -6,12 +6,14 @@ import {
   TriangleAlertIcon,
 } from "lucide-react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { useTheme } from "@/lib/use-theme"
 
 const Toaster = ({ ...props }: ToasterProps) => {
+  // Light or dark as the app theme; the colours come from its variables.
+  const theme = useTheme()
   return (
     <Sonner
-      // Quervio follows the Windows light/dark setting.
-      theme="system"
+      theme={theme.kind}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

@@ -118,10 +118,12 @@
   * {
     @apply border-border outline-ring/50;
     }
-  /* Transparent so the Windows 11 Mica effect shows through. */
+  /* Transparent so the Windows 11 Mica effect shows through, unless a
+     theme paints its own background (src/lib/themes.ts). */
   html,
   body {
-    @apply bg-transparent text-foreground;
+    @apply text-foreground;
+    background: var(--app-background, transparent);
     }
   /* Panel groups size themselves with height: 100%, so the chain needs one. */
   html,

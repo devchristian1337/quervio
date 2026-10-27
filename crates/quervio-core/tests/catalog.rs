@@ -11,7 +11,7 @@ use quervio_core::scripting;
 use quervio_core::session::Session;
 
 mod common;
-use common::{password, run_scripts, saved_connection, TestDatabase};
+use common::{TestDatabase, password, run_scripts, saved_connection};
 
 const DATABASE: &str = "Quervio Tests]Catalog";
 
