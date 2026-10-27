@@ -12,7 +12,9 @@ use mssql_tds::error::Error as DriverError;
 use serde::Serialize;
 
 use crate::batch;
-use crate::results::{ResultColumn, ResultLimits, ResultSet as StoredResultSet, SharedResults};
+use crate::results::{
+    ColumnKind, ResultColumn, ResultLimits, ResultSet as StoredResultSet, SharedResults,
+};
 use crate::session::{Session, int};
 
 /// Cancels a running Execution from another task.
@@ -131,6 +133,7 @@ impl Session {
                                 .iter()
                                 .map(|column| ResultColumn {
                                     name: column.column_name.clone(),
+                                    kind: column_kind(column.data_type),
                                 })
                                 .collect();
                             results
@@ -292,5 +295,38 @@ fn message(text: &str, is_error: bool) -> ExecutionEvent {
         is_error,
         header: None,
         line: None,
+    }
+}
+
+/// How the grid sorts and aligns a column of this type.
+fn column_kind(data_type: mssql_tds::datatypes::sqldatatypes::TdsDataType) -> ColumnKind {
+    use mssql_tds::datatypes::sqldatatypes::TdsDataType as T;
+    match data_type {
+        T::Int1
+        | T::Int2
+        | T::Int4
+        | T::Int8
+        | T::IntN
+        | T::Bit
+        | T::BitN
+        | T::Decimal
+        | T::DecimalN
+        | T::Numeric
+        | T::NumericN
+        | T::Flt4
+        | T::Flt8
+        | T::FltN
+        | T::Money
+        | T::Money4
+        | T::MoneyN => ColumnKind::Number,
+        T::DateN
+        | T::TimeN
+        | T::DateTime2N
+        | T::DateTimeOffsetN
+        | T::DateTim4
+        | T::DateTime
+        | T::DateTimeN => ColumnKind::Date,
+        T::Binary | T::VarBinary | T::BigBinary | T::BigVarBinary | T::Image => ColumnKind::Binary,
+        _ => ColumnKind::Text,
     }
 }

@@ -2,6 +2,7 @@
 //! every cell's display text in one buffer, so a million rows stay compact,
 //! and the grid only ever asks for the window it shows.
 
+use std::cmp::Ordering;
 use std::io::{self, Write};
 use std::ops::Range;
 use std::sync::{Arc, RwLock};
@@ -36,6 +37,26 @@ impl Default for ResultLimits {
 #[serde(rename_all = "camelCase")]
 pub struct ResultColumn {
     pub name: String,
+    pub kind: ColumnKind,
+}
+
+/// What a column holds, for sorting and for right-aligning numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ColumnKind {
+    Number,
+    /// Dates and times, written so that text order is time order.
+    Date,
+    Binary,
+    #[default]
+    Text,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SortDirection {
+    Ascending,
+    Descending,
 }
 
 /// One cell's text, or NULL.
@@ -55,6 +76,8 @@ pub struct ResultSet {
     ends: Vec<u64>,
     nulls: BitSet,
     clipped: BitSet,
+    /// Display order of the rows while sorted: `order[shown] = stored`.
+    order: Option<Vec<u32>>,
 }
 
 impl ResultSet {
@@ -65,7 +88,62 @@ impl ResultSet {
             ends: Vec::new(),
             nulls: BitSet::default(),
             clipped: BitSet::default(),
+            order: None,
         }
+    }
+
+    /// The stored row shown at `row`. Rows read after a sort keep their place
+    /// at the end.
+    fn stored(&self, row: usize) -> usize {
+        match &self.order {
+            Some(order) => order.get(row).map_or(row, |&stored| stored as usize),
+            None => row,
+        }
+    }
+
+    /// Orders the rows by one column, NULLs last in both directions, or back
+    /// to the order the Server sent with `None`. Ties keep the Server's order.
+    pub fn sort(&mut self, by: Option<(usize, SortDirection)>) {
+        let Some((column, direction)) = by.filter(|(column, _)| *column < self.columns.len())
+        else {
+            self.order = None;
+            return;
+        };
+        let rows = self.row_count();
+        let kind = self.columns[column].kind;
+        // Numbers are compared as numbers; parse each one once.
+        let numbers: Vec<f64> = if kind == ColumnKind::Number {
+            (0..rows)
+                .map(|row| {
+                    self.cell_text(row, column)
+                        .and_then(|text| text.parse().ok())
+                        .unwrap_or(f64::NAN)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut order: Vec<u32> = (0..rows as u32).collect();
+        order.sort_by(|&a, &b| {
+            let (a, b) = (a as usize, b as usize);
+            let ordering = match (self.cell_text(a, column), self.cell_text(b, column)) {
+                (None, None) => return Ordering::Equal,
+                (None, Some(_)) => return Ordering::Greater,
+                (Some(_), None) => return Ordering::Less,
+                (Some(left), Some(right)) => match kind {
+                    ColumnKind::Number => numbers[a]
+                        .partial_cmp(&numbers[b])
+                        .unwrap_or_else(|| left.cmp(right)),
+                    ColumnKind::Date | ColumnKind::Binary => left.cmp(right),
+                    ColumnKind::Text => compare_text(left, right),
+                },
+            };
+            match direction {
+                SortDirection::Ascending => ordering,
+                SortDirection::Descending => ordering.reverse(),
+            }
+        });
+        self.order = Some(order);
     }
 
     pub fn columns(&self) -> &[ResultColumn] {
@@ -114,6 +192,7 @@ impl ResultSet {
         if row >= self.row_count() || column >= self.columns.len() {
             return None;
         }
+        let row = self.stored(row);
         Some(CellValue {
             text: self.cell_text(row, column).map(str::to_string),
             clipped: self.clipped.get(row * self.columns.len() + column),
@@ -131,6 +210,7 @@ impl ResultSet {
         out.extend_from_slice(&(rows.len() as u32).to_le_bytes());
         out.extend_from_slice(&(width as u32).to_le_bytes());
         for row in rows {
+            let row = self.stored(row);
             for column in 0..width {
                 match self.cell_text(row, column) {
                     None => {
@@ -166,6 +246,7 @@ impl ResultSet {
             out.push_str("\r\n");
         }
         for row in rows {
+            let row = self.stored(row);
             for (i, column) in columns.clone().enumerate() {
                 if i > 0 {
                     out.push('\t');
@@ -198,6 +279,7 @@ impl ResultSet {
         writeln!(out, "| {} |", names.collect::<Vec<_>>().join(" | "))?;
         writeln!(out, "|{}", "---|".repeat(columns.len()))?;
         for row in rows {
+            let row = self.stored(row);
             let cells: Vec<_> = columns
                 .clone()
                 .map(|column| {
@@ -216,6 +298,15 @@ impl ResultSet {
             .expect("writing to memory cannot fail");
         String::from_utf8(out).expect("cells are UTF-8")
     }
+}
+
+/// Case-insensitive, like the default SQL Server collations; ties fall back
+/// to exact order so the result is stable.
+fn compare_text(left: &str, right: &str) -> Ordering {
+    left.chars()
+        .flat_map(char::to_lowercase)
+        .cmp(right.chars().flat_map(char::to_lowercase))
+        .then_with(|| left.cmp(right))
 }
 
 fn markdown_cell(text: &str) -> String {
@@ -251,9 +342,13 @@ mod tests {
 
     fn set() -> ResultSet {
         let mut set = ResultSet::new(vec![
-            ResultColumn { name: "Id".into() },
+            ResultColumn {
+                name: "Id".into(),
+                kind: ColumnKind::Number,
+            },
             ResultColumn {
                 name: "Name".into(),
+                kind: ColumnKind::Text,
             },
         ]);
         for (id, name) in [
@@ -281,7 +376,10 @@ mod tests {
 
     #[test]
     fn clips_long_values_on_a_char_boundary() {
-        let mut set = ResultSet::new(vec![ResultColumn { name: "x".into() }]);
+        let mut set = ResultSet::new(vec![ResultColumn {
+            name: "x".into(),
+            kind: ColumnKind::Text,
+        }]);
         set.push_row(
             &[ColumnValues::String(SqlString::from_utf8_string(
                 "àààà".into(),
@@ -338,5 +436,43 @@ mod tests {
             )
         );
         assert_eq!(set.markdown(0..1, 1..2), "| Name |\n|---|\n| Rossi |\n");
+    }
+    #[test]
+    fn sorts_numbers_text_and_nulls_without_moving_the_data() {
+        let mut set = set();
+        set.push_row(
+            &[
+                ColumnValues::Int(10),
+                ColumnValues::String(SqlString::from_utf8_string("alfa".into())),
+            ],
+            100,
+        );
+        let names = |set: &ResultSet| -> Vec<Option<String>> {
+            (0..set.row_count())
+                .map(|row| set.cell(row, 1).unwrap().text)
+                .collect()
+        };
+        // Numbers as numbers: 10 before 3 when descending, not after 1.
+        set.sort(Some((0, SortDirection::Descending)));
+        assert_eq!(set.cell(0, 0).unwrap().text.as_deref(), Some("10"));
+        assert_eq!(set.cell(3, 0).unwrap().text.as_deref(), Some("1"));
+        // Text ignores case; NULL stays last in both directions.
+        set.sort(Some((1, SortDirection::Ascending)));
+        assert_eq!(
+            names(&set),
+            [
+                Some("alfa".into()),
+                Some("Bianchi, \"Gino\"".into()),
+                Some("Rossi".into()),
+                None
+            ]
+        );
+        set.sort(Some((1, SortDirection::Descending)));
+        assert_eq!(names(&set).last(), Some(&None));
+        // Copies follow what is shown.
+        assert_eq!(set.copy_text(0..1, 1..2, false), "Rossi\r\n");
+        // None goes back to the Server's order.
+        set.sort(None);
+        assert_eq!(set.cell(0, 1).unwrap().text.as_deref(), Some("Rossi"));
     }
 }

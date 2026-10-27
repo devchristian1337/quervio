@@ -30,8 +30,11 @@ const server = { serverName: "mock", version: "16.0.0.0", database: "master" };
 const MOCK_ROWS = 1_000_000;
 const COLUMNS = ["Id", "Name", "Notes", "Payload"];
 
+let mockDescending = false;
+
 /** Synthetic cell: NULL every 7th Notes, long JSON in Payload. */
-function mockCell(row: number, column: number): string | null {
+function mockCell(shown: number, column: number): string | null {
+  const row = mockDescending ? MOCK_ROWS - 1 - shown : shown;
   switch (column) {
     case 0:
       return String(row + 1);
@@ -92,12 +95,16 @@ mockIPC(async (cmd, args) => {
       // WAITFOR DELAY '00:00:05' makes the mock slow, to see the running state.
       const wait = /waitfor\s+delay\s+'00:00:(\d\d)'/i.exec(String(a.script));
       if (wait) await new Promise((resolve) => setTimeout(resolve, Number(wait[1]) * 1000));
-      send({ type: "resultSetStarted", index: 0, columns: COLUMNS.map((name) => ({ name })) });
+      send({ type: "resultSetStarted", index: 0, columns: COLUMNS.map((name, i) => ({ name, kind: i === 0 ? "number" : "text" })) });
       send({ type: "resultSetFinished", index: 0, rows: MOCK_ROWS });
       send({ type: "rowsAffected", count: MOCK_ROWS });
       send({ type: "finished", outcome: "succeeded", elapsedMs: 1234, database: "master", openTransactions: 0 });
       return "succeeded";
     }
+    case "result_sort":
+      // Only Id sorts in the mock: descending reverses the rows.
+      mockDescending = a.column === 0 && a.direction === "descending";
+      return null;
     case "result_rows":
       return encodeWindow(a.start as number, a.count as number);
     case "result_cell": {
