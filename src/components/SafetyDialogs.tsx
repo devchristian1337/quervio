@@ -21,7 +21,7 @@ const KIND_LABELS: Record<ScriptCheck["findings"][number]["kind"], string> = {
 };
 
 export function SafetyDialogs() {
-  const { destructive, transactions, unsaved } = useDialogs();
+  const { destructive, transactions, unsaved, deleteConnection } = useDialogs();
 
   return (
     <>
@@ -116,6 +116,26 @@ export function SafetyDialogs() {
               Don't save
             </Button>
             <Button onClick={() => unsaved?.resolve("save")}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteConnection} onOpenChange={(open) => !open && deleteConnection?.resolve(false)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete {deleteConnection?.name}?</DialogTitle>
+            <DialogDescription>
+              Quervio forgets this connection and its saved password. The server and its databases are not
+              touched.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button autoFocus variant="outline" onClick={() => deleteConnection?.resolve(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => deleteConnection?.resolve(true)}>
+              Delete connection
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

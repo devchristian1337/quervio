@@ -58,9 +58,16 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
   const userName = draft.authentication.kind === "sql" ? draft.authentication.userName : "";
   // Editing a SQL login keeps the stored password unless a new one is typed.
   const keepsPassword = editing !== null && editing.authentication.kind === "sql";
-  const canSubmit =
-    draft.server.trim() !== "" &&
-    (!isSql || (userName.trim() !== "" && (password !== "" || keepsPassword)));
+  // What still blocks Test and Save, said under the buttons it disables.
+  const missing =
+    draft.server.trim() === ""
+      ? "Enter a server name to test or save."
+      : isSql && userName.trim() === ""
+        ? "Enter a login to test or save."
+        : isSql && password === "" && !keepsPassword
+          ? "Enter the password to test or save."
+          : null;
+  const canSubmit = missing === null;
 
   const cleaned = (): SavedConnection => ({
     ...draft,
@@ -225,6 +232,7 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
               variant="outline"
               className="mr-auto"
               disabled={!canSubmit || test.status === "running"}
+              aria-describedby={missing ? "connect-missing" : undefined}
               onClick={runTest}
             >
               Test connection
@@ -232,11 +240,20 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!canSubmit || saving}>
+            <Button
+              type="submit"
+              disabled={!canSubmit || saving}
+              aria-describedby={missing ? "connect-missing" : undefined}
+            >
               {saving && <Loader2 className="animate-spin" />}
               {editing ? "Save" : "Save and connect"}
             </Button>
           </DialogFooter>
+          {missing && (
+            <p id="connect-missing" className="-mt-2 text-xs text-muted-foreground">
+              {missing}
+            </p>
+          )}
         </form>
       </DialogContent>
     </Dialog>

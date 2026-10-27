@@ -38,7 +38,7 @@ import { contextOf, isFilterable, serverKey, useExplorer, type TreeNode } from "
 import { useQueries } from "@/stores/queries";
 import { openQueryFromContext } from "@/lib/shortcuts";
 import { useShortcutLabel } from "@/lib/commands";
-import { useConnectDialog, useSettingsDialog } from "@/stores/dialogs";
+import { useConnectDialog, useDialogs, useSettingsDialog } from "@/stores/dialogs";
 
 type Row =
   | { type: "node"; node: TreeNode; depth: number; parent: string | null }
@@ -155,7 +155,7 @@ export function ObjectExplorer() {
   }
 
   async function removeConnection(connection: SavedConnection) {
-    if (!window.confirm(`Delete the saved connection "${displayName(connection)}"?`)) return;
+    if (!(await useDialogs.getState().confirmDeleteConnection(displayName(connection)))) return;
     await explorer.disconnect(connection.id);
     await useConnections.getState().remove(connection.id);
   }
