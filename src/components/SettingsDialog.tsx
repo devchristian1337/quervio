@@ -30,8 +30,10 @@ import { useSystemDark } from "@/lib/use-theme";
 import { cn } from "@/lib/utils";
 import { useSettingsDialog, type SettingsSection } from "@/stores/dialogs";
 import { useSettings, type Density, type Indent } from "@/stores/settings";
-import logoDark from "@/assets/quervio-logo-dark.png";
-import logoLight from "@/assets/quervio-logo-light.png";
+// The app tile: Q Prisma v2 on its graphite ground, as on the desktop.
+import prismaTile from "@/assets/quervio-q-prisma-v2.png";
+import interLicence from "@/assets/fonts/Inter-LICENSE.txt?raw";
+import jetBrainsLicence from "@/assets/fonts/JetBrainsMono-OFL.txt?raw";
 
 const SECTIONS: { id: SettingsSection; label: string; icon: ReactNode }[] = [
   { id: "appearance", label: "Appearance", icon: <Palette /> },
@@ -254,10 +256,11 @@ function ThemePreview({ theme }: { theme: Theme }) {
 // ─── Editor ─────────────────────────────────────────────────────────────────
 
 const FONTS = [
+  // Bundled with Quervio; the others are used if installed on the PC.
+  "'JetBrains Mono', Consolas, monospace",
   "'Cascadia Code', Consolas, monospace",
   "'Cascadia Mono', Consolas, monospace",
   "Consolas, monospace",
-  "'JetBrains Mono', Consolas, monospace",
   "'Fira Code', Consolas, monospace",
   "'Courier New', monospace",
 ];
@@ -272,7 +275,7 @@ function EditorSection() {
   return (
     <>
       <Heading title="Editor" description="The SQL editor of every query tab." />
-      <Row label="Font" help="Fonts that are not installed fall back to Consolas.">
+      <Row label="Font" help="JetBrains Mono comes with Quervio; the others fall back to Consolas if not installed.">
         <Select value={editor.fontFamily} onValueChange={(fontFamily) => update("editor", { fontFamily })}>
           <SelectTrigger size="sm" className="w-52">
             <SelectValue />
@@ -308,6 +311,9 @@ function EditorSection() {
       </Row>
       <Row label="Line numbers">
         <Switch checked={editor.lineNumbers} onCheckedChange={(lineNumbers) => update("editor", { lineNumbers })} />
+      </Row>
+      <Row label="Ligatures" help="Join pairs such as => or != into one glyph, if the font has them.">
+        <Switch checked={editor.ligatures} onCheckedChange={(ligatures) => update("editor", { ligatures })} />
       </Row>
       <Row label="Minimap" help="An overview of the script along the right edge.">
         <Switch checked={editor.minimap} onCheckedChange={(minimap) => update("editor", { minimap })} />
@@ -356,7 +362,7 @@ function ResultsSection() {
           </SelectContent>
         </Select>
       </Row>
-      <Row label="Monospace font" help="Show values in Cascadia Code, like the editor.">
+      <Row label="Monospace font" help="Show values in JetBrains Mono, like the editor, instead of Inter.">
         <Switch checked={results.monospace} onCheckedChange={(monospace) => update("results", { monospace })} />
       </Row>
     </>
@@ -544,6 +550,11 @@ const LICENSES: [string, string][] = [
   ["Sonner", "MIT"],
 ];
 
+const FONT_LICENCES: [string, string][] = [
+  ["Inter (interface and results)", interLicence],
+  ["JetBrains Mono (SQL editor)", jetBrainsLicence],
+];
+
 function AboutSection() {
   const [versions, setVersions] = useState<{ app: string; tauri: string } | null>(null);
   const [dataDir, setDataDir] = useState("");
@@ -563,10 +574,12 @@ function AboutSection() {
 
   return (
     <>
-      <div className="mb-6 flex flex-col items-start gap-3">
-        <img src={logoLight} alt="Quervio" className="w-48 dark:hidden" draggable={false} />
-        <img src={logoDark} alt="Quervio" className="hidden w-48 dark:block" draggable={false} />
-        <p className="text-sm text-muted-foreground">A fast, modern SQL Server client for Windows.</p>
+      <div className="mb-6 flex items-center gap-4">
+        <img src={prismaTile} alt="" className="size-16 rounded-2xl object-contain" draggable={false} />
+        <div>
+          <div className="text-xl font-semibold tracking-tight">Quervio</div>
+          <p className="text-sm text-muted-foreground">A fast, modern SQL Server client for Windows.</p>
+        </div>
       </div>
       <Row label="Version">
         <span className="font-mono text-sm">{versions?.app ?? "…"}</span>
@@ -596,6 +609,22 @@ function AboutSection() {
             <span>{name}</span>
             <span className="font-mono text-xs text-muted-foreground">{license}</span>
           </div>
+        ))}
+      </div>
+
+      <h4 className="mt-8 mb-1 text-sm font-semibold">Fonts</h4>
+      <p className="mb-2 text-xs text-muted-foreground">
+        Bundled with Quervio under the SIL Open Font License 1.1, which travels with them.
+      </p>
+      <div className="divide-y rounded-md border">
+        {FONT_LICENCES.map(([name, text]) => (
+          <details key={name} className="group px-3 py-1.5 text-sm">
+            <summary className="flex cursor-pointer list-none items-center justify-between">
+              <span>{name}</span>
+              <span className="font-mono text-xs text-muted-foreground">OFL-1.1</span>
+            </summary>
+            <pre className="mt-2 max-h-56 overflow-auto font-mono text-xs whitespace-pre-wrap text-muted-foreground">{text}</pre>
+          </details>
         ))}
       </div>
     </>

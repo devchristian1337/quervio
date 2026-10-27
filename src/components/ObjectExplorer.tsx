@@ -164,7 +164,7 @@ export function ObjectExplorer() {
   }
 
   return (
-    <section className="flex h-full flex-col">
+    <section className="flex h-full flex-col bg-panel">
       <header className="flex h-9 shrink-0 items-center justify-between border-b px-3">
         <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Object Explorer</h2>
         <div className="flex items-center">

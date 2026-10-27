@@ -38,8 +38,8 @@ import { useConnections } from "@/stores/connections";
 import { useExplorer } from "@/stores/explorer";
 import { useQueries, type QueryTab } from "@/stores/queries";
 
-import logoDark from "@/assets/quervio-logo-dark.png";
-import logoLight from "@/assets/quervio-logo-light.png";
+// Q Prisma v2 (design/branding); the transparent cut keeps its centre open on any theme.
+import prisma from "@/assets/quervio-q-prisma-v2-trasparente.png";
 
 const SqlEditor = lazy(() => import("@/components/SqlEditor"));
 const ResultGrid = lazy(() => import("@/components/ResultGrid"));
@@ -98,8 +98,10 @@ function EmptyState() {
   return (
     <div className="grid flex-1 place-items-center">
       <div className="flex flex-col items-center gap-3 text-muted-foreground">
-        <img src={logoLight} alt="Quervio" className="mb-4 w-64 select-none dark:hidden" draggable={false} />
-        <img src={logoDark} alt="Quervio" className="mb-4 hidden w-64 select-none dark:block" draggable={false} />
+        <div className="mb-4 flex items-center gap-3 text-foreground">
+          <img src={prisma} alt="" className="size-16 object-contain select-none" draggable={false} />
+          <span className="text-3xl font-semibold tracking-tight">Quervio</span>
+        </div>
         <p>Select a server or database in the Object Explorer, then open a query.</p>
         <Button variant="outline" size="sm" disabled={!context} onClick={() => openQueryFromContext()}>
           <Plus /> New query <span className="text-xs text-muted-foreground">{newQueryKey}</span>
@@ -118,7 +120,7 @@ function TabBar() {
   const connections = useConnections((s) => s.connections);
 
   return (
-    <div className="flex h-9 shrink-0 items-end overflow-x-auto border-b">
+    <div className="flex h-9 shrink-0 items-end overflow-x-auto border-b bg-panel">
       {tabs.map((tab) => {
         const connection = connections.find((c) => c.id === tab.connectionId);
         const environment = connection ? ENVIRONMENTS[connection.environment] : null;
@@ -271,7 +273,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
       <Button
         size="sm"
         variant="ghost"
-        className="h-7 text-red-500 hover:text-red-400"
+        className="h-7 text-red-500 hover:text-red-400 dark:text-red-400 dark:hover:text-red-300"
         disabled={!executing}
         title={`Cancel executing query (${keys.cancel})`}
         onClick={() => void cancel(tab.id)}
@@ -282,7 +284,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
       <DatabaseSelector tab={tab} />
       {production && (
         <span
-          className="ml-2 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-red-500"
+          className="ml-2 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-red-500 dark:text-red-400"
           title="Destructive statements ask for confirmation on this server"
         >
           PRODUCTION
@@ -306,7 +308,7 @@ function OutputPanel({ tab }: { tab: QueryTab }) {
   const setView = useQueries((s) => s.setView);
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-8 shrink-0 items-end gap-1 border-b px-2 text-xs">
+      <div className="flex h-8 shrink-0 items-end gap-1 border-b bg-panel px-2 text-xs">
         {(["results", "messages"] as const).map((view) => (
           <button
             key={view}
@@ -356,7 +358,7 @@ function Messages({ tab }: { tab: QueryTab }) {
             return (
               <div
                 key={index}
-                className={cn(message.isError && "text-red-500", line && "cursor-pointer hover:underline")}
+                className={cn(message.isError && "text-red-500 dark:text-red-400", line && "cursor-pointer hover:underline")}
                 title={line ? `Go to line ${line}` : undefined}
                 onDoubleClick={line ? () => revealLine(line) : undefined}
                 onClick={line ? () => revealLine(line) : undefined}
@@ -392,7 +394,7 @@ function Running() {
   return (
     <Centered>
       <div className="flex flex-col items-center gap-4">
-        <LoaderGooeyBlobs size={14} className="text-sky-500" aria-label="Executing query" />
+        <LoaderGooeyBlobs size={14} className="text-brand-secondary" aria-label="Executing query" />
         <span className="text-xs">Executing query…</span>
       </div>
     </Centered>
@@ -476,7 +478,7 @@ function StatusBar({ tab }: { tab: QueryTab }) {
   }
 
   return (
-    <footer className="flex h-6 shrink-0 items-center gap-4 border-t px-3 text-xs text-muted-foreground">
+    <footer className="flex h-6 shrink-0 items-center gap-4 border-t bg-panel px-3 text-xs text-muted-foreground">
       <span className="flex items-center gap-1.5">{status}</span>
       <span className="ml-auto flex items-center gap-1.5">
         {environment && <span className={cn("size-2 rounded-full", environment.dot)} title={environment.label} />}
