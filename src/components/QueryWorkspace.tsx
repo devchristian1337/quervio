@@ -133,7 +133,7 @@ function TabBar() {
             {connection && <span className="truncate text-xs text-muted-foreground">{displayName(connection)}</span>}
             <button
               title="Close"
-              className={cn("ml-1 rounded p-0.5 hover:bg-accent", !selected && "opacity-0 group-hover:opacity-100")}
+              className={cn("ml-1 rounded p-0.5 hover:bg-accent", !selected && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={() => void closeTab(tab)}
             >

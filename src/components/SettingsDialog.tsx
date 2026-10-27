@@ -558,7 +558,7 @@ function ShortcutRow({ command, onPreview }: { command: Command; onPreview: (pre
             <button
               type="button"
               title={`Remove ${key}`}
-              className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
+              className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100"
               onClick={() => setShortcut(command.id, keys.filter((k) => k !== key))}
             >
               <X className="size-3" />
@@ -682,7 +682,7 @@ function AboutSection() {
       <div className="divide-y rounded-md border">
         {FONT_LICENCES.map(([name, text]) => (
           <details key={name} className="group px-3 py-1.5 text-sm">
-            <summary className="flex cursor-pointer list-none items-center justify-between">
+            <summary className="flex list-none items-center justify-between">
               <span>{name}</span>
               <span className="font-mono text-xs text-muted-foreground">OFL-1.1</span>
             </summary>
