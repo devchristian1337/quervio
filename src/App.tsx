@@ -15,10 +15,14 @@ import { useConnections } from "@/stores/connections";
 import { restoreTabs, saveNow } from "@/lib/session-restore";
 import { applyTheme } from "@/lib/themes";
 import { useTheme } from "@/lib/use-theme";
+import { applyWindowTheme } from "@/lib/window-theme";
+import { useSettings } from "@/stores/settings";
 
 // The chosen theme, or Light/Dark following Windows.
 function useAppTheme() {
   const theme = useTheme();
+  const choice = useSettings((s) => s.settings.appearance.theme);
+  useEffect(() => applyWindowTheme(choice), [choice]);
   useEffect(() => applyTheme(theme), [theme]);
 }
 

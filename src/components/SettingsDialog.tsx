@@ -171,8 +171,10 @@ function AppearanceSection() {
       <div className="grid grid-cols-3 gap-3">
         <ThemeCard
           name="System"
-          // Short enough for the narrowest card, like "Dark · Mica" beside it.
-          note={`Windows · ${systemDark ? "Dark" : "Light"}`}
+          // Short enough for the narrowest card, like "Dark · Mica" beside it. Another
+          // theme sets the window's own mode (lib/window-theme.ts), which hides
+          // Windows' from the page, so the current mode shows only while System is on.
+          note={current === "system" ? `Windows · ${systemDark ? "Dark" : "Light"}` : "Follows Windows"}
           selected={current === "system"}
           onSelect={() => choose("system")}
           preview={[findTheme("light", false), findTheme("dark", true)]}
