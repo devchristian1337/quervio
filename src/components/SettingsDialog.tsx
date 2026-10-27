@@ -15,7 +15,7 @@ import {
   Timer,
   X,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/basic-toast";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { GlowingKeyboard } from "@/components/ui/glowing-keyboard";

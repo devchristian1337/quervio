@@ -24,7 +24,7 @@ import {
   selectAll,
 } from "@/lib/editor";
 import { errorMessage } from "@/lib/api";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/basic-toast";
 import { scheduleSave } from "@/lib/session-restore";
 import { useQueries } from "@/stores/queries";
 import { useShortcutLabel } from "@/lib/commands";

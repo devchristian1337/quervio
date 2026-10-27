@@ -2,7 +2,7 @@
 // The script text lives in the tab's Monaco model, not here.
 import { Channel } from "@tauri-apps/api/core";
 import { create } from "zustand";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/basic-toast";
 import { api, displayName, errorMessage, type ServerInfo } from "@/lib/api";
 import { useConnections } from "@/stores/connections";
 import { useDialogs } from "@/stores/dialogs";

@@ -4,7 +4,7 @@
 import { create } from "zustand";
 import { api, errorMessage, type ExecuteOptions } from "@/lib/api";
 import type { ThemeId } from "@/lib/themes";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/basic-toast";
 
 export type Density = "compact" | "comfortable";
 export type Indent = "2" | "4" | "tab";

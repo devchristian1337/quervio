@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/context-menu";
 import { ConnectDialog } from "@/components/ConnectDialog";
 import { api, displayName, errorMessage, type SavedConnection, type ScriptKind } from "@/lib/api";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/basic-toast";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";

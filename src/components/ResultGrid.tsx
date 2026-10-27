@@ -22,7 +22,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { save } from "@tauri-apps/plugin-dialog";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/basic-toast";
 import {
   ContextMenu,
   ContextMenuContent,
