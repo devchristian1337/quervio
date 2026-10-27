@@ -1,5 +1,6 @@
 mod explorer;
 mod query;
+mod settings;
 
 use std::path::Path;
 
@@ -15,6 +16,7 @@ pub fn run() {
             copy_querydeck_data(&data_dir);
             app.manage(explorer::ExplorerState::open(&data_dir)?);
             app.manage(query::QueryState::default());
+            app.manage(settings::SettingsState::new(&data_dir));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -44,6 +46,9 @@ pub fn run() {
             query::result_cell,
             query::result_copy,
             query::result_export_markdown,
+            settings::settings_load,
+            settings::settings_save,
+            settings::settings_data_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -54,7 +59,10 @@ pub fn run() {
 /// passwords (DPAPI is tied to the Windows user, not the folder) and the
 /// open Query Tabs. The old folder is left as it was.
 fn copy_querydeck_data(data_dir: &Path) {
-    let Some(old_dir) = data_dir.parent().map(|parent| parent.join("com.querydeck.app")) else {
+    let Some(old_dir) = data_dir
+        .parent()
+        .map(|parent| parent.join("com.querydeck.app"))
+    else {
         return;
     };
     if data_dir.join("connections.json").exists() || !old_dir.join("connections.json").exists() {
@@ -71,6 +79,9 @@ fn copy_querydeck_data(data_dir: &Path) {
     });
     // Not fatal: the app starts empty, and the old files are still there.
     if let Err(error) = copied {
-        eprintln!("Could not copy the Querydeck data from {}: {error}", old_dir.display());
+        eprintln!(
+            "Could not copy the Querydeck data from {}: {error}",
+            old_dir.display()
+        );
     }
 }

@@ -135,6 +135,17 @@ mockIPC(async (cmd, args) => {
     case "tabs_save":
       localStorage.setItem("quervio.mock.tabs", a.snapshot as string);
       return null;
+    case "settings_load":
+      return localStorage.getItem("quervio.mock.settings");
+    case "settings_save":
+      localStorage.setItem("quervio.mock.settings", a.settings as string);
+      return null;
+    case "settings_data_dir":
+      return String.raw`C:\Users\mock\AppData\Roaming\com.quervio.app`;
+    case "plugin:app|version":
+      return "0.1.0-mock";
+    case "plugin:app|tauri_version":
+      return "2.x";
     case "file_read":
       return "SELECT 'from a file';\n";
     case "file_write":

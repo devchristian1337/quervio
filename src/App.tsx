@@ -12,17 +12,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useQueries } from "@/stores/queries";
 import { useConnections } from "@/stores/connections";
 import { restoreTabs, saveNow } from "@/lib/session-restore";
+import { applyTheme } from "@/lib/themes";
+import { useTheme } from "@/lib/use-theme";
 
-// Follow the Windows light/dark setting.
-function useSystemTheme() {
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () =>
-      document.documentElement.classList.toggle("dark", query.matches);
-    apply();
-    query.addEventListener("change", apply);
-    return () => query.removeEventListener("change", apply);
-  }, []);
+// The chosen theme, or Light/Dark following Windows.
+function useAppTheme() {
+  const theme = useTheme();
+  useEffect(() => applyTheme(theme), [theme]);
 }
 
 // WebView2's own menu (Back, Refresh, Save as, Print…) makes no sense in
@@ -73,7 +69,7 @@ function useRestoreTabs() {
 }
 
 export default function App() {
-  useSystemTheme();
+  useAppTheme();
   useNoBrowserMenu();
   useCloseGuard();
   useRestoreTabs();

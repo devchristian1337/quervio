@@ -5,6 +5,14 @@ import type { ExecutionEvent, Outcome } from "@/lib/execution";
 
 export type SortDirection = "ascending" | "descending";
 
+/** Mirrors ExecuteOptions in src-tauri/src/query.rs. */
+export interface ExecuteOptions {
+  /** 0 waits forever. */
+  timeoutSeconds: number;
+  maxRows: number;
+  maxCellBytes: number;
+}
+
 export type Environment = "production" | "test" | "development";
 export type Encrypt = "mandatory" | "optional" | "strict";
 
@@ -88,6 +96,9 @@ export const api = {
   fileRead: (path: string) => invoke<string>("file_read", { path }),
   fileWrite: (path: string, text: string) => invoke<void>("file_write", { path, text }),
   tabsLoad: () => invoke<string | null>("tabs_load"),
+  settingsLoad: () => invoke<string | null>("settings_load"),
+  settingsSave: (settings: string) => invoke<void>("settings_save", { settings }),
+  dataDir: () => invoke<string>("settings_data_dir"),
   tabsSave: (snapshot: string) => invoke<void>("tabs_save", { snapshot }),
 
   checkScript: (script: string, baseLine: number) => invoke<ScriptCheck>("query_check", { script, baseLine }),
