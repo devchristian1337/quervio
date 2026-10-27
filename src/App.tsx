@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/resizable";
 import { ObjectExplorer } from "@/components/ObjectExplorer";
 import { QueryWorkspace } from "@/components/QueryWorkspace";
-import { Toaster } from "@/components/ui/sonner";
+import { Toaster } from "@/components/ui/basic-toast";
 import { SafetyDialogs } from "@/components/SafetyDialogs";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -92,7 +92,7 @@ export default function App() {
     </ResizablePanelGroup>
     <SafetyDialogs />
     <SettingsDialog />
-    <Toaster position="bottom-right" />
+    <Toaster />
     </>
   );
 }

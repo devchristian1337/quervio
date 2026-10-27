@@ -3,7 +3,7 @@ import { Copy, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/basic-toast";
 import { api, errorMessage } from "@/lib/api";
 
 /** Indents JSON and XML; anything else is shown as it is. */

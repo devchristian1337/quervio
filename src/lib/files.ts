@@ -1,6 +1,6 @@
 // Opening and saving .sql files (Ctrl+O, Ctrl+S, Ctrl+Shift+S).
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/basic-toast";
 import { api, errorMessage } from "@/lib/api";
 import { disposeModel, modelText } from "@/lib/editor";
 import { useDialogs } from "@/stores/dialogs";

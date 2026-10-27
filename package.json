@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ark-ui/react": "^5.39.3",
     "@glideapps/glide-data-grid": "6.0.4-alpha24",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-select": "^2.4.1",
@@ -31,7 +32,6 @@
     "react-dom": "^19.1.0",
     "react-resizable-panels": "^4.15.0",
     "react-responsive-carousel": "^3.2.23",
-    "sonner": "^2.0.8",
     "tailwindcss": "^4.3.3",
     "zustand": "^5.0.16"
   },
