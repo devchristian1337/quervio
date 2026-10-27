@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api, displayName, errorMessage } from "@/lib/api";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/interfaces-select";
 import { currentScript, focusEditor, revealLine } from "@/lib/editor";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { useGlobalShortcuts } from "@/lib/shortcuts";

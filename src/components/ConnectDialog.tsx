@@ -18,7 +18,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/ui/interfaces-select";
 import { api, errorMessage, type Encrypt, type Environment, type SavedConnection } from "@/lib/api";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { newConnection, useConnections } from "@/stores/connections";
