@@ -8,6 +8,7 @@ import { ObjectExplorer } from "@/components/ObjectExplorer";
 import { QueryWorkspace } from "@/components/QueryWorkspace";
 import { Toaster } from "@/components/ui/sonner";
 import { SafetyDialogs } from "@/components/SafetyDialogs";
+import { SettingsDialog } from "@/components/SettingsDialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useQueries } from "@/stores/queries";
 import { useConnections } from "@/stores/connections";
@@ -86,6 +87,7 @@ export default function App() {
       </ResizablePanel>
     </ResizablePanelGroup>
     <SafetyDialogs />
+    <SettingsDialog />
     <Toaster position="bottom-right" />
     </>
   );

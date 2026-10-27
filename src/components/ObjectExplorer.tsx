@@ -13,6 +13,7 @@ import {
   Plus,
   ScrollText,
   Server,
+  Settings2,
   SquarePen,
   Table2,
   X,
@@ -37,6 +38,7 @@ import { contextOf, isFilterable, serverKey, useExplorer, type TreeNode } from "
 import { useQueries } from "@/stores/queries";
 import { openQueryFromContext } from "@/lib/shortcuts";
 import { useShortcutLabel } from "@/lib/commands";
+import { useSettingsDialog } from "@/stores/dialogs";
 
 type Row =
   | { type: "node"; node: TreeNode; depth: number; parent: string | null }
@@ -48,6 +50,7 @@ const INDENT = 14;
 export function ObjectExplorer() {
   const { connections, loaded, load } = useConnections();
   const explorer = useExplorer();
+  const settingsKey = useShortcutLabel("settings");
   const newQueryKey = useShortcutLabel("newQuery");
   const [dialog, setDialog] = useState<{ open: boolean; editing: SavedConnection | null }>({
     open: false,
@@ -391,6 +394,17 @@ export function ObjectExplorer() {
           });
         }}
       />
+      <footer className="flex h-9 shrink-0 items-center border-t px-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+          title={`Settings (${settingsKey})`}
+          onClick={() => useSettingsDialog.getState().show()}
+        >
+          <Settings2 /> Settings
+        </Button>
+      </footer>
     </section>
   );
 }

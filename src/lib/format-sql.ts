@@ -7,17 +7,28 @@
 import "@/lib/node-global";
 import { formatSql, type FormatOptions } from "poor-mans-t-sql-formatter";
 
-const OPTIONS: FormatOptions = {
-  indent: "    ",
-  uppercaseKeywords: true,
-  // Never rewrite keywords (PROC → PROCEDURE): layout and case only.
-  keywordStandardization: false,
-};
+/** Settings > Editor > Formatting. */
+export interface FormatStyle {
+  uppercaseKeywords: boolean;
+  indent: "2" | "4" | "tab";
+}
+
+const DEFAULT_STYLE: FormatStyle = { uppercaseKeywords: true, indent: "4" };
+
+function optionsOf(style: FormatStyle): FormatOptions {
+  return {
+    indent: style.indent === "tab" ? "	" : " ".repeat(Number(style.indent)),
+    uppercaseKeywords: style.uppercaseKeywords,
+    // Never rewrite keywords (PROC → PROCEDURE): layout and case only.
+    keywordStandardization: false,
+  };
+}
 
 export class FormatError extends Error {}
 
 /** `script` formatted, with GO lines, Batch order and comments kept. */
-export function formatScript(script: string): string {
+export function formatScript(script: string, style: FormatStyle = DEFAULT_STYLE): string {
+  const options = optionsOf(style);
   const text = script.replace(/\r\n?/g, "\n");
   const pieces = splitOnGo(text);
   const batches = pieces.filter((piece) => piece.kind === "batch").length;
@@ -30,7 +41,7 @@ export function formatScript(script: string): string {
     }
     batchNumber += 1;
     if (piece.text.trim() === "") continue;
-    const result = formatSql(piece.text, OPTIONS);
+    const result = formatSql(piece.text, options);
     if (result.errorFound) {
       const where = batches > 1 ? `batch ${batchNumber}` : "the script";
       throw new FormatError(`The formatter could not parse ${where}; nothing was changed.`);

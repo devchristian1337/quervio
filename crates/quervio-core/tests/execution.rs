@@ -175,6 +175,39 @@ async fn cancel_stops_all_batches_and_keeps_the_session() {
 
 #[tokio::test]
 #[ignore = "needs SQL Server: docker compose up -d --wait"]
+async fn a_timeout_says_so_instead_of_blaming_the_user() {
+    let mut session = open().await;
+    let cancel = CancelToken::new();
+    let timer = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        timer.time_out();
+    });
+    let mut log = Vec::new();
+    let outcome = session
+        .execute(
+            "WAITFOR DELAY '00:00:30';",
+            0,
+            &cancel,
+            &SharedResults::default(),
+            ResultLimits::default(),
+            |event| log.push(format!("{event:?}")),
+        )
+        .await;
+    assert_eq!(outcome, Outcome::Cancelled);
+    assert!(
+        log.iter()
+            .any(|e| e.contains("Execution Timeout Expired") && e.contains("is_error: true")),
+        "{log:#?}"
+    );
+    assert!(
+        !log.iter().any(|e| e.contains("cancelled by user")),
+        "{log:#?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs SQL Server: docker compose up -d --wait"]
 async fn use_database_switches_the_session() {
     let mut session = open().await;
     session.use_database("tempdb").await.unwrap();

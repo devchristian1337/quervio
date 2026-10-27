@@ -74,6 +74,13 @@ describe("formatScript", () => {
     expect(() => formatScript("select (1")).toThrow(FormatError);
   });
 
+  it("follows the formatting settings", () => {
+    expect(formatScript("select a,b from t where x=1", { uppercaseKeywords: false, indent: "2" })).toBe(
+      ["select a,", "  b", "from t", "where x = 1"].join("\n"),
+    );
+    expect(formatScript("select a,b from t", { uppercaseKeywords: true, indent: "tab" })).toContain("\n\tb");
+  });
+
   it("keeps CRLF input working", () => {
     expect(formatScript("select 1\r\nGO\r\nselect 2\r\n")).toBe("SELECT 1\nGO\n\nSELECT 2\n");
   });

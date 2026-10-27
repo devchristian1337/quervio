@@ -71,8 +71,13 @@ export const api = {
   openQuery: (tabId: string, connectionId: string, database: string | null) =>
     invoke<ServerInfo>("query_open", { tabId, connectionId, database }),
   closeQuery: (tabId: string) => invoke<void>("query_close", { tabId }),
-  executeQuery: (tabId: string, script: string, baseLine: number, onEvent: Channel<ExecutionEvent>) =>
-    invoke<Outcome>("query_execute", { tabId, script, baseLine, onEvent }),
+  executeQuery: (
+    tabId: string,
+    script: string,
+    baseLine: number,
+    options: ExecuteOptions,
+    onEvent: Channel<ExecutionEvent>,
+  ) => invoke<Outcome>("query_execute", { tabId, script, baseLine, options, onEvent }),
   cancelQuery: (tabId: string) => invoke<void>("query_cancel", { tabId }),
 
   resultRows: (tabId: string, set: number, start: number, count: number) =>
