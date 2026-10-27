@@ -202,6 +202,13 @@
   background-color: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
 }
 
+/* The results grid (Glide) sets a hand cursor on its headers and row numbers,
+   with no option to change it; the app keeps the arrow on everything that is
+   not a link. Only "pointer" is replaced, so col-resize and the rest stay. */
+[data-testid="data-grid-canvas"][style*="cursor: pointer"] {
+  cursor: default !important;
+}
+
 /* A lit key on the Settings › Shortcuts keyboard (components/ui/glowing-keyboard.tsx):
    its border and glow take the key's text colour, the theme's primary. */
 .glowing-key {

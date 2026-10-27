@@ -401,7 +401,9 @@ export default function ResultGrid({ tabId, set }: Props) {
               columns={columns}
               rows={set.rows}
               getCellContent={getCellContent}
-              rowMarkers="both"
+              // Row numbers that select their row when clicked, as in SSMS: no checkboxes
+              // in place of the numbers on hover, and none in the corner (Ctrl+A selects all).
+              rowMarkers={{ kind: "clickable-number", headerDisabled: true }}
               rowHeight={size.row}
               headerHeight={size.header}
               width="100%"
