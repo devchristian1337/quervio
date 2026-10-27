@@ -174,10 +174,10 @@ function DatabaseSelector({ tab }: { tab: QueryTab }) {
       <SelectTrigger
         size="sm"
         // As tall as the toolbar buttons; the size="sm" rule alone is 32 px.
-        className="w-56 gap-1.5 px-2 py-0 text-xs data-[size=sm]:h-7"
+        className="w-56 gap-1.5 px-2 py-0 data-[size=sm]:h-7"
         title="Current database (USE)"
       >
-        <Database className="size-3.5 text-muted-foreground" />
+        <Database className="size-4 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-left">
           <SelectValue placeholder="Database" />
         </span>
@@ -196,7 +196,7 @@ function DatabaseSelector({ tab }: { tab: QueryTab }) {
       >
         {error && <div className="px-2 py-1.5 text-xs text-destructive">{error}</div>}
         {options.map((name) => (
-          <SelectItem key={name} value={name} className="text-xs" title={name}>
+          <SelectItem key={name} value={name} title={name}>
             <span className="truncate">{name}</span>
           </SelectItem>
         ))}

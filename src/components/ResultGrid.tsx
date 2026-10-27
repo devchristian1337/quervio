@@ -117,7 +117,8 @@ function gridTheme(p: Palette, kind: "light" | "dark", density: Density, monospa
     fontFamily: monospace ? MONO : SANS,
     baseFontStyle: `${monospace ? size.font - 1 : size.font}px`,
     headerFontStyle: `500 ${size.font - 1}px`,
-    markerFontStyle: `${size.font - 2}px`,
+    // Row numbers sit a step under the values, never under 11 px (10 px in Compact).
+    markerFontStyle: `${Math.max(11, size.font - 2)}px`,
     editorFontSize: `${size.font}px`,
   };
 }
