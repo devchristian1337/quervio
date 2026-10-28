@@ -3,7 +3,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { create } from "zustand";
 import { toast } from "@/components/ui/basic-toast";
-import { api, displayName, errorMessage, type ServerInfo } from "@/lib/api";
+import { api, displayName, errorMessage, type Environment, type SavedConnection, type ServerInfo } from "@/lib/api";
 import { useConnections } from "@/stores/connections";
 import { useDialogs } from "@/stores/dialogs";
 import { executeOptions, useSettings } from "@/stores/settings";
@@ -31,6 +31,8 @@ export interface QueryTab {
   id: string;
   title: string;
   connectionId: string;
+  /** The Environment of the Saved Connection when the Session was opened. */
+  environment: Environment | null;
   status: TabStatus;
   error: string | null;
   server: ServerInfo | null;
@@ -95,6 +97,16 @@ interface QueriesState {
 
 let counter = 0;
 
+/**
+ * The Environment the Production guard uses for a tab: the one its Session
+ * was opened with, since editing or deleting the Saved Connection leaves the
+ * Session on its Server, or Production if the connection says so now.
+ */
+export function tabEnvironment(tab: QueryTab, connections: SavedConnection[]): Environment | null {
+  const current = connections.find((c) => c.id === tab.connectionId)?.environment ?? null;
+  return current === "production" ? current : (tab.environment ?? current);
+}
+
 export function fileName(path: string) {
   return path.split(/[\\/]/).pop() || path;
 }
@@ -153,6 +165,7 @@ export const useQueries = create<QueriesState>((set, get) => {
         id,
         title: options.title ?? (options.filePath ? fileName(options.filePath) : `Query ${counter}`),
         connectionId,
+        environment: useConnections.getState().connections.find((c) => c.id === connectionId)?.environment ?? null,
         status: "connecting",
         error: null,
         server: null,
@@ -200,16 +213,21 @@ export const useQueries = create<QueriesState>((set, get) => {
       if (!tab || tab.status !== "ready" || script.text.trim() === "") return;
 
       // On Production, Destructive Statements need an explicit go-ahead.
-      const connection = useConnections.getState().connections.find((c) => c.id === tab.connectionId);
-      if (connection?.environment === "production" && useSettings.getState().settings.query.confirmDestructive) {
+      // The Session checks it again on its own side unless allowed here.
+      const connections = useConnections.getState().connections;
+      const confirm = useSettings.getState().settings.query.confirmDestructive;
+      let allowDestructive = !confirm;
+      if (confirm && tabEnvironment(tab, connections) === "production") {
         const check = await api.checkScript(script.text, script.baseLine);
         if (check.findings.length > 0 || check.uncertain) {
+          const connection = connections.find((c) => c.id === tab.connectionId);
           const run = await useDialogs.getState().confirmDestructive({
             tabTitle: tab.title,
-            connectionName: displayName(connection),
+            connectionName: connection ? displayName(connection) : (tab.server?.serverName ?? tab.title),
             check,
           });
           if (!run) return;
+          allowDestructive = true;
         }
       }
       patch(id, {
@@ -280,7 +298,7 @@ export const useQueries = create<QueriesState>((set, get) => {
       };
 
       try {
-        await api.executeQuery(id, script.text, script.baseLine, executeOptions(), channel);
+        await api.executeQuery(id, script.text, script.baseLine, executeOptions(), allowDestructive, channel);
       } catch (error) {
         patch(id, (t) => ({
           messages: [...t.messages, { text: errorMessage(error), isError: true }],

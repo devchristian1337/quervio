@@ -35,7 +35,7 @@ import { useGlobalShortcuts } from "@/lib/shortcuts";
 import { useShortcutLabel } from "@/lib/commands";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
-import { useQueries, type QueryTab } from "@/stores/queries";
+import { tabEnvironment, useQueries, type QueryTab } from "@/stores/queries";
 
 const SqlEditor = lazy(() => import("@/components/SqlEditor"));
 const ResultGrid = lazy(() => import("@/components/ResultGrid"));
@@ -218,7 +218,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
   };
   const { execute, cancel } = useQueries();
   const executing = tab.status === "executing";
-  const environment = useConnections((s) => s.connections.find((c) => c.id === tab.connectionId)?.environment);
+  const environment = useConnections((s) => tabEnvironment(tab, s.connections));
   return (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
       <Button size="icon" variant="ghost" className="size-7" title={`Open script (${keys.openFile})`} onClick={() => void openFile()}>

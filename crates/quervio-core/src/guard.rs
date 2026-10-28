@@ -263,11 +263,15 @@ fn scan(tokens: &[Token], line_offset: u32, findings: &mut Vec<Finding>) {
             }
         };
 
-        if (token.is_word("CREATE") || token.is_word("ALTER"))
-            && next_word(1).is_some_and(|w| MODULES.contains(&w))
-            || token.is_word("CREATE")
-                && next_word(1) == Some("OR")
-                && next_word(3).is_some_and(|w| MODULES.contains(&w))
+        // SQL Server only takes a module's CREATE/ALTER as the first statement
+        // of a batch; elsewhere the words are something else, such as the
+        // permission in `GRANT CREATE VIEW`.
+        if i == 0
+            && ((token.is_word("CREATE") || token.is_word("ALTER"))
+                && next_word(1).is_some_and(|w| MODULES.contains(&w))
+                || token.is_word("CREATE")
+                    && next_word(1) == Some("OR")
+                    && next_word(3).is_some_and(|w| MODULES.contains(&w)))
         {
             // The rest of the batch is a module body: defined, not run.
             return;
@@ -298,7 +302,7 @@ fn scan(tokens: &[Token], line_offset: u32, findings: &mut Vec<Finding>) {
         } else if token.is_word("ALTER") && next_word(1) == Some("TABLE") {
             report(DestructiveKind::AlterTable, name_after(tokens, i + 2));
             // Its DROP COLUMN / DROP CONSTRAINT is part of this finding.
-            i = statement_end(tokens, i + 2, &["ADD", "DROP", "ALTER", "SET", "WITH"]);
+            i = alter_table_end(tokens, i + 2);
             continue;
         }
         i += 1;
@@ -411,6 +415,91 @@ fn statement_end(tokens: &[Token], from: usize, belongs: &[&str]) -> usize {
     tokens.len()
 }
 
+/// What a DROP drops when it starts a statement of its own; inside an
+/// ALTER TABLE, DROP is followed by COLUMN, CONSTRAINT or a name instead.
+const DROPPED_OBJECTS: &[&str] = &[
+    "TABLE",
+    "VIEW",
+    "INDEX",
+    "PROCEDURE",
+    "PROC",
+    "FUNCTION",
+    "TRIGGER",
+    "DATABASE",
+    "SCHEMA",
+    "TYPE",
+    "SYNONYM",
+    "SEQUENCE",
+    "USER",
+    "LOGIN",
+    "ROLE",
+    "ASSEMBLY",
+    "STATISTICS",
+    "DEFAULT",
+    "RULE",
+    "XML",
+    "FULLTEXT",
+    "EXTERNAL",
+    "PARTITION",
+    "QUEUE",
+    "SERVICE",
+    "CERTIFICATE",
+    "SYMMETRIC",
+    "ASYMMETRIC",
+    "CREDENTIAL",
+    "EVENT",
+    "SERVER",
+    "AGGREGATE",
+    "SECURITY",
+];
+
+/// Index just past the ALTER TABLE whose clauses start at `from`. Without a
+/// `;`, a DROP TABLE, ALTER TABLE or SET NOCOUNT on a later line starts the
+/// next statement, while DROP COLUMN, ALTER COLUMN, SET (...) and
+/// WITH CHECK belong to this one.
+fn alter_table_end(tokens: &[Token], from: usize) -> usize {
+    let mut depth = 0;
+    for (offset, token) in tokens[from..].iter().enumerate() {
+        let at = from + offset;
+        if token.is_symbol('(') {
+            depth += 1;
+        } else if token.is_symbol(')') {
+            depth -= 1;
+        }
+        if depth != 0 {
+            continue;
+        }
+        if token.is_symbol(';') {
+            return at;
+        }
+        let Kind::Word(word) = &token.kind else {
+            continue;
+        };
+        if !STATEMENT_STARTS.contains(&word.as_str()) {
+            continue;
+        }
+        let next = tokens.get(at + 1);
+        let next_word = match next.map(|t| &t.kind) {
+            Some(Kind::Word(w)) => Some(w.as_str()),
+            _ => None,
+        };
+        let belongs = match word.as_str() {
+            "DROP" => !next_word.is_some_and(|w| DROPPED_OBJECTS.contains(&w)),
+            "ALTER" => next_word == Some("COLUMN"),
+            "SET" => next.is_some_and(|t| t.is_symbol('(')),
+            "WITH" => {
+                matches!(next_word, Some("CHECK" | "NOCHECK"))
+                    || next.is_some_and(|t| t.is_symbol('('))
+            }
+            _ => false,
+        };
+        if !belongs {
+            return at;
+        }
+    }
+    tokens.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,6 +604,63 @@ mod tests {
         assert_eq!(
             kinds("CREATE PROCEDURE dbo.p AS SELECT 1\nGO\nDELETE FROM dbo.T"),
             [(DeleteWithoutWhere, "dbo.T".into(), 3)]
+        );
+    }
+
+    #[test]
+    fn permissions_on_modules_are_not_module_definitions() {
+        assert_eq!(
+            kinds(
+                "REVOKE CREATE VIEW FROM public;\nDELETE FROM dbo.Orders;\nDROP TABLE dbo.Customers;"
+            ),
+            [
+                (DeleteWithoutWhere, "dbo.Orders".into(), 2),
+                (Drop, "dbo.Customers".into(), 3)
+            ]
+        );
+        assert_eq!(
+            kinds("GRANT CREATE PROCEDURE TO [nobody];\nDELETE FROM dbo.Orders"),
+            [(DeleteWithoutWhere, "dbo.Orders".into(), 2)]
+        );
+        assert_eq!(
+            kinds("DENY CREATE FUNCTION TO [nobody]; TRUNCATE TABLE dbo.Log"),
+            [(Truncate, "dbo.Log".into(), 1)]
+        );
+    }
+
+    #[test]
+    fn an_alter_table_ends_where_the_next_statement_starts() {
+        assert_eq!(
+            kinds(
+                "CREATE TABLE #t (x int)\nALTER TABLE #t ADD y int\nDROP TABLE dbo.Customers\nALTER TABLE dbo.Orders DROP COLUMN Total"
+            ),
+            [
+                (Drop, "dbo.Customers".into(), 3),
+                (AlterTable, "dbo.Orders".into(), 4)
+            ]
+        );
+        assert_eq!(
+            kinds("ALTER TABLE dbo.T ADD y int\nDROP TABLE dbo.Customers"),
+            [
+                (AlterTable, "dbo.T".into(), 1),
+                (Drop, "dbo.Customers".into(), 2)
+            ]
+        );
+        // Its own clauses stay part of it.
+        assert_eq!(
+            kinds(
+                "ALTER TABLE dbo.T WITH CHECK ADD CONSTRAINT ck CHECK (x > 0)\nALTER TABLE dbo.T ALTER COLUMN x bigint\nALTER TABLE dbo.T DROP CONSTRAINT ck, COLUMN y\nALTER TABLE dbo.T SET (LOCK_ESCALATION = TABLE)"
+            ),
+            [
+                (AlterTable, "dbo.T".into(), 1),
+                (AlterTable, "dbo.T".into(), 2),
+                (AlterTable, "dbo.T".into(), 3),
+                (AlterTable, "dbo.T".into(), 4)
+            ]
+        );
+        assert_eq!(
+            kinds("ALTER TABLE #t DROP COLUMN x\nSET NOCOUNT ON\nDELETE FROM dbo.Log").len(),
+            1
         );
     }
 

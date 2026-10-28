@@ -31,7 +31,7 @@ pub async fn connect() -> TdsClient {
     context.user_name = setting("QUERVIO_TEST_USER");
     context.password = setting("QUERVIO_TEST_PASSWORD");
     context.database = "master".into();
-    // Quervio's default for a Saved Connection: Mandatory + Trust server certificate.
+    // The test container has a self-signed certificate, so it must be trusted.
     context.encryption_options.mode = EncryptionSetting::Required;
     context.encryption_options.trust_server_certificate = true;
 

@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use quervio_core::connection::Environment;
 use quervio_core::execution::{CancelToken, ExecutionEvent, Outcome};
 use quervio_core::results::{CellValue, ResultLimits, SharedResults, SortDirection};
 use quervio_core::session::{ServerInfo, Session};
@@ -18,6 +19,9 @@ const APPLICATION_NAME: &str = "Quervio - Query";
 #[derive(Default)]
 pub struct QueryState {
     sessions: tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<Session>>>>,
+    // The Environment each Session was opened with: the Production guard
+    // follows the Server a tab is on, not what its Saved Connection says now.
+    environments: Mutex<HashMap<String, Environment>>,
     // Kept apart from the sessions: cancelling must not wait for the
     // Session lock that the running Execution holds.
     running: Mutex<HashMap<String, CancelToken>>,
@@ -79,6 +83,11 @@ pub async fn query_open(
         session.use_database(&database).await.map_err(message)?;
     }
     let info = session.server_info().await.map_err(message)?;
+    state
+        .environments
+        .lock()
+        .unwrap()
+        .insert(tab_id.clone(), connection.environment);
     let previous = state
         .sessions
         .lock()
@@ -94,6 +103,7 @@ pub async fn query_close(state: State<'_, QueryState>, tab_id: String) -> Comman
         cancel.cancel();
     }
     state.results.lock().unwrap().remove(&tab_id);
+    state.environments.lock().unwrap().remove(&tab_id);
     let session = state.sessions.lock().await.remove(&tab_id);
     if let Some(session) = session.and_then(|shared| Arc::try_unwrap(shared).ok()) {
         let _ = session.into_inner().close().await;
@@ -102,6 +112,8 @@ pub async fn query_close(state: State<'_, QueryState>, tab_id: String) -> Comman
 }
 
 /// Runs `script` and streams its events; resolves when the Execution ends.
+/// `allow_destructive` says the user confirmed Destructive Statements, or
+/// turned the confirmation off; without it a Production Session refuses them.
 #[tauri::command]
 pub async fn query_execute(
     state: State<'_, QueryState>,
@@ -109,8 +121,13 @@ pub async fn query_execute(
     script: String,
     base_line: u32,
     options: ExecuteOptions,
+    allow_destructive: bool,
     on_event: Channel<ExecutionEvent>,
 ) -> CommandResult<Outcome> {
+    let environment = state.environments.lock().unwrap().get(&tab_id).copied();
+    if !allow_destructive && needs_confirmation(environment, &script, base_line) {
+        return Err(UNCONFIRMED.into());
+    }
     let session = state.session(&tab_id).await?;
     let results = state.results(&tab_id);
     let cancel = CancelToken::new();
@@ -150,6 +167,17 @@ pub async fn query_execute(
     }
     state.running.lock().unwrap().remove(&tab_id);
     Ok(outcome)
+}
+
+const UNCONFIRMED: &str = "Destructive Statements on a Production server need confirmation, and none was given; nothing was run.";
+
+/// Whether a script must be confirmed before it runs on a Session opened
+/// with `environment`. A tab with no known Environment counts as Production.
+fn needs_confirmation(environment: Option<Environment>, script: &str, base_line: u32) -> bool {
+    !matches!(
+        environment,
+        Some(Environment::Test | Environment::Development)
+    ) && quervio_core::guard::check(script, base_line).needs_confirmation()
 }
 
 /// Per-Execution options from the user's settings.
@@ -334,4 +362,24 @@ pub async fn query_end_transactions(
     let session = state.session(&tab_id).await?;
     let mut session = session.lock().await;
     session.end_transactions(commit).await.map_err(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn production_sessions_refuse_unconfirmed_destructive_statements() {
+        let drop = "DROP TABLE dbo.Customers";
+        assert!(needs_confirmation(Some(Environment::Production), drop, 0));
+        // A tab whose Environment is not known is treated as Production.
+        assert!(needs_confirmation(None, drop, 0));
+        assert!(!needs_confirmation(Some(Environment::Development), drop, 0));
+        assert!(!needs_confirmation(Some(Environment::Test), drop, 0));
+        assert!(!needs_confirmation(
+            Some(Environment::Production),
+            "SELECT 1",
+            0
+        ));
+    }
 }

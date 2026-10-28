@@ -39,6 +39,19 @@ export function newConnection(): SavedConnection {
     defaultDatabase: null,
     environment: "development",
     encrypt: "mandatory",
-    trustServerCertificate: true,
+    // Checked by default, as in SSMS: a trusted certificate lets anyone on the
+    // network path read the login, so it is opt-in per connection.
+    trustServerCertificate: false,
   };
+}
+
+/** Why these settings leave the login readable on the network, if they do. */
+export function transportWarning(connection: Pick<SavedConnection, "encrypt" | "trustServerCertificate">): string | null {
+  if (connection.encrypt === "optional") {
+    return "Optional encryption can be turned off by anyone on the network path, who can then read the login.";
+  }
+  if (connection.trustServerCertificate && connection.encrypt !== "strict") {
+    return "The server's certificate and name are not checked, so anyone on the network path can read the login. Use it only for a server you trust with a self-signed certificate.";
+  }
+  return null;
 }

@@ -206,6 +206,8 @@ async fn columns(session: &mut Session, db: &str, object_id: i64) -> Result<Vec<
         .map(|row| {
             let column_type = SqlType {
                 name: text(row, 1)?,
+                // Shown as a label only, never run.
+                schema: None,
                 max_length: int(row, 2)?,
                 precision: int(row, 3)?,
                 scale: int(row, 4)?,
@@ -253,6 +255,9 @@ pub fn quote_name(name: &str) -> String {
 /// A column type as `sys.columns` describes it.
 pub(crate) struct SqlType {
     pub(crate) name: String,
+    /// The schema of a user-defined type, which is then written as
+    /// `[schema].[name]`: its name is chosen by whoever created it.
+    pub(crate) schema: Option<String>,
     pub(crate) max_length: i64,
     pub(crate) precision: i64,
     pub(crate) scale: i64,
@@ -260,6 +265,9 @@ pub(crate) struct SqlType {
 
 impl std::fmt::Display for SqlType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(schema) = &self.schema {
+            return write!(f, "{}.{}", quote_name(schema), quote_name(&self.name));
+        }
         let name = self.name.as_str();
         let length = |bytes_per_char: i64| match self.max_length {
             -1 => "max".to_string(),
@@ -282,6 +290,7 @@ mod tests {
     fn sql_type(name: &str, max_length: i64, precision: i64, scale: i64) -> String {
         SqlType {
             name: name.into(),
+            schema: None,
             max_length,
             precision,
             scale,
@@ -299,6 +308,29 @@ mod tests {
         assert_eq!(sql_type("decimal", 9, 18, 2), "decimal(18, 2)");
         assert_eq!(sql_type("datetime2", 8, 27, 7), "datetime2(7)");
         assert_eq!(sql_type("datetime", 8, 23, 3), "datetime");
+    }
+
+    #[test]
+    fn user_defined_types_are_quoted_with_their_schema() {
+        let crafted = SqlType {
+            name: "int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int".into(),
+            schema: Some("dbo".into()),
+            max_length: 4,
+            precision: 10,
+            scale: 0,
+        };
+        assert_eq!(
+            crafted.to_string(),
+            "[dbo].[int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int]"
+        );
+        let alias = SqlType {
+            name: "Phone]x".into(),
+            schema: Some("sales".into()),
+            max_length: 40,
+            precision: 0,
+            scale: 0,
+        };
+        assert_eq!(alias.to_string(), "[sales].[Phone]]x]");
     }
 
     #[test]

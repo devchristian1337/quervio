@@ -298,6 +298,45 @@ async fn create_table_scripts_round_trip() {
     }
 }
 
+/// A user-defined type's name is chosen by whoever created it, so a crafted
+/// one must stay a single quoted name in the script.
+#[tokio::test]
+#[ignore = "needs SQL Server: docker compose up -d --wait"]
+async fn create_table_quotes_user_defined_types() {
+    const SETUP: &str =
+        "CREATE TYPE dbo.[int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int] FROM int;
+         CREATE TABLE dbo.Victim (x int);
+         CREATE TABLE dbo.T (c dbo.[int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int] NOT NULL);";
+    let _turn = DATABASE_LOCK.lock().await;
+    let _database = TestDatabase::create(DATABASE, SETUP).await;
+    let mut session = open().await;
+    let tables = catalog::objects(&mut session, DATABASE, ObjectFolder::Tables)
+        .await
+        .unwrap();
+    let table = tables.iter().find(|table| table.name == "T").unwrap();
+    let script = scripting::create_table(&mut session, DATABASE, table.object_id.unwrap())
+        .await
+        .unwrap();
+    assert!(
+        script.contains("[c] [dbo].[int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int] NOT NULL"),
+        "{script}"
+    );
+
+    // Running the script elsewhere creates the table and nothing else.
+    const COPY: &str = "Quervio Tests]Scripted";
+    let _copy = TestDatabase::create(
+        COPY,
+        "CREATE TYPE dbo.[int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int] FROM int;
+         CREATE TABLE dbo.Victim (x int);",
+    )
+    .await;
+    run_scripts(&[&format!("USE [Quervio Tests]]Scripted];\n{script}")]).await;
+    let copies = catalog::objects(&mut session, COPY, ObjectFolder::Tables)
+        .await
+        .unwrap();
+    assert_eq!(names(&copies), ["dbo.T", "dbo.Victim"]);
+}
+
 #[tokio::test]
 #[ignore = "needs SQL Server: docker compose up -d --wait"]
 async fn modules_script_as_create_and_alter() {
