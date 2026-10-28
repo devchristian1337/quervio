@@ -2,7 +2,8 @@
 // After Legion's GlowingKeyboard, redrawn as a Windows keyboard in the
 // theme's colours. Keys are named as src/lib/commands.ts writes them:
 // "Ctrl", "Shift", "Alt", "F5", "S", "Tab", ",", so a shortcut split on "+"
-// is what lights up. Both Ctrl, Shift and Alt keys light, since either works.
+// is what lights up. A modifier lights on the left only, as it is written
+// once in the shortcut: the right Shift and Ctrl have names of their own.
 //
 // The keys follow the layout Windows is typing with: navigator.keyboard
 // gives the character of each physical key, which labels it, and a layout
@@ -113,12 +114,12 @@ function rows(iso: boolean): (KeyDef | "arrows")[][] {
       ? [
           { id: "Shift", grow: 0.45, align: "start" },
           ...codes(["IntlBackslash", ...letters("ZXCVBNM"), "Comma", "Period", "Slash"]),
-          { id: "Shift", grow: 1.55, align: "end" },
+          { id: "ShiftRight", label: "Shift", grow: 1.55, align: "end" },
         ]
       : [
           { id: "Shift", grow: 1, align: "start" },
           ...codes([...letters("ZXCVBNM"), "Comma", "Period", "Slash"]),
-          { id: "Shift", grow: 1, align: "end" },
+          { id: "ShiftRight", label: "Shift", grow: 1, align: "end" },
         ],
     [
       { id: "Ctrl", grow: 0.5, align: "start" },
@@ -126,7 +127,7 @@ function rows(iso: boolean): (KeyDef | "arrows")[][] {
       { id: "Alt", grow: 0.3 },
       { id: "Space", label: "", grow: 5 },
       { id: "AltGr", label: "Alt Gr", grow: 0.3 },
-      { id: "Ctrl", grow: 0.5, align: "end" },
+      { id: "CtrlRight", label: "Ctrl", grow: 0.5, align: "end" },
       "arrows",
     ],
   ];
@@ -210,16 +211,17 @@ function Key({ def, lit, size, delay, still, height = size, className }: KeyProp
         marginBottom: top ? -ROW_GAP : undefined,
       }}
       className={cn(
-        "flex min-w-0 items-center justify-center rounded-md border border-t-[1.5px] bg-background/60 px-1.5 text-[11px] text-muted-foreground shadow-[inset_0_0_12px_rgb(0_0_0/0.12)] transition-colors duration-200 select-none",
+        // Opaque, and above a lit key (z-1 against z-0), so a glow never tints the keys beside it.
+        "relative z-1 flex min-w-0 items-center justify-center rounded-md border border-t-[1.5px] bg-background px-1.5 text-[11px] text-muted-foreground shadow-[inset_0_0_12px_rgb(0_0_0/0.12)] transition-[color,border-color,box-shadow] duration-200 ease-out select-none motion-reduce:transition-none",
         def.align === "start" && "justify-start",
         def.align === "end" && "justify-end",
         top && "items-start rounded-b-none! border-b-0! pt-2",
         def.part === "bottom" && "rounded-t-none! border-t-0!",
-        lit && "glowing-key text-primary",
+        lit && "glowing-key z-0 text-primary",
         className,
       )}
     >
-      <span className={cn("truncate", lit && "blur-in font-medium")}>{def.label ?? def.id}</span>
+      <span className={cn("truncate", lit && "font-medium")}>{def.label ?? def.id}</span>
     </motion.div>
   );
 }
