@@ -37,10 +37,10 @@ import {useOperations} from "@/stores/operations";
 // tools look like the connection dialog and Settings: 36px fields, labels
 // in the text colour above them.
 export const inputClass =
-  "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive";
+  "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring aria-invalid:border-destructive";
 /** A script or JSON editor: the field's border and focus, in the code face. */
 export const textareaClass =
-  "w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none select-text placeholder:text-muted-foreground disabled:opacity-50 dark:bg-input/30 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
+  "w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none select-text placeholder:text-muted-foreground disabled:opacity-50 dark:bg-input/30 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 /** Read-only scripts and results. */
 export const codeClass =
   "overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre select-text";

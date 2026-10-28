@@ -83,7 +83,7 @@ export function Templates({ context }: { context: Context }) {
               <button
                 key={t.id}
                 className={cn(
-                  "block w-full rounded-sm px-3 py-2 text-left text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                  "block w-full rounded-sm px-3 py-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                   selected?.id === t.id ? "bg-accent" : "hover:bg-accent/40",
                 )}
                 onClick={() => setSelected({ ...t })}
