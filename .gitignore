@@ -29,3 +29,7 @@ dist-ssr
 
 # Design audit screenshots (tasteskill)
 .taste-skill/
+/tools/**/bin/
+/tools/**/obj/
+/src-tauri/resources/microsoft/*
+!/src-tauri/resources/microsoft/README.txt

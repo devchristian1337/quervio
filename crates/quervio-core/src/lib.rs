@@ -13,9 +13,11 @@ pub mod execution;
 pub mod files;
 pub mod format;
 pub mod guard;
+pub mod management;
 pub mod results;
 pub mod scripting;
 pub mod secrets;
 pub mod session;
+pub mod sqlcmd;
 
 pub use error::{Error, Result};

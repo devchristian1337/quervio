@@ -17,6 +17,8 @@ const APPLICATION_NAME: &str = "Quervio - Object Explorer";
 type SharedSession = Arc<tokio::sync::Mutex<Session>>;
 
 pub struct ExplorerState {
+    data_dir: std::path::PathBuf,
+    token: tokio::sync::Mutex<Option<(String, u64)>>,
     connections: Mutex<ConnectionStore>,
     secrets: DpapiSecretStore,
     sessions: tokio::sync::Mutex<HashMap<String, SharedSession>>,
@@ -25,8 +27,27 @@ pub struct ExplorerState {
 }
 
 impl ExplorerState {
+    pub(crate) fn connection_from_server(&self, server: &str) -> CommandResult<SavedConnection> {
+        let store = self.connections.lock().unwrap();
+        store
+            .list()
+            .iter()
+            .find(|c| c.server.eq_ignore_ascii_case(server))
+            .cloned()
+            .or_else(|| store.list().first().cloned())
+            .map(|mut c| {
+                if !c.server.eq_ignore_ascii_case(server) {
+                    c.environment = quervio_core::connection::Environment::Production;
+                    c.default_database = None;
+                }
+                c
+            })
+            .ok_or_else(|| "Save a connection before SQLCMD :connect.".into())
+    }
     pub fn open(data_dir: &Path) -> quervio_core::Result<Self> {
         Ok(Self {
+            data_dir: data_dir.to_path_buf(),
+            token: tokio::sync::Mutex::new(None),
             connections: Mutex::new(ConnectionStore::open(data_dir.join("connections.json"))?),
             secrets: DpapiSecretStore::new(data_dir.join("secrets.json")),
             sessions: tokio::sync::Mutex::new(HashMap::new()),
@@ -42,6 +63,29 @@ impl ExplorerState {
             .get(id)
             .map_err(message)?
             .clone())
+    }
+
+    pub(crate) async fn credential(
+        &self,
+        connection: &SavedConnection,
+        typed: Option<String>,
+    ) -> CommandResult<Option<String>> {
+        if connection.authentication != Authentication::Entra {
+            return self.password(&connection.id, typed);
+        }
+        let mut cached = self.token.lock().await;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(message)?
+            .as_secs();
+        if let Some((token, expires)) = cached.as_ref() {
+            if *expires > now + 120 {
+                return Ok(Some(token.clone()));
+            }
+        }
+        let (token, expires) = crate::microsoft::access_token(&self.data_dir).await?;
+        *cached = Some((token.clone(), expires));
+        Ok(Some(token))
     }
 
     /// The stored password, or the one typed in the dialog when given.
@@ -66,7 +110,7 @@ impl ExplorerState {
 
     async fn connect(&self, id: &str) -> CommandResult<(SharedSession, ServerInfo)> {
         let connection = self.connection(id)?;
-        let password = self.password(id, None)?;
+        let password = self.credential(&connection, None).await?;
         let mut session = Session::open(&connection, password, APPLICATION_NAME)
             .await
             .map_err(message)?;
@@ -123,7 +167,9 @@ pub async fn save_connection(
             state.secrets.set(&saved.id, &password).map_err(message)?
         }
         (Authentication::Sql { .. }, None) => {}
-        (Authentication::Windows, _) => state.secrets.delete(&saved.id).map_err(message)?,
+        (Authentication::Windows | Authentication::Entra, _) => {
+            state.secrets.delete(&saved.id).map_err(message)?
+        }
     }
     // Settings may have changed; the next expand reconnects with them.
     state.disconnect(&saved.id).await;
@@ -149,7 +195,7 @@ pub async fn test_connection(
     connection: SavedConnection,
     password: Option<String>,
 ) -> CommandResult<ServerInfo> {
-    let password = state.password(&connection.id, password)?;
+    let password = state.credential(&connection, password).await?;
     let mut session = Session::open(&connection, password, APPLICATION_NAME)
         .await
         .map_err(message)?;
@@ -166,9 +212,11 @@ pub async fn connection_databases(
     mut connection: SavedConnection,
     password: Option<String>,
 ) -> CommandResult<Vec<CatalogItem>> {
-    let password = state.password(&connection.id, password)?;
+    let password = state.credential(&connection, password).await?;
     // Discovery must work even when the database being edited does not exist.
-    connection.default_database = None;
+    if connection.authentication != Authentication::Entra {
+        connection.default_database = None;
+    }
     tokio::time::timeout(std::time::Duration::from_secs(20), async {
         let mut session = Session::open(&connection, password, APPLICATION_NAME)
             .await
@@ -257,6 +305,7 @@ pub async fn explorer_script(
     use quervio_core::scripting;
     let session = state.session(&id).await?;
     let mut session = session.lock().await;
+    let is_module = matches!(&kind, ScriptKind::Create | ScriptKind::Alter);
     let script = match kind {
         ScriptKind::SelectTop => {
             scripting::select_top(&mut session, &database, object_id, 1000).await
@@ -271,7 +320,27 @@ pub async fn explorer_script(
             .await
             .map(|definition| scripting::as_alter(&definition)),
     };
-    script.map_err(message)
+    let script = script.map_err(message)?;
+    if is_module {
+        let db = catalog::quote_name(&database);
+        let flags=session.query_table(&format!("SELECT uses_ansi_nulls,uses_quoted_identifier FROM {db}.sys.sql_modules WHERE object_id={object_id}"),1).await.map_err(message)?;
+        if let Some(row) = flags.rows.first() {
+            return Ok(format!(
+                "SET ANSI_NULLS {};\nGO\nSET QUOTED_IDENTIFIER {};\nGO\n{script}",
+                if row[0].as_deref() == Some("0") {
+                    "OFF"
+                } else {
+                    "ON"
+                },
+                if row[1].as_deref() == Some("0") {
+                    "OFF"
+                } else {
+                    "ON"
+                }
+            ));
+        }
+    }
+    Ok(script)
 }
 
 /// Reads a `.sql` file chosen in the Open dialog.

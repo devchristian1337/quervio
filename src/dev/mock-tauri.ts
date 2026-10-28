@@ -28,6 +28,9 @@ const item = (name: string, extra: Partial<CatalogItem> = {}): CatalogItem => ({
 const server = { serverName: "mock", version: "16.0.0.0", database: "master" };
 
 const MOCK_ROWS = 1_000_000;
+const table = (columns: string[], rows: (string | null)[][] = []) => ({columns, rows, truncated: false});
+const PLAN = `<ShowPlanXML xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan" Version="1.6" Build="16.0.0.0"><BatchSequence><Batch><Statements><StmtSimple StatementText="SELECT Id FROM dbo.Customer" StatementSubTreeCost="0.003"><QueryPlan><RelOp NodeId="0" PhysicalOp="Clustered Index Scan" LogicalOp="Clustered Index Scan" EstimateRows="100" EstimatedTotalSubtreeCost="0.003"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="100" /></RunTimeInformation><IndexScan /></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>`;
+const previews = new Map<string, string>();
 const COLUMNS = ["Id", "Name", "Notes", "Payload"];
 
 let mockDescending = false;
@@ -75,6 +78,43 @@ function encodeWindow(start: number, count: number): ArrayBuffer {
 mockIPC(async (cmd, args) => {
   const a = args as Record<string, unknown>;
   switch (cmd) {
+    case "management_capabilities":return {version: "16.0.0.0", majorVersion: 16, edition: "Developer Edition · browser mock", engineEdition: 3, database: a.database ?? "master", features: Object.fromEntries(["plans", "monitor", "live", "queryStore", "agent", "backup", "events", "audit", "tde", "alwaysEncrypted"].map(f => [f, {state: "available", reason: ""}]))};
+    case "management_dependencies":return [{name: "Microsoft bridge (.NET 10, SMO, DacFx, SqlClient)", path: null, available: false, help: "Configure components in the desktop app."}, {name: "SQL Tools Service", path: null, available: false, help: "Browser mock uses catalog completion."}];
+    case "management_read": {
+      const r = a.resource as Record<string, unknown>;
+      switch (r.kind) {
+        case "objects":return table(["schema", "name", "object_id", "type_desc", "modify_date"], [["dbo", "Customer", "1", "USER_TABLE", "2026-10-28"], ["sales", "Order", "2", "USER_TABLE", "2026-10-28"], ["dbo", "CustomerNames", "3", "VIEW", "2026-10-28"]]);
+        case "columns":return table(["column_id", "name", "type", "max_length", "precision", "scale", "is_nullable", "is_identity", "is_computed", "default_name", "default_expression", "computed_expression", "identity_seed", "identity_increment"], [["1", "Id", "int", "4", "10", "0", "0", "1", "0", null, null, null, "1", "1"], ["2", "Name", "nvarchar", "200", "0", "0", "0", "0", "0", null, null, null, null, null]]);
+        case "relations":return table(["name", "parent_schema", "parent_table", "parent_column", "referenced_schema", "referenced_table", "referenced_column", "constraint_column_id", "delete_referential_action_desc", "update_referential_action_desc"], [["FK_Order_Customer", "sales", "Order", "CustomerId", "dbo", "Customer", "Id", "1", "NO_ACTION", "NO_ACTION"]]);
+        case "definition":return table(["definition"], [["CREATE VIEW dbo.CustomerNames AS SELECT Id, Name FROM dbo.Customer;"]]);
+        case "properties":return table(["name", "state_desc", "recovery_model_desc", "compatibility_level"], [[String(a.database ?? "master"), "ONLINE", "FULL", "160"]]);
+        case "activity":return table(["session_id", "login_name", "database_name", "status", "command", "blocking_session_id", "wait_type", "wait_ms", "cpu_ms", "elapsed_ms", "text"], [["52", "support", "Sales", "running", "SELECT", "0", null, "0", "12", "35", "SELECT Id, Name FROM dbo.Customer"]]);
+        case "waits":return table(["wait_type", "waiting_tasks_count", "wait_time_ms", "signal_wait_time_ms"], [["PAGEIOLATCH_SH", "15", "120", "4"]]);
+        case "io":return table(["database_name", "name", "num_of_reads", "num_of_writes", "io_stall_read_ms", "io_stall_write_ms"], [["Sales", "Sales_Data", "400", "120", "38", "12"]]);
+        case "cpu":return table(["sample_tick", "sql_process_cpu_percent", "system_idle_percent"], [["1000", "3", "90"], ["2000", "4", "89"], ["3000", "2", "94"]]);
+        case "queryStoreOptions":return table(["actual_state_desc", "desired_state_desc", "current_storage_size_mb", "max_storage_size_mb"], [["READ_WRITE", "READ_WRITE", "12", "1000"]]);
+        case "queryStoreQueries":case "queryStoreRegressions":return table(["query_id", "query_sql_text", "executions", "avg_duration_us", "plans"], [["1", "SELECT Id, Name FROM dbo.Customer", "15", "35000", "2"]]);
+        case "queryStorePlans":return table(["plan_id", "query_id", "is_forced_plan", "force_failure_count", "avg_duration_us"], [["1", "1", "0", "0", "35000"], ["2", "1", "0", "0", "18000"]]);
+        case "queryStorePlan":case "live":return table(["query_plan"], [[PLAN]]);
+        case "eventData":return table(["target_data"], [[`<RingBufferTarget><event name="sql_batch_completed" timestamp="2026-10-28T12:00:00Z"><data name="duration"><value>35000</value></data><action name="sql_text"><value>SELECT Id FROM dbo.Customer</value></action></event></RingBufferTarget>`]]);
+        case "principals":return table(["principal_id", "name", "type_desc"], [["1", "dbo", "SQL_USER"]]);
+        case "roles":return table(["role_name", "member_name"], [["db_datareader", "support"]]);
+        default:return table(["name"]);
+      }
+    }
+    case "management_prepare": {const token = crypto.randomUUID();previews.set(token, String(a.script));return {token, script: a.script, server: "Mock server", database: a.database ?? "master", expiresInSeconds: 300};}
+    case "management_bridge_prepare":return {token: crypto.randomUUID(), server: "Mock server", database: a.database ?? "master"};
+    case "management_apply": {if (!a.confirmed || !previews.delete(String(a.token))) throw new Error("Invalid preview.");return ["Browser mock: no SQL was submitted."];}
+    case "management_discard":previews.delete(String(a.token));return null;
+    case "management_bridge": {
+      const request=a.request as {action:string};
+      if(request.action==="importPreview")return table(["Id","Name"],[["1","Rossi"],["2",""]]);
+      if(request.action==="dacPreview")return {packageHash:"mock-package",script:"-- Browser mock: no deployment was generated.",report:"<DeploymentReport/>"};
+      if(request.action==="encryptedQuery")return {sets:[table(["Id","Name"],[["1","Rossi"]])]};
+      return {mock: true, message: "No Microsoft operation was executed in browser mock mode."};
+    }
+    case "query_sqlcmd_prepare":return {token: "mock-sqlcmd", script: a.script, hasLocalCommands: /!!|:out|:error/i.test(String(a.script))};
+    case "language_request":return {result: null, diagnostics: []};
     case "list_connections":
       return [connection];
     case "explorer_connect":
@@ -93,6 +133,7 @@ mockIPC(async (cmd, args) => {
       const channel = a.onEvent as Channel<ExecutionEvent>;
       const send = (event: ExecutionEvent) => channel.onmessage(event);
       send({ type: "batchStarted", batch: 0, firstLine: 0 });
+      if ((a.options as {planMode?: string} | undefined)?.planMode !== "none" && (a.options as {planMode?: string} | undefined)?.planMode) send({type: "plan", xml: PLAN});
       // WAITFOR DELAY '00:00:05' makes the mock slow, to see the running state.
       const wait = /waitfor\s+delay\s+'00:00:(\d\d)'/i.exec(String(a.script));
       if (wait) await new Promise((resolve) => setTimeout(resolve, Number(wait[1]) * 1000));

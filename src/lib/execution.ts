@@ -5,6 +5,9 @@ export type ColumnKind = "number" | "date" | "binary" | "text";
 export type Outcome = "succeeded" | "failed" | "cancelled";
 
 export type ExecutionEvent =
+  | {type:"sessionClosed";reason:string}
+  | {type: "sessionChanged"; server: import("@/lib/api").ServerInfo; connectionId: string | null}
+  | { type: "plan"; xml: string }
   | { type: "batchStarted"; batch: number; firstLine: number }
   | { type: "message"; text: string; isError: boolean; header: string | null; line: number | null }
   | { type: "rowsAffected"; count: number }

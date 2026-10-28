@@ -8,6 +8,8 @@ import { useConnections } from "@/stores/connections";
 import { useDialogs } from "@/stores/dialogs";
 import { executeOptions, useSettings } from "@/stores/settings";
 import type { ColumnKind, ExecutionEvent, Outcome } from "@/lib/execution";
+import { useSqlcmdConfirmation } from "@/stores/sqlcmd";
+import {invalidateCatalog} from "@/lib/metadata-events";
 
 export interface MessageLine {
   text: string;
@@ -45,7 +47,11 @@ export interface QueryTab {
   runId: number;
   startedAt: number | null;
   elapsedMs: number | null;
-  view: "results" | "messages";
+  view: "results" | "messages" | "plans";
+  planMode?: "none" | "estimated" | "actual";
+  plans?: string[];
+  sqlcmdMode?: boolean;
+  metadataAvailable?: boolean;
   /** Text the tab's editor starts with (restored, opened from a file or scripted). */
   initialText: string;
   /** The .sql file the tab was opened from or saved to. */
@@ -55,6 +61,8 @@ export interface QueryTab {
 }
 
 export interface OpenOptions {
+  sqlcmdMode?: boolean;
+  planMode?: "none" | "estimated" | "actual";
   title?: string;
   text?: string;
   filePath?: string | null;
@@ -86,6 +94,8 @@ interface QueriesState {
   close: (id: string) => Promise<void>;
   activate: (id: string) => void;
   setView: (id: string, view: QueryTab["view"]) => void;
+  setPlanMode: (id: string, mode: NonNullable<QueryTab["planMode"]>) => void;
+  setSqlcmdMode: (id: string, mode: boolean) => void;
   execute: (id: string, script: Script) => Promise<void>;
   cancel: (id: string) => Promise<void>;
   useDatabase: (id: string, database: string) => Promise<void>;
@@ -181,6 +191,8 @@ export const useQueries = create<QueriesState>((set, get) => {
         initialText: text,
         filePath: options.filePath ?? null,
         dirty: options.dirty ?? false,
+        sqlcmdMode: options.sqlcmdMode ?? false,
+        planMode: options.planMode ?? "none",
       };
       set((s) => ({ tabs: [...s.tabs, tab], activeId: options.activate === false ? s.activeId : id }));
       try {
@@ -207,6 +219,8 @@ export const useQueries = create<QueriesState>((set, get) => {
     activate: (id) => set({ activeId: id }),
 
     setView: (id, view) => patch(id, { view }),
+    setPlanMode: (id, planMode) => patch(id, { planMode }),
+    setSqlcmdMode: (id, sqlcmdMode) => patch(id, { sqlcmdMode, planMode: "none" }),
 
     execute: async (id, script) => {
       const tab = get().tabs.find((t) => t.id === id);
@@ -217,7 +231,15 @@ export const useQueries = create<QueriesState>((set, get) => {
       const connections = useConnections.getState().connections;
       const confirm = useSettings.getState().settings.query.confirmDestructive;
       let allowDestructive = !confirm;
-      if (confirm && tabEnvironment(tab, connections) === "production") {
+      let sqlcmdToken: string | null = null;
+      if (tab.sqlcmdMode) {
+        try {
+          const preview = await api.sqlcmdPrepare(id, script.text, tab.filePath, script.baseLine);
+          if (!await useSqlcmdConfirmation.getState().ask(preview.script, preview.hasLocalCommands)) return;
+          sqlcmdToken = preview.token;
+        } catch (error) {toast.error("SQLCMD preparation failed", {description: errorMessage(error)});return;}
+      }
+      if (!tab.sqlcmdMode && tab.planMode !== "estimated" && confirm && tabEnvironment(tab, connections) === "production") {
         const check = await api.checkScript(script.text, script.baseLine);
         if (check.findings.length > 0 || check.uncertain) {
           const connection = connections.find((c) => c.id === tab.connectionId);
@@ -236,6 +258,7 @@ export const useQueries = create<QueriesState>((set, get) => {
         resultSets: [],
         outcome: null,
         runId: tab.runId + 1,
+        plans: [],
         startedAt: Date.now(),
         elapsedMs: null,
         error: null,
@@ -244,6 +267,15 @@ export const useQueries = create<QueriesState>((set, get) => {
       const channel = new Channel<ExecutionEvent>();
       channel.onmessage = (event) => {
         switch (event.type) {
+          case "sessionClosed":
+            patch(id,{status:"disconnected",error:event.reason,openTransactions:0});
+            break;
+          case "sessionChanged":
+            patch(id, {server: event.server, database: event.server.database, environment: "production", metadataAvailable: !!event.connectionId, ...(event.connectionId ? {connectionId: event.connectionId} : {})});
+            break;
+          case "plan":
+            patch(id, (t) => ({ plans: [...(t.plans ?? []), event.xml], view: "plans" }));
+            break;
           case "message":
             patch(id, (t) => ({ messages: [...t.messages, event] }));
             break;
@@ -279,6 +311,7 @@ export const useQueries = create<QueriesState>((set, get) => {
             break;
           }
           case "finished":
+            if(event.outcome==="succeeded" && (tab.sqlcmdMode || /^\s*(CREATE|ALTER|DROP)\b/im.test(script.text))) invalidateCatalog();
             patch(id, (t) => ({
               outcome: event.outcome,
               elapsedMs: event.elapsedMs,
@@ -289,7 +322,7 @@ export const useQueries = create<QueriesState>((set, get) => {
                   ? [{ text: "Commands completed successfully.", isError: false }]
                   : t.messages,
               // Errors are easy to miss behind a grid: show them, like SSMS.
-              view: event.outcome === "succeeded" && t.resultSets.length > 0 ? "results" : "messages",
+              view: (t.plans?.length ?? 0)>0 ? "plans" : event.outcome === "succeeded" && t.resultSets.length > 0 ? "results" : "messages",
             }));
             break;
           case "batchStarted":
@@ -298,7 +331,8 @@ export const useQueries = create<QueriesState>((set, get) => {
       };
 
       try {
-        await api.executeQuery(id, script.text, script.baseLine, executeOptions(), allowDestructive, channel);
+        if (sqlcmdToken) await api.sqlcmdExecute(id, sqlcmdToken, executeOptions(), channel);
+        else await api.executeQuery(id, script.text, script.baseLine, { ...executeOptions(), planMode: tab.planMode ?? "none" }, allowDestructive, channel);
       } catch (error) {
         patch(id, (t) => ({
           messages: [...t.messages, { text: errorMessage(error), isError: true }],

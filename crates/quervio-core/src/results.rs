@@ -81,6 +81,50 @@ pub struct ResultSet {
 }
 
 impl ResultSet {
+    pub fn has_clipped_cells(&self) -> bool {
+        self.clipped.0.iter().any(|word| *word != 0)
+    }
+
+    pub fn write_csv(&self, out: &mut impl Write) -> io::Result<()> {
+        if self.has_clipped_cells() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "This result contains truncated values. Increase the cell limit and rerun the query before exporting.",
+            ));
+        }
+        fn field(out: &mut impl Write, value: Option<&str>, escape: bool) -> io::Result<()> {
+            out.write_all(b"\"")?;
+            match value {
+                None => out.write_all(br"\N")?,
+                Some(text) => {
+                    if escape && text.starts_with('\\') {
+                        out.write_all(br"\")?;
+                    }
+                    out.write_all(text.replace('"', "\"\"").as_bytes())?;
+                }
+            }
+            out.write_all(b"\"")
+        }
+        out.write_all(&[0xef, 0xbb, 0xbf])?;
+        for (i, column) in self.columns.iter().enumerate() {
+            if i > 0 {
+                out.write_all(b",")?;
+            }
+            field(out, Some(&column.name), false)?;
+        }
+        out.write_all(b"\r\n")?;
+        for row in 0..self.row_count() {
+            let stored = self.stored(row);
+            for column in 0..self.columns.len() {
+                if column > 0 {
+                    out.write_all(b",")?;
+                }
+                field(out, self.cell_text(stored, column), true)?;
+            }
+            out.write_all(b"\r\n")?;
+        }
+        Ok(())
+    }
     pub fn new(columns: Vec<ResultColumn>) -> Self {
         Self {
             columns,
@@ -372,6 +416,34 @@ mod tests {
         assert_eq!(set.cell(1, 1).unwrap().text, None);
         assert_eq!(set.cell(2, 0).unwrap().text.as_deref(), Some("3"));
         assert_eq!(set.cell(3, 0), None);
+    }
+
+    #[test]
+    fn csv_preserves_nulls_quotes_and_display_order() {
+        let mut data = set();
+        data.sort(Some((0, SortDirection::Descending)));
+        let mut out = Vec::new();
+        data.write_csv(&mut out).unwrap();
+        assert_eq!(&out[..3], &[0xef, 0xbb, 0xbf]);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains(r#""2","\N""#));
+        assert!(text.contains(r#"Bianchi, ""Gino"""#));
+        assert!(text.lines().nth(1).unwrap().starts_with(r#""3""#));
+    }
+
+    #[test]
+    fn lossy_results_cannot_be_exported_as_complete_data() {
+        let mut data = set();
+        data.push_row(
+            &[
+                ColumnValues::Int(4),
+                ColumnValues::String(SqlString::from_utf8_string("clipped".into())),
+            ],
+            2,
+        );
+        let mut out = Vec::new();
+        assert!(data.write_csv(&mut out).is_err());
+        assert!(out.is_empty());
     }
 
     #[test]

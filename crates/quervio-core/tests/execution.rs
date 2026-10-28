@@ -32,6 +32,11 @@ async fn run(session: &mut Session, script: &str, base_line: u32) -> (Outcome, V
             ResultLimits::default(),
             |event| {
                 log.push(match event {
+                    ExecutionEvent::SessionClosed { reason } => format!("disconnected {reason}"),
+                    ExecutionEvent::Plan { xml } => format!("plan {} bytes", xml.len()),
+                    ExecutionEvent::SessionChanged { server, .. } => {
+                        format!("server {}", server.server_name)
+                    }
                     ExecutionEvent::BatchStarted { batch, first_line } => {
                         format!("batch {batch}@{first_line}")
                     }
