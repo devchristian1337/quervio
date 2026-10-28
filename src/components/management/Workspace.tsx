@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { QueryWorkspace } from "@/components/QueryWorkspace";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/flexnative-tooltip";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useConnections } from "@/stores/connections";
 import { useQueries } from "@/stores/queries";
@@ -132,16 +133,13 @@ export function Workspace() {
                   selected ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                 )}
               >
-                <button
-                  className="min-w-0 truncate"
-                  title={`${TOOL_NAMES[tab.kind]} · ${tab.database ?? "Server"}`}
-                  onClick={() => workbench.activate(tab.id)}
-                >
-                  {tab.name ?? TOOL_NAMES[tab.kind]}
-                </button>
+                <Tip label={`${TOOL_NAMES[tab.kind]} · ${tab.database ?? "Server"}`} side="bottom">
+                  <button className="min-w-0 truncate" onClick={() => workbench.activate(tab.id)}>
+                    {tab.name ?? TOOL_NAMES[tab.kind]}
+                  </button>
+                </Tip>
                 <button
                   aria-label={`Close ${TOOL_NAMES[tab.kind]}`}
-                  title="Close"
                   // A 20 px target with a 14 px icon, as on the query tabs.
                   className={cn(
                     "grid size-5 shrink-0 place-items-center rounded hover:bg-foreground/10",

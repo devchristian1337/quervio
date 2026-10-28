@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { TooltipProvider } from "./components/ui/flexnative-tooltip";
 import "./index.css";
 import { loadSettings, useSettings } from "./stores/settings";
 import { applyTheme, findTheme } from "./lib/themes";
@@ -20,6 +21,9 @@ applyTheme(
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    {/* A short wait, so moving across a toolbar does not flash every tip. */}
+    <TooltipProvider delayDuration={400}>
+      <App />
+    </TooltipProvider>
   </React.StrictMode>,
 );
