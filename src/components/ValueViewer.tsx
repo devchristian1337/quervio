@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
-import { Copy, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
+import { CopyButton } from "@/components/ui/copy-button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { toast } from "@/components/ui/basic-toast";
 import { api, errorMessage } from "@/lib/api";
 
 /** Indents JSON and XML; anything else is shown as it is. */
@@ -83,18 +81,9 @@ export function ValueViewer({ tabId, set, row, column, columnName, onClose }: Pr
         </div>
         {shown && (
           <div className="flex justify-end">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                writeText(shown.text).then(
-                  () => toast.success("Value copied"),
-                  (error) => toast.error("Copy failed", { description: errorMessage(error) }),
-                )
-              }
-            >
-              <Copy /> Copy
-            </Button>
+            <CopyButton text={shown.text} label="Copy the value" variant="outline">
+              Copy
+            </CopyButton>
           </div>
         )}
       </DialogContent>

@@ -2,11 +2,9 @@
 // change applies at once and is saved by src/stores/settings.ts.
 import { useEffect, useState, type ReactNode } from "react";
 import { getTauriVersion, getVersion } from "@tauri-apps/api/app";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   Check,
   Code2,
-  Copy,
   Info,
   Keyboard,
   Palette,
@@ -19,13 +17,14 @@ import {
 import { toast } from "@/components/ui/basic-toast";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/flexnative-tooltip";
+import { CopyButton } from "@/components/ui/copy-button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { GlowingKeyboard } from "@/components/ui/glowing-keyboard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/interfaces-select";
 import { Switch } from "@/components/ui/switch";
-import { api, errorMessage } from "@/lib/api";
+import { api } from "@/lib/api";
 import { COMMANDS, commandFor, keysOf, shortcutOf, type Command } from "@/lib/commands";
 import { pauseShortcuts } from "@/lib/shortcuts";
 import { THEMES, findTheme, type Theme, type ThemeId } from "@/lib/themes";
@@ -483,6 +482,8 @@ function ShortcutsSection() {
           )}
         </p>
       </div>
+      {/* The keys stay lit over the gaps between rows and groups, until the pointer leaves the list. */}
+      <div onMouseLeave={() => setPreview((current) => (current?.recording ? current : null))}>
       {groups.map((group) => (
         <div key={group} className="mb-6">
           <h4 className="mb-1 text-xs font-medium text-muted-foreground">{group}</h4>
@@ -491,6 +492,7 @@ function ShortcutsSection() {
           ))}
         </div>
       ))}
+      </div>
     </>
   );
 }
@@ -555,7 +557,6 @@ function ShortcutRow({ command, onPreview }: { command: Command; onPreview: (pre
     <div
       className="flex min-h-11 items-center justify-between gap-4 border-b py-1.5 last:border-b-0"
       onMouseEnter={() => show(keys[0])}
-      onMouseLeave={() => show(undefined)}
     >
       <span className="text-sm">{command.label}</span>
       <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -649,12 +650,6 @@ function AboutSection() {
     api.dataDir().then((dir) => setDataDir(dir ?? ""), () => setDataDir(""));
   }, []);
 
-  const copyDataDir = () =>
-    writeText(dataDir).then(
-      () => toast.success("Folder path copied"),
-      (error) => toast.error("Copy failed", { description: errorMessage(error) }),
-    );
-
   return (
     <>
       <div className="mb-6 flex items-center gap-4">
@@ -675,11 +670,7 @@ function AboutSection() {
           <Tip label={dataDir}>
             <span className="truncate font-mono text-xs select-text">{dataDir || "—"}</span>
           </Tip>
-          <Tip label="Copy path" wrap>
-            <Button variant="ghost" size="icon" className="size-7" disabled={!dataDir} aria-label="Copy path" onClick={() => void copyDataDir()}>
-              <Copy />
-            </Button>
-          </Tip>
+          <CopyButton text={dataDir} label="Copy path" className="size-7" disabled={!dataDir} />
         </div>
       </Row>
 
