@@ -11,6 +11,7 @@ interface UpdateStatus {
   current: string | null;
   available: string | null;
   ready: boolean;
+  empty: boolean;
 }
 
 export type UpdatePhase =
@@ -18,6 +19,7 @@ export type UpdatePhase =
   | "checking"
   | "not-installed"
   | "current"
+  | "empty"
   | "available"
   | "downloading"
   | "ready"
@@ -29,6 +31,8 @@ export const useUpdates = create<{
   available: string | null;
   progress: number;
   error: string | null;
+  /** What failed, when phase is "error". */
+  failed: "check" | "download" | "install" | null;
   check: () => Promise<void>;
   download: () => Promise<void>;
   install: () => Promise<void>;
@@ -37,8 +41,9 @@ export const useUpdates = create<{
   available: null,
   progress: 0,
   error: null,
+  failed: null,
   check: async () => {
-    set({ phase: "checking", error: null });
+    set({ phase: "checking", error: null, failed: null });
     try {
       const status = await invoke<UpdateStatus>("update_check");
       set({
@@ -49,21 +54,23 @@ export const useUpdates = create<{
             ? "ready"
             : status.available
               ? "available"
-              : "current",
+              : status.empty
+                ? "empty"
+                : "current",
       });
     } catch (error) {
-      set({ phase: "error", error: String(error) });
+      set({ phase: "error", error: String(error), failed: "check" });
     }
   },
   download: async () => {
     const onProgress = new Channel<number>();
     onProgress.onmessage = (progress) => set({ progress });
-    set({ phase: "downloading", progress: 0, error: null });
+    set({ phase: "downloading", progress: 0, error: null, failed: null });
     try {
       await invoke("update_download", { onProgress });
       set({ phase: "ready" });
     } catch (error) {
-      set({ phase: "error", error: String(error) });
+      set({ phase: "error", error: String(error), failed: "download" });
     }
   },
   install: async () => {
@@ -74,7 +81,7 @@ export const useUpdates = create<{
       // Quervio exits here; Velopack starts the new version.
       await invoke("update_apply");
     } catch (error) {
-      set({ phase: "error", error: String(error) });
+      set({ phase: "error", error: String(error), failed: "install" });
     }
   },
 }));

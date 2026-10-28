@@ -194,7 +194,9 @@ mockIPC(async (cmd, args) => {
     case "settings_data_dir":
       return String.raw`C:\Users\mock\AppData\Roaming\com.quervio.app`;
     case "update_check":
-      return { installed: true, current: "0.1.0-mock", available: "0.1.1-mock", ready: false };
+      if (new URLSearchParams(location.search).has("update-error"))
+        throw "https://github.com/devchristian1337/quervio/releases cannot be read: the repository is private or does not exist.";
+      return { installed: true, current: "0.1.0-mock", available: "0.1.1-mock", ready: false, empty: false };
     case "update_download": {
       const channel = a.onProgress as Channel<number>;
       for (const percent of [0, 25, 50, 75, 100]) channel.onmessage(percent);
