@@ -81,6 +81,7 @@ mockIPC(async (cmd, args) => {
     case "test_connection":
       return server;
     case "explorer_databases":
+    case "connection_databases":
       return [item("master", { system: true }), item("Sales")];
     case "explorer_objects":
       return [item("Customer", { schema: "dbo", objectId: 1 })];

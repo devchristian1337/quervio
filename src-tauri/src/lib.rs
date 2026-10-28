@@ -24,6 +24,7 @@ pub fn run() {
             explorer::save_connection,
             explorer::delete_connection,
             explorer::test_connection,
+            explorer::connection_databases,
             explorer::explorer_connect,
             explorer::explorer_disconnect,
             explorer::explorer_databases,

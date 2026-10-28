@@ -158,6 +158,29 @@ pub async fn test_connection(
     Ok(info)
 }
 
+/// Lists accessible databases using the unsaved dialog values. This temporary
+/// Session never changes Saved Connections or the Object Explorer's Sessions.
+#[tauri::command]
+pub async fn connection_databases(
+    state: State<'_, ExplorerState>,
+    mut connection: SavedConnection,
+    password: Option<String>,
+) -> CommandResult<Vec<CatalogItem>> {
+    let password = state.password(&connection.id, password)?;
+    // Discovery must work even when the database being edited does not exist.
+    connection.default_database = None;
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        let mut session = Session::open(&connection, password, APPLICATION_NAME)
+            .await
+            .map_err(message)?;
+        let result = catalog::databases(&mut session).await.map_err(message);
+        let _ = session.close().await;
+        result
+    })
+    .await
+    .map_err(|_| "Timed out loading databases.".to_string())?
+}
+
 #[tauri::command]
 pub async fn explorer_connect(
     state: State<'_, ExplorerState>,

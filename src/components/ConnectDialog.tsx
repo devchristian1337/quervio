@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { DatabasePicker } from "@/components/DatabasePicker";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -105,8 +106,11 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <form onSubmit={submit} className="grid gap-4">
+      <DialogContent className="sm:max-w-lg" onEscapeKeyDown={(event) => {
+        // Escape closes the database suggestions before the connection dialog.
+        if (document.getElementById("database")?.getAttribute("aria-expanded") === "true") event.preventDefault();
+      }}>
+        <form onSubmit={submit} autoComplete="off" className="grid gap-4">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit connection" : "New connection"}</DialogTitle>
             <DialogDescription>
@@ -174,11 +178,12 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
               />
             </Field>
             <Field label="Default database" htmlFor="database">
-              <Input
-                id="database"
-                placeholder="master"
-                value={draft.defaultDatabase ?? ""}
-                onChange={(e) => update({ defaultDatabase: e.target.value })}
+              <DatabasePicker
+                key={`${open}:${editing?.id ?? "new"}`}
+                connection={draft}
+                password={password}
+                canLoad={open && canSubmit}
+                onChange={(defaultDatabase) => update({ defaultDatabase })}
               />
             </Field>
           </div>

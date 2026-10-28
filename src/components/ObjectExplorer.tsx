@@ -29,6 +29,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { ConnectDialog } from "@/components/ConnectDialog";
+import { TextFieldMenu } from "@/components/TextFieldMenu";
 import { api, displayName, errorMessage, type SavedConnection, type ScriptKind } from "@/lib/api";
 import { toast } from "@/components/ui/basic-toast";
 import { ENVIRONMENTS } from "@/lib/environment";
@@ -229,7 +230,9 @@ export function ObjectExplorer() {
             return (
               <div key={row.key} style={{ paddingLeft: row.depth * INDENT + 20 }} className="flex items-center gap-1 py-0.5 pr-2">
                 <Filter className="size-3 shrink-0 text-muted-foreground" />
+                <TextFieldMenu>
                 <input
+                  autoComplete="off"
                   autoFocus
                   value={explorer.filters[row.owner] ?? ""}
                   onChange={(e) => explorer.setFilter(row.owner, e.target.value)}
@@ -242,6 +245,7 @@ export function ObjectExplorer() {
                   placeholder="Filter by name"
                   className="h-5 min-w-0 flex-1 rounded border bg-background/60 px-1.5 text-xs outline-none focus:border-ring"
                 />
+                </TextFieldMenu>
                 <button
                   title="Clear filter"
                   className="text-muted-foreground hover:text-foreground"

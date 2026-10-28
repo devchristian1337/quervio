@@ -27,15 +27,13 @@ function useAppTheme() {
 }
 
 // WebView2's own menu (Back, Refresh, Save as, Print…) makes no sense in
-// the app. Text fields keep it for Cut/Copy/Paste; the editor, the grid and
-// the Object Explorer open their own menus. Shift+right-click keeps it in
+// the app. Text fields, the editor, the grid and the Object Explorer open
+// their own menus. Shift+right-click keeps it in
 // dev builds, for Inspect.
 function useNoBrowserMenu() {
   useEffect(() => {
     const onContextMenu = (event: MouseEvent) => {
       if (import.meta.env.DEV && event.shiftKey) return;
-      const target = event.target as Element | null;
-      if (target?.closest("input, textarea, [contenteditable=true]")) return;
       event.preventDefault();
     };
     document.addEventListener("contextmenu", onContextMenu);
