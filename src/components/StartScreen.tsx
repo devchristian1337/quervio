@@ -1,5 +1,6 @@
 import { FolderOpen, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/flexnative-tooltip";
 import { displayName, type SavedConnection } from "@/lib/api";
 import { useShortcutLabel, type CommandId } from "@/lib/commands";
 import { ENVIRONMENTS } from "@/lib/environment";
@@ -91,27 +92,29 @@ function ConnectionRow({ connection }: { connection: SavedConnection }) {
         <div className="truncate text-xs text-muted-foreground">{details}</div>
       </div>
       <span className="w-24 shrink-0 text-xs text-muted-foreground">{environment.label}</span>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="size-8 text-muted-foreground"
-        title={`Open a script on ${displayName(connection)}`}
-        aria-label={`Open a script on ${displayName(connection)}`}
-        onClick={() =>
-          void openFile({ connectionId: connection.id, database: connection.defaultDatabase })
-        }
-      >
-        <FolderOpen />
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="text-primary hover:text-primary"
-        title={`New query on ${displayName(connection)} (${newQueryKey})`}
-        onClick={newQuery}
-      >
-        <Plus /> New query
-      </Button>
+      <Tip label={`Open a script on ${displayName(connection)}`}>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-8 text-muted-foreground"
+          aria-label={`Open a script on ${displayName(connection)}`}
+          onClick={() =>
+            void openFile({ connectionId: connection.id, database: connection.defaultDatabase })
+          }
+        >
+          <FolderOpen />
+        </Button>
+      </Tip>
+      <Tip label={`New query on ${displayName(connection)} (${newQueryKey})`}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-primary hover:text-primary"
+          onClick={newQuery}
+        >
+          <Plus /> New query
+        </Button>
+      </Tip>
     </li>
   );
 }

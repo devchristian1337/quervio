@@ -116,7 +116,7 @@ export function DatabasePicker({ connection, password, canLoad, onChange }: Prop
         <Combobox.Content className="w-full min-w-56 overflow-hidden rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md outline-none">
           {!canLoad && <p role="status" className="px-2 py-2 text-xs text-muted-foreground">Enter server and login details to load databases. You can also type a name.</p>}
           {current?.status === "loading" && <p role="status" className="px-2 py-2 text-xs text-muted-foreground">Loading databases…</p>}
-          {current?.status === "failed" && <p role="status" className="px-2 py-2 text-xs text-destructive" title={current.error}>Could not load databases. You can type a name or retry.</p>}
+          {current?.status === "failed" && <p role="status" className="px-2 py-2 text-xs text-destructive">Could not load databases. You can type a name or retry.<span className="mt-1 line-clamp-3 block break-words text-muted-foreground select-text">{current.error}</span></p>}
           <Combobox.List className="max-h-52 overflow-y-auto">
             {collection.items.map(name => (
               <Combobox.Item key={name} item={name} className="flex cursor-pointer items-center justify-between gap-2 rounded-sm px-2 py-1.5 outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground">

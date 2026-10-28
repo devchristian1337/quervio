@@ -20,6 +20,7 @@ import {
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/flexnative-tooltip";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -168,25 +169,29 @@ export function ObjectExplorer() {
       <header className="flex h-9 shrink-0 items-center justify-between border-b px-3">
         <h2 className="text-xs font-medium text-muted-foreground">Object Explorer</h2>
         <div className="flex items-center">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          title={`New query (${newQueryKey})`}
-          disabled={!explorer.context}
-          onClick={() => openQueryFromContext()}
-        >
-          <SquarePen />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          title="New connection"
-          onClick={() => dialog.show()}
-        >
-          <Plus />
-        </Button>
+        <Tip label={`New query (${newQueryKey})`} wrap>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            aria-label="New query"
+            disabled={!explorer.context}
+            onClick={() => openQueryFromContext()}
+          >
+            <SquarePen />
+          </Button>
+        </Tip>
+        <Tip label="New connection">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            aria-label="New connection"
+            onClick={() => dialog.show()}
+          >
+            <Plus />
+          </Button>
+        </Tip>
         </div>
       </header>
 
@@ -248,16 +253,18 @@ export function ObjectExplorer() {
                   className="h-5 min-w-0 flex-1 rounded border bg-background/60 px-1.5 text-xs outline-none focus:border-ring"
                 />
                 </TextFieldMenu>
-                <button
-                  title="Clear filter"
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={() => {
-                    explorer.setFilter(row.owner, null);
-                    treeRef.current?.focus();
-                  }}
-                >
-                  <X className="size-3" />
-                </button>
+                <Tip label="Clear filter">
+                  <button
+                    aria-label="Clear filter"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      explorer.setFilter(row.owner, null);
+                      treeRef.current?.focus();
+                    }}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </Tip>
               </div>
             );
           }
@@ -270,18 +277,21 @@ export function ObjectExplorer() {
 
           return (
             <ContextMenu key={node.key}>
+              {/* Only what the row may not show in full: the server's version, or a long detail. */}
+              <Tip
+                label={
+                  info
+                    ? `${info.serverName} — SQL Server ${info.version}`
+                    : node.detail
+                      ? `${node.label} (${node.detail})`
+                      : undefined
+                }
+              >
               <ContextMenuTrigger asChild>
                 <div
                   role="treeitem"
                   aria-expanded={node.expandable ? expanded : undefined}
                   aria-selected={selected}
-                  title={
-                    info
-                      ? `${info.serverName} — SQL Server ${info.version}`
-                      : node.detail
-                        ? `${node.label} (${node.detail})`
-                        : node.label
-                  }
                   style={{ paddingLeft: depth * INDENT + 4 }}
                   className={cn(
                     "group flex h-7 cursor-pointer items-center gap-1 pr-2 whitespace-nowrap",
@@ -326,20 +336,23 @@ export function ObjectExplorer() {
                     </span>
                   )}
                   {isFilterable(node.kind) && expanded && explorer.filters[node.key] === undefined && (
-                    <button
-                      tabIndex={-1}
-                      title="Filter"
-                      className="ml-auto opacity-0 group-hover:opacity-100"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        explorer.setFilter(node.key, "");
-                      }}
-                    >
-                      <Filter className="size-3 text-muted-foreground" />
-                    </button>
+                    <Tip label="Filter">
+                      <button
+                        tabIndex={-1}
+                        aria-label="Filter"
+                        className="ml-auto opacity-0 group-hover:opacity-100"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          explorer.setFilter(node.key, "");
+                        }}
+                      >
+                        <Filter className="size-3 text-muted-foreground" />
+                      </button>
+                    </Tip>
                   )}
                 </div>
               </ContextMenuTrigger>
+              </Tip>
               <ContextMenuContent className="w-48">
                 <ManagementItems node={node} />
                 <ScriptItems node={node} />
@@ -411,15 +424,16 @@ export function ObjectExplorer() {
         }}
       />
       <footer className="flex h-9 shrink-0 items-center border-t px-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-          title={`Settings (${settingsKey})`}
-          onClick={() => useSettingsDialog.getState().show()}
-        >
-          <Settings2 /> Settings
-        </Button>
+        <Tip label={`Settings (${settingsKey})`}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+            onClick={() => useSettingsDialog.getState().show()}
+          >
+            <Settings2 /> Settings
+          </Button>
+        </Tip>
       </footer>
     </section>
   );

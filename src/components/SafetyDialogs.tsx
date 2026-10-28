@@ -1,5 +1,6 @@
 import { TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/flexnative-tooltip";
 import {
   Dialog,
   DialogContent,
@@ -39,17 +40,18 @@ export function SafetyDialogs() {
           <ul className="max-h-64 space-y-1 overflow-auto rounded border p-2 font-mono text-xs">
             {destructive?.check.findings.map((finding, index) => (
               <li key={index}>
-                <button
-                  className="w-full rounded px-1.5 py-1 text-left hover:bg-accent"
-                  title="Show in the editor"
-                  onClick={() => revealLine(finding.line)}
-                >
-                  <span className="text-muted-foreground">Line {finding.line}</span>
-                  {" · "}
-                  <span className="text-red-500">{KIND_LABELS[finding.kind]}</span>
-                  {" · "}
-                  {finding.target}
-                </button>
+                <Tip label="Show in the editor" side="right">
+                  <button
+                    className="w-full rounded px-1.5 py-1 text-left hover:bg-accent"
+                    onClick={() => revealLine(finding.line)}
+                  >
+                    <span className="text-muted-foreground">Line {finding.line}</span>
+                    {" · "}
+                    <span className="text-red-500">{KIND_LABELS[finding.kind]}</span>
+                    {" · "}
+                    {finding.target}
+                  </button>
+                </Tip>
               </li>
             ))}
             {destructive?.check.uncertain && (

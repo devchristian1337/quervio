@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "@/components/ui/basic-toast";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/flexnative-tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { GlowingKeyboard } from "@/components/ui/glowing-keyboard";
 import { Input } from "@/components/ui/input";
@@ -237,9 +238,9 @@ function ThemeCard({
       <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
         <div className="min-w-0">
           <div className="truncate text-sm font-medium">{name}</div>
-          <div className="truncate text-xs text-muted-foreground" title={note}>
-            {note}
-          </div>
+          <Tip label={note}>
+            <div className="truncate text-xs text-muted-foreground">{note}</div>
+          </Tip>
         </div>
         {selected && <Check className="size-4 shrink-0 text-primary" />}
       </div>
@@ -566,45 +567,50 @@ function ShortcutRow({ command, onPreview }: { command: Command; onPreview: (pre
             onMouseLeave={() => show(keys[0])}
           >
             {key}
-            <button
-              type="button"
-              title={`Remove ${key}`}
-              className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100"
-              onClick={() => setShortcut(command.id, keys.filter((k) => k !== key))}
-            >
-              <X className="size-3" />
-            </button>
+            <Tip label={`Remove ${key}`}>
+              <button
+                type="button"
+                aria-label={`Remove ${key}`}
+                className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100"
+                onClick={() => setShortcut(command.id, keys.filter((k) => k !== key))}
+              >
+                <X className="size-3" />
+              </button>
+            </Tip>
           </span>
         ))}
         {keys.length === 0 && !recording && <span className="text-xs text-muted-foreground">None</span>}
-        <Button
-          variant={recording ? "default" : "ghost"}
-          size={recording ? "sm" : "icon"}
-          // The same 28 px square as the reset button beside it until it records.
-          className={recording ? "h-7 px-2 text-xs" : "size-7"}
-          title={recording ? undefined : `Add keys for ${command.label}`}
-          aria-label={recording ? undefined : `Add keys for ${command.label}`}
-          onClick={() => {
-            onPreview(
-              recording
-                ? keys[0] ? { shortcut: keys[0], command: command.label } : null
-                : { shortcut: "", command: command.label, recording: true },
-            );
-            setRecording(!recording);
-          }}
-        >
-          {recording ? "Press keys…" : <Plus />}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          title="Back to the default"
-          disabled={!changed}
-          onClick={() => setShortcut(command.id, null)}
-        >
-          <RotateCcw />
-        </Button>
+        <Tip label={recording ? undefined : `Add keys for ${command.label}`}>
+          <Button
+            variant={recording ? "default" : "ghost"}
+            size={recording ? "sm" : "icon"}
+            // The same 28 px square as the reset button beside it until it records.
+            className={recording ? "h-7 px-2 text-xs" : "size-7"}
+            aria-label={recording ? undefined : `Add keys for ${command.label}`}
+            onClick={() => {
+              onPreview(
+                recording
+                  ? keys[0] ? { shortcut: keys[0], command: command.label } : null
+                  : { shortcut: "", command: command.label, recording: true },
+              );
+              setRecording(!recording);
+            }}
+          >
+            {recording ? "Press keys…" : <Plus />}
+          </Button>
+        </Tip>
+        <Tip label="Back to the default" wrap>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            aria-label="Back to the default"
+            disabled={!changed}
+            onClick={() => setShortcut(command.id, null)}
+          >
+            <RotateCcw />
+          </Button>
+        </Tip>
       </div>
     </div>
   );
@@ -666,12 +672,14 @@ function AboutSection() {
       </Row>
       <Row label="Data folder" help="Saved connections, encrypted passwords, open tabs and settings.">
         <div className="flex max-w-80 items-center gap-1.5">
-          <span className="truncate font-mono text-xs select-text" title={dataDir}>
-            {dataDir || "—"}
-          </span>
-          <Button variant="ghost" size="icon" className="size-7" disabled={!dataDir} title="Copy path" onClick={() => void copyDataDir()}>
-            <Copy />
-          </Button>
+          <Tip label={dataDir}>
+            <span className="truncate font-mono text-xs select-text">{dataDir || "—"}</span>
+          </Tip>
+          <Tip label="Copy path" wrap>
+            <Button variant="ghost" size="icon" className="size-7" disabled={!dataDir} aria-label="Copy path" onClick={() => void copyDataDir()}>
+              <Copy />
+            </Button>
+          </Tip>
         </div>
       </Row>
 

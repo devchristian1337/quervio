@@ -18,6 +18,7 @@ import { closeTab as closeTabSafely, openFile, saveTab } from "@/lib/files";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StartScreen } from "@/components/StartScreen";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/flexnative-tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { LoaderGooeyBlobs } from "@/components/ui/loaders-gooey-blobs";
 import {
@@ -104,12 +105,25 @@ function TabBar() {
       {tabs.map((tab) => {
         const connection = connections.find((c) => c.id === tab.connectionId);
         const selected = tab.id === activeId;
+        const where = connection ? `${displayName(connection)}${tab.database ? ` · ${tab.database}` : ""}` : undefined;
         return (
-          <div
+          <Tip
             key={tab.id}
+            side="bottom"
+            label={
+              tab.filePath && where ? (
+                <span className="flex flex-col">
+                  <span className="break-all">{tab.filePath}</span>
+                  <span className="opacity-70">{where}</span>
+                </span>
+              ) : (
+                (tab.filePath ?? where)
+              )
+            }
+          >
+          <div
             role="tab"
             aria-selected={selected}
-            title={connection ? `${displayName(connection)}${tab.database ? ` · ${tab.database}` : ""}` : undefined}
             onMouseDown={(e) => {
               if (e.button === 1) {
                 e.preventDefault();
@@ -129,13 +143,13 @@ function TabBar() {
               // The brand's second colour, as for activity: amber is the Test Environment's.
               <Circle className="size-2.5 shrink-0 fill-brand-secondary text-brand-secondary" aria-label="Open transaction" />
             ) : null}
-            <span className="truncate" title={tab.filePath ?? undefined}>
+            <span className="truncate">
               {tab.title}
               {tab.dirty ? "*" : ""}
             </span>
             {connection && <span className="truncate text-xs text-muted-foreground">{displayName(connection)}</span>}
             <button
-              title="Close"
+              aria-label="Close"
               // A 20 px target; -mr-1 keeps the tab's right padding where it was.
               className={cn(
                 "-mr-1 ml-1 grid size-5 shrink-0 place-items-center rounded hover:bg-accent",
@@ -147,6 +161,7 @@ function TabBar() {
               <X className="size-3.5" />
             </button>
           </div>
+          </Tip>
         );
       })}
     </div>
@@ -178,17 +193,19 @@ function DatabaseSelector({ tab }: { tab: QueryTab }) {
       onValueChange={(database) => void useDatabase(tab.id, database)}
       disabled={tab.status !== "ready" || tab.metadataAvailable === false}
     >
-      <SelectTrigger
-        size="sm"
-        // As tall as the toolbar buttons; the size="sm" rule alone is 32 px.
-        className="w-56 gap-1.5 px-2 py-0 data-[size=sm]:h-7"
-        title="Current database (USE)"
-      >
-        <Database className="size-4 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-left">
-          <SelectValue placeholder="Database" />
-        </span>
-      </SelectTrigger>
+      <Tip label="Current database (USE)" wrap>
+        <SelectTrigger
+          size="sm"
+          // As tall as the toolbar buttons; the size="sm" rule alone is 32 px.
+          className="w-56 gap-1.5 px-2 py-0 data-[size=sm]:h-7"
+          aria-label="Current database"
+        >
+          <Database className="size-4 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-left">
+            <SelectValue placeholder="Database" />
+          </span>
+        </SelectTrigger>
+      </Tip>
       <SelectContent
         // A plain dropdown under the trigger, as wide as it, not a list
         // laid over it around the current database.
@@ -224,44 +241,50 @@ function Toolbar({ tab }: { tab: QueryTab }) {
   const environment = useConnections((s) => tabEnvironment(tab, s.connections));
   return (
     <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-1 border-b px-2 py-1">
-      <Button size="icon" variant="ghost" className="size-7" title={`Open script (${keys.openFile})`} onClick={() => void openFile()}>
-        <FolderOpen />
-      </Button>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="size-7"
-        title={`Save script (${keys.save})`}
-        onClick={() => void saveTab(tab.id)}
-      >
-        <Save />
-      </Button>
+      <Tip label={`Open script (${keys.openFile})`}>
+        <Button size="icon" variant="ghost" className="size-7" aria-label="Open script" onClick={() => void openFile()}>
+          <FolderOpen />
+        </Button>
+      </Tip>
+      <Tip label={`Save script (${keys.save})`}>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-7"
+          aria-label="Save script"
+          onClick={() => void saveTab(tab.id)}
+        >
+          <Save />
+        </Button>
+      </Tip>
       <div className="mx-1 h-5 w-px bg-border" />
-      <Button
-        size="sm"
-        variant="ghost"
-        // The screen's one coloured control: the brand's, never an Environment's.
-        className="h-7 text-primary hover:text-primary"
-        disabled={tab.status !== "ready"}
-        title={`Execute (${keys.execute})`}
-        onClick={() => {
-          const script = currentScript();
-          if (script) void execute(tab.id, script);
-          focusEditor();
-        }}
-      >
-        <Play className="fill-current" /> Execute
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="h-7"
-        disabled={!executing}
-        title={`Cancel executing query (${keys.cancel})`}
-        onClick={() => void cancel(tab.id)}
-      >
-        <Square className="fill-current" /> Cancel
-      </Button>
+      <Tip label={`Execute (${keys.execute})`} wrap>
+        <Button
+          size="sm"
+          variant="ghost"
+          // The screen's one coloured control: the brand's, never an Environment's.
+          className="h-7 text-primary hover:text-primary"
+          disabled={tab.status !== "ready"}
+          onClick={() => {
+            const script = currentScript();
+            if (script) void execute(tab.id, script);
+            focusEditor();
+          }}
+        >
+          <Play className="fill-current" /> Execute
+        </Button>
+      </Tip>
+      <Tip label={`Cancel executing query (${keys.cancel})`} wrap>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7"
+          disabled={!executing}
+          onClick={() => void cancel(tab.id)}
+        >
+          <Square className="fill-current" /> Cancel
+        </Button>
+      </Tip>
       <div className="mx-1 h-5 w-px bg-border" />
       <DatabaseSelector tab={tab} />
       <Select
@@ -269,44 +292,41 @@ function Toolbar({ tab }: { tab: QueryTab }) {
         disabled={executing || tab.sqlcmdMode}
         onValueChange={(mode) => useQueries.getState().setPlanMode(tab.id, mode as "none" | "estimated" | "actual")}
       >
-        <SelectTrigger
-          size="sm"
-          aria-label="Execution plan mode"
-          // Like the database dropdown beside it.
-          className="ml-1 w-40 gap-1.5 px-2 py-0 data-[size=sm]:h-7"
-          title="Execution plan"
-        >
-          <Workflow className="size-4 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-left">
-            <SelectValue />
-          </span>
-        </SelectTrigger>
+        <Tip label="Execution plan" wrap>
+          <SelectTrigger
+            size="sm"
+            aria-label="Execution plan mode"
+            // Like the database dropdown beside it.
+            className="ml-1 w-40 gap-1.5 px-2 py-0 data-[size=sm]:h-7"
+          >
+            <Workflow className="size-4 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-left">
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+        </Tip>
         <SelectContent position="popper" align="start" className="w-(--radix-select-trigger-width)">
           <SelectItem value="none">No plan</SelectItem>
           <SelectItem value="estimated">Estimated plan</SelectItem>
           <SelectItem value="actual">Actual plan</SelectItem>
         </SelectContent>
       </Select>
-      <label
-        className="ml-1 flex h-7 cursor-pointer items-center gap-2 rounded-md px-2 text-sm select-none hover:bg-accent has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50"
-        title="SQLCMD includes, variables and commands are expanded and reviewed before execution"
-      >
-        <Checkbox
-          disabled={executing}
-          checked={tab.sqlcmdMode ?? false}
-          onCheckedChange={(checked) => useQueries.getState().setSqlcmdMode(tab.id, checked === true)}
-        />
-        SQLCMD
-      </label>
+      <Tip label="SQLCMD includes, variables and commands are expanded and reviewed before execution">
+        <label className="ml-1 flex h-7 cursor-pointer items-center gap-2 rounded-md px-2 text-sm select-none hover:bg-accent has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+          <Checkbox
+            disabled={executing}
+            checked={tab.sqlcmdMode ?? false}
+            onCheckedChange={(checked) => useQueries.getState().setSqlcmdMode(tab.id, checked === true)}
+          />
+          SQLCMD
+        </label>
+      </Tip>
       {environment && (
-        <span
-          className={cn("ml-2 shrink-0 rounded px-2 py-0.5 text-xs font-medium", ENVIRONMENTS[environment].pill)}
-          title={
-            environment === "production" ? "Destructive statements ask for confirmation on this server" : undefined
-          }
-        >
-          {ENVIRONMENTS[environment].label}
-        </span>
+        <Tip label={environment === "production" ? "Destructive statements ask for confirmation on this server" : undefined}>
+          <span className={cn("ml-2 shrink-0 rounded px-2 py-0.5 text-xs font-medium", ENVIRONMENTS[environment].pill)}>
+            {ENVIRONMENTS[environment].label}
+          </span>
+        </Tip>
       )}
       {tab.status === "connecting" && (
         <span className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -314,9 +334,9 @@ function Toolbar({ tab }: { tab: QueryTab }) {
         </span>
       )}
       {tab.status === "disconnected" && tab.error && (
-        <span className="ml-2 truncate text-xs text-destructive select-text" title={tab.error}>
-          {tab.error}
-        </span>
+        <Tip label={tab.error}>
+          <span className="ml-2 truncate text-xs text-destructive select-text">{tab.error}</span>
+        </Tip>
       )}
     </div>
   );
@@ -374,16 +394,16 @@ function Messages({ tab }: { tab: QueryTab }) {
           {tab.messages.map((message, index) => {
             const { line } = message;
             return (
-              <div
-                key={index}
-                className={cn(message.isError && "text-destructive", line && "cursor-pointer hover:underline")}
-                title={line ? `Go to line ${line}` : undefined}
-                onDoubleClick={line ? () => revealLine(line) : undefined}
-                onClick={line ? () => revealLine(line) : undefined}
-              >
-                {message.header && <div>{message.header}</div>}
-                <div>{message.text}</div>
-              </div>
+              <Tip key={index} label={line ? `Go to line ${line}` : undefined}>
+                <div
+                  className={cn(message.isError && "text-destructive", line && "cursor-pointer hover:underline")}
+                  onDoubleClick={line ? () => revealLine(line) : undefined}
+                  onClick={line ? () => revealLine(line) : undefined}
+                >
+                  {message.header && <div>{message.header}</div>}
+                  <div>{message.text}</div>
+                </div>
+              </Tip>
             );
           })}
           {finishedAt && tab.status !== "executing" && (
