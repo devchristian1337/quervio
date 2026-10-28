@@ -31,6 +31,7 @@ import { THEMES, findTheme, type Theme, type ThemeId } from "@/lib/themes";
 import { useSystemDark } from "@/lib/use-theme";
 import { cn } from "@/lib/utils";
 import { useSettingsDialog, type SettingsSection } from "@/stores/dialogs";
+import { useUpdates } from "@/stores/updates";
 import { EDITOR_FONT_SIZE, useSettings, type Density, type Indent } from "@/stores/settings";
 // The app tile: Q Prisma v2 on its graphite ground, as on the desktop.
 import prismaTile from "@/assets/quervio-q-prisma-v2.png";
@@ -639,6 +640,49 @@ const FONT_LICENCES: [string, string][] = [
   ["JetBrains Mono (SQL editor)", jetBrainsLicence],
 ];
 
+const UPDATE_HELP = "Downloaded from the Quervio releases on GitHub and installed on restart.";
+
+/** Check, download, then restart into the new version. */
+function UpdateControl() {
+  const { phase, available, progress, error, check, download, install } = useUpdates();
+  const busy = phase === "checking" || phase === "downloading" || phase === "installing";
+  const text = {
+    idle: "",
+    checking: "Checking…",
+    "not-installed": "Only an installed Quervio can update itself",
+    current: "Quervio is up to date",
+    available: `Version ${available} is available`,
+    downloading: `Downloading ${available}… ${progress}%`,
+    ready: `Version ${available} is ready`,
+    installing: "Restarting…",
+    error: "The update failed",
+  }[phase];
+  const action =
+    phase === "available"
+      ? { label: "Download", run: download }
+      : phase === "ready" || phase === "installing"
+        ? { label: "Restart to update", run: install }
+        : { label: "Check for updates", run: check };
+
+  return (
+    <div className="flex items-center gap-3">
+      {text &&
+        (error ? (
+          <Tip label={error}>
+            <span className="text-sm text-destructive">{text}</span>
+          </Tip>
+        ) : (
+          <span className="text-sm text-muted-foreground">{text}</span>
+        ))}
+      {phase !== "not-installed" && (
+        <Button size="sm" variant={phase === "ready" ? "default" : "outline"} disabled={busy} onClick={() => void action.run()}>
+          {action.label}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function AboutSection() {
   const [versions, setVersions] = useState<{ app: string; tauri: string } | null>(null);
   const [dataDir, setDataDir] = useState("");
@@ -661,6 +705,9 @@ function AboutSection() {
       </div>
       <Row label="Version">
         <span className="font-mono text-sm select-text">{versions?.app ?? "…"}</span>
+      </Row>
+      <Row label="Updates" help={UPDATE_HELP}>
+        <UpdateControl />
       </Row>
       <Row label="Tauri">
         <span className="font-mono text-sm select-text">{versions?.tauri ?? "…"}</span>

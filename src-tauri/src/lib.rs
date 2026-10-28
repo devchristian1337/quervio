@@ -5,6 +5,7 @@ mod microsoft;
 mod processes;
 mod query;
 mod settings;
+mod updates;
 
 use std::path::Path;
 
@@ -23,6 +24,7 @@ pub fn run() {
             app.manage(management::ManagementState::default());
             app.manage(language::LanguageState::default());
             app.manage(settings::SettingsState::new(&data_dir));
+            app.manage(updates::UpdateState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -73,6 +75,9 @@ pub fn run() {
             settings::settings_load,
             settings::settings_save,
             settings::settings_data_dir,
+            updates::update_check,
+            updates::update_download,
+            updates::update_apply,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
