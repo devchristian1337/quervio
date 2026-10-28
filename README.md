@@ -38,11 +38,15 @@ cargo test --workspace -- --ignored
 
 ## Build the installer
 
-```bash
-pnpm tauri build
+Quervio installs and updates itself with [Velopack](https://docs.velopack.io) ([ADR 0005](docs/adr/0005-installer-velopack.md)). With the .NET SDK installed and the Microsoft bridge built (`scripts/build-microsoft.ps1`):
+
+```powershell
+.\scripts\pack-velopack.ps1
 ```
 
-Produces an unsigned NSIS installer under `target/release/bundle/nsis`.
+Produces an unsigned `Quervio.App-win-Setup.exe` and the update packages under `target/velopack/releases`. Add `-Publish` to upload them as the GitHub Release `v<version>` (it uses `gh auth token`); installed copies find it from Settings › About, and check once at start-up. The version comes from `src-tauri/tauri.conf.json`.
+
+`pnpm tauri build` still produces the old NSIS installer under `target/release/bundle/nsis`, which cannot update itself.
 
 ## Management workbench
 

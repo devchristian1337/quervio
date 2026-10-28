@@ -11,16 +11,14 @@ import { Toaster } from "@/components/ui/basic-toast";
 import { SafetyDialogs } from "@/components/SafetyDialogs";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useQueries } from "@/stores/queries";
 import { useConnections } from "@/stores/connections";
-import { restoreTabs, saveNow } from "@/lib/session-restore";
+import { restoreTabs } from "@/lib/session-restore";
+import { settleBeforeExit } from "@/lib/exit";
+import { useUpdateCheck } from "@/stores/updates";
 import { applyTheme } from "@/lib/themes";
 import { useTheme } from "@/lib/use-theme";
 import { applyWindowTheme } from "@/lib/window-theme";
 import { useSettings } from "@/stores/settings";
-import {ask} from "@tauri-apps/plugin-dialog";
-import {useOperations} from "@/stores/operations";
-import {management} from "@/lib/management-api";
 
 // The chosen theme, or Light/Dark following Windows.
 function useAppTheme() {
@@ -57,11 +55,7 @@ function useCloseGuard() {
       // Held open until the tabs are saved (they come back on the next
       // start) and open transactions are settled.
       event.preventDefault();
-      const operations=Object.values(useOperations.getState().running);
-      if(operations.length && !await ask(`${operations.length} operation(s) are still running. Cancel them and close Quervio?`,{title:"Operations in progress",kind:"warning",okLabel:"Cancel operations and close",cancelLabel:"Keep working"})) return;
-      await saveNow();
-      if (await useQueries.getState().settleAllTransactions()) {
-        await management.shutdown();
+      if (await settleBeforeExit()) {
         closing = true;
         await appWindow.destroy();
       }
@@ -83,6 +77,7 @@ export default function App() {
   useNoBrowserMenu();
   useCloseGuard();
   useRestoreTabs();
+  useUpdateCheck();
 
   return (
     <>
