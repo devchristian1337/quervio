@@ -26,6 +26,8 @@ pub struct UpdateStatus {
     available: Option<String>,
     /// The update is downloaded and is applied on the next restart.
     ready: bool,
+    /// No release has been published yet.
+    empty: bool,
 }
 
 fn manager() -> Option<UpdateManager> {
@@ -41,6 +43,7 @@ pub async fn update_check(state: State<'_, UpdateState>) -> CommandResult<Update
             current: None,
             available: None,
             ready: false,
+            empty: false,
         });
     };
     let current = manager.get_current_version_as_string();
@@ -50,8 +53,17 @@ pub async fn update_check(state: State<'_, UpdateState>) -> CommandResult<Update
         tokio::task::spawn_blocking(move || manager.check_for_updates())
             .await
             .map_err(message)?
-            .map_err(message)?
+            .map_err(|error| {
+                let error = error.to_string();
+                // GitHub answers 404 for a private repository too.
+                if error.contains("404") {
+                    format!("{RELEASES}/releases cannot be read: the repository is private or does not exist.")
+                } else {
+                    error
+                }
+            })?
     };
+    let empty = matches!(check, UpdateCheck::RemoteIsEmpty);
     let found = match check {
         UpdateCheck::UpdateAvailable(info) => Some(*info),
         UpdateCheck::NoUpdateAvailable | UpdateCheck::RemoteIsEmpty => None,
@@ -67,6 +79,7 @@ pub async fn update_check(state: State<'_, UpdateState>) -> CommandResult<Update
         current: Some(current),
         available,
         ready,
+        empty,
     })
 }
 

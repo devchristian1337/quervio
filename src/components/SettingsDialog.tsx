@@ -644,18 +644,23 @@ const UPDATE_HELP = "Downloaded from the Quervio releases on GitHub and installe
 
 /** Check, download, then restart into the new version. */
 function UpdateControl() {
-  const { phase, available, progress, error, check, download, install } = useUpdates();
+  const { phase, available, progress, error, failed, check, download, install } = useUpdates();
   const busy = phase === "checking" || phase === "downloading" || phase === "installing";
   const text = {
     idle: "",
     checking: "Checking…",
     "not-installed": "Only an installed Quervio can update itself",
     current: "Quervio is up to date",
+    empty: "No release has been published yet",
     available: `Version ${available} is available`,
     downloading: `Downloading ${available}… ${progress}%`,
     ready: `Version ${available} is ready`,
     installing: "Restarting…",
-    error: "The update failed",
+    error: {
+      check: "Could not check for updates",
+      download: "The download failed",
+      install: "The update could not start",
+    }[failed ?? "check"],
   }[phase];
   const action =
     phase === "available"
@@ -665,20 +670,18 @@ function UpdateControl() {
         : { label: "Check for updates", run: check };
 
   return (
-    <div className="flex items-center gap-3">
-      {text &&
-        (error ? (
-          <Tip label={error}>
-            <span className="text-sm text-destructive">{text}</span>
-          </Tip>
-        ) : (
-          <span className="text-sm text-muted-foreground">{text}</span>
-        ))}
-      {phase !== "not-installed" && (
-        <Button size="sm" variant={phase === "ready" ? "default" : "outline"} disabled={busy} onClick={() => void action.run()}>
-          {action.label}
-        </Button>
-      )}
+    <div className="flex max-w-80 flex-col items-end gap-1">
+      <div className="flex items-center gap-3">
+        {text && (
+          <span className={cn("text-sm", phase === "error" ? "text-destructive" : "text-muted-foreground")}>{text}</span>
+        )}
+        {phase !== "not-installed" && (
+          <Button size="sm" variant={phase === "ready" ? "default" : "outline"} disabled={busy} onClick={() => void action.run()}>
+            {action.label}
+          </Button>
+        )}
+      </div>
+      {phase === "error" && error && <p className="text-right text-xs text-muted-foreground select-text">{error}</p>}
     </div>
   );
 }
