@@ -108,7 +108,7 @@ export function DatabasePicker({ connection, password, canLoad, onChange }: Prop
         <Combobox.Input asChild>
           <Input placeholder="master" className="pr-9" aria-label="Default database" />
         </Combobox.Input>
-        <Combobox.Trigger className="absolute inset-y-0 right-0 flex w-9 items-center justify-center rounded-r-md text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <Combobox.Trigger className="absolute inset-y-0 right-0 flex w-9 items-center justify-center rounded-r-md text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
           {current?.status === "loading" ? <Loader2 className="size-4 animate-spin" /> : <ChevronDown className="size-4" />}
         </Combobox.Trigger>
       </Combobox.Control>
