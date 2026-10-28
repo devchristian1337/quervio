@@ -23,6 +23,7 @@ import {
   Text,
   textareaClass,
   useRead,
+  ViewTabs,
 } from "./shared";
 
 export function BackupRestore({
@@ -141,7 +142,7 @@ export function BackupRestore({
     );
   return (
     <div className="flex flex-col gap-3 overflow-auto">
-      <Choice
+      <ViewTabs
         label="Operation"
         value={mode}
         onChange={setMode}
@@ -388,7 +389,7 @@ export function Agent({ context }: { context: Context }) {
       : "";
   return (
     <div className="flex flex-col gap-3 overflow-auto">
-      <Choice
+      <ViewTabs
         label="Agent objects"
         value={section}
         onChange={setSection}

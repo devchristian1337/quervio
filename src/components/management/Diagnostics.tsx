@@ -17,6 +17,7 @@ import {
   Operation,
   Text,
   useRead,
+  ViewTabs,
 } from "./shared";
 import { PlanViewer } from "./PlanViewer";
 
@@ -45,20 +46,20 @@ export function ActivityMonitor({ context }: { context: Context }) {
     : null;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <ViewTabs
+        label="Activity"
+        value={view}
+        onChange={setView}
+        options={[
+          ["activity", "Processes and blocking"],
+          ["waits", "Wait statistics (since last reset)"],
+          ["io", "File I/O (cumulative)"],
+          ["cpu", "SQL process CPU samples"],
+          ["expensiveQueries", "Cached query totals"],
+          ["live", "Live query statistics"],
+        ]}
+      />
       <div className="flex flex-wrap items-end gap-3">
-        <Choice
-          label="Activity"
-          value={view}
-          onChange={setView}
-          options={[
-            ["activity", "Processes and blocking"],
-            ["waits", "Wait statistics (since last reset)"],
-            ["io", "File I/O (cumulative)"],
-            ["cpu", "SQL process CPU samples"],
-            ["expensiveQueries", "Cached query totals"],
-            ["live", "Live query statistics"],
-          ]}
-        />
         <Choice
           label="Refresh"
           value={interval}
