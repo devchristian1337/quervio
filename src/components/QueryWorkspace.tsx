@@ -19,7 +19,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StartScreen } from "@/components/StartScreen";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/flexnative-tooltip";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Checkbox } from "@/components/ui/radix-checkbox";
+import { Tabs } from "@/components/ui/vercel-tabs";
 import { LoaderGooeyBlobs } from "@/components/ui/loaders-gooey-blobs";
 import {
   ContextMenu,
@@ -346,23 +347,28 @@ function OutputPanel({ tab }: { tab: QueryTab }) {
   const setView = useQueries((s) => s.setView);
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-8 shrink-0 items-end gap-1 border-b bg-panel px-2 text-xs">
-        {(["results", "messages", "plans"] as const).map((view) => (
-          <button
-            key={view}
-            onClick={() => setView(tab.id, view)}
-            className={cn(
-              "-mb-px border-b-2 px-2 pb-1.5 capitalize",
-              tab.view === view ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {view}
-            {view === "messages" && tab.messages.some((m) => m.isError) && (
-              <span className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive align-middle" />
-            )}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        aria-label="Output"
+        className="shrink-0 bg-panel"
+        listClassName="px-1"
+        activeTab={tab.view}
+        onTabChange={(view) => setView(tab.id, view as QueryTab["view"])}
+        tabs={[
+          { id: "results", label: "Results" },
+          {
+            id: "messages",
+            label: (
+              <>
+                Messages
+                {tab.messages.some((m) => m.isError) && (
+                  <span className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive" aria-label="has errors" />
+                )}
+              </>
+            ),
+          },
+          { id: "plans", label: "Plans" },
+        ]}
+      />
       <div className={cn("min-h-0 flex-1", tab.view === "messages" && "overflow-auto")}>
         {tab.view === "plans" ? <div className="flex h-full flex-col p-2"><PlanViewer plans={tab.plans} /></div> : tab.view === "messages" ? <Messages tab={tab} /> : <Results tab={tab} />}
       </div>

@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, useMemo, type ReactNode } from "react";
 import { Info, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Checkbox } from "@/components/ui/radix-checkbox";
+import { Tabs } from "@/components/ui/vercel-tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -33,7 +34,7 @@ import { useQueries } from "@/stores/queries";
 import { invalidateCatalog } from "@/lib/metadata-events";
 import {useOperations} from "@/stores/operations";
 
-// The app's controls (ui/input, ui/interfaces-select, ui/checkbox), so the
+// The app's controls (ui/input, ui/interfaces-select, ui/radix-checkbox), so the
 // tools look like the connection dialog and Settings: 36px fields, labels
 // in the text colour above them.
 export const inputClass =
@@ -150,6 +151,31 @@ export function Dropdown<T extends string>({
     </Select>
   );
 }
+// The views of a tool, as tabs; options as for Choice.
+export function ViewTabs<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: T;
+  onChange: (value: T) => void;
+  options: readonly (T | readonly [T, string])[];
+}) {
+  return (
+    <Tabs
+      aria-label={label}
+      className="shrink-0"
+      activeTab={value}
+      onTabChange={(id) => onChange(id as T)}
+      tabs={options.map((option) =>
+        typeof option === "string" ? { id: option, label: option } : { id: option[0], label: option[1] },
+      )}
+    />
+  );
+}
+
 export function Choice<T extends string>({
   label,
   value,

@@ -17,6 +17,7 @@ import {
   ReadTable,
   Text,
   textareaClass,
+  ViewTabs,
 } from "./shared";
 
 export function Security({ context }: { context: Context }) {
@@ -98,23 +99,23 @@ export function Security({ context }: { context: Context }) {
         : ["create", "enable", "disable", "delete"];
   return (
     <div className="flex flex-col gap-3 overflow-auto">
+      <ViewTabs
+        label="Security objects"
+        value={section}
+        onChange={(v) => {
+          setSection(v);
+          setOperation("create");
+        }}
+        options={[
+          ["principals", "Logins / users"],
+          ["roles", "Roles and membership"],
+          ["permissions", "Granular permissions"],
+          ["audits", "SQL Server Audit"],
+          ["auditSpecifications", "Audit specifications"],
+          ["auditData", "Read audit events"],
+        ]}
+      />
       <div className="flex flex-wrap gap-3">
-        <Choice
-          label="Security objects"
-          value={section}
-          onChange={(v) => {
-            setSection(v);
-            setOperation("create");
-          }}
-          options={[
-            ["principals", "Logins / users"],
-            ["roles", "Roles and membership"],
-            ["permissions", "Granular permissions"],
-            ["audits", "SQL Server Audit"],
-            ["auditSpecifications", "Audit specifications"],
-            ["auditData", "Read audit events"],
-          ]}
-        />
         <Choice
           label="Scope"
           value={scope}
@@ -406,7 +407,7 @@ export function Encryption({ context }: { context: Context }) {
     script = `CREATE COLUMN MASTER KEY ${n(masterKey)} WITH(KEY_STORE_PROVIDER_NAME=N'MSSQL_CERTIFICATE_STORE',KEY_PATH=${l(keyPath)});`;
   return (
     <div className="flex flex-col gap-3 overflow-auto">
-      <Choice
+      <ViewTabs
         label="Encryption area"
         value={area}
         onChange={(v) => {

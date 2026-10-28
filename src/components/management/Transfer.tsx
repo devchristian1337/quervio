@@ -13,6 +13,7 @@ import {
   Notice,
   Text,
   textareaClass,
+  ViewTabs,
 } from "./shared";
 import { Button } from "@/components/ui/button";
 
@@ -85,7 +86,7 @@ export function Transfer({ context }: { context: Context }) {
   };
   return (
     <div className="flex flex-col gap-3 overflow-auto">
-      <Choice
+      <ViewTabs
         label="Transfer operation"
         value={mode}
         onChange={(v) => {
