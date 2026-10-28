@@ -43,6 +43,7 @@ export type Resource =
         | "serverTriggers"
         | "relations"
         | "activity"
+        | "health"
         | "waits"
         | "io"
         | "cpu"

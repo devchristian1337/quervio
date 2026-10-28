@@ -48,6 +48,7 @@ pub enum Resource {
     Definition { object_id: i64 },
     Relations,
     Activity,
+    Health,
     Waits,
     Io,
     Cpu,
@@ -82,9 +83,49 @@ pub enum Resource {
     Live { session_id: u32 },
 }
 
+/// One row: the server and the current database as they are now, for the
+/// Activity Monitor's cards. CPU is the resource pools' current use; batch
+/// requests are cumulative, so the page turns two samples into a rate.
+/// Azure SQL Database shows neither the host's memory nor its volumes.
+fn health_sql(major: u32, azure: bool) -> String {
+    let host = if azure {
+        "NULL AS cpu_count,NULL AS max_workers_count,NULL AS active_workers,NULL AS started_at,NULL AS total_physical_memory_kb,NULL AS available_physical_memory_kb,NULL AS physical_memory_in_use_kb,NULL AS volume_bytes,NULL AS volume_used_percent"
+    } else {
+        "i.cpu_count,i.max_workers_count,(SELECT SUM(active_workers_count) FROM sys.dm_os_schedulers WHERE status=N'VISIBLE ONLINE') AS active_workers,CONVERT(varchar(33),i.sqlserver_start_time,126) AS started_at,m.total_physical_memory_kb,m.available_physical_memory_kb,pm.physical_memory_in_use_kb,(SELECT MAX(vs.total_bytes) FROM sys.database_files f CROSS APPLY sys.dm_os_volume_stats(DB_ID(),f.file_id) vs) AS volume_bytes,(SELECT MAX(100.0-vs.available_bytes*100.0/NULLIF(vs.total_bytes,0)) FROM sys.database_files f CROSS APPLY sys.dm_os_volume_stats(DB_ID(),f.file_id) vs) AS volume_used_percent"
+    };
+    let host_from = if azure {
+        ""
+    } else {
+        " CROSS JOIN sys.dm_os_sys_info i CROSS JOIN sys.dm_os_sys_memory m CROSS JOIN sys.dm_os_process_memory pm"
+    };
+    // sys.dm_db_log_space_usage arrived with SQL Server 2012.
+    let (log, log_from) = if major >= 11 || azure {
+        (
+            "l.total_log_size_in_bytes AS log_bytes,l.used_log_space_in_percent AS log_used_percent",
+            " CROSS JOIN sys.dm_db_log_space_usage l",
+        )
+    } else {
+        ("NULL AS log_bytes,NULL AS log_used_percent", "")
+    };
+    format!(
+        "SELECT CONVERT(nvarchar(128),SERVERPROPERTY('ServerName')) AS server_name,CONVERT(nvarchar(128),SERVERPROPERTY('ProductVersion')) AS product_version,CONVERT(nvarchar(128),SERVERPROPERTY('Edition')) AS edition,CONVERT(varchar(33),SYSDATETIME(),126) AS sampled_at,{host},\
+(SELECT SUM(CASE WHEN counter_name=N'CPU usage %' THEN cntr_value END)*100.0/NULLIF(MAX(CASE WHEN counter_name=N'CPU usage % base' THEN cntr_value END),0) FROM sys.dm_os_performance_counters WHERE object_name LIKE N'%Resource Pool Stats%') AS cpu_percent,\
+(SELECT MAX(cntr_value) FROM sys.dm_os_performance_counters WHERE object_name LIKE N'%SQL Statistics%' AND counter_name=N'Batch Requests/sec') AS batch_requests,\
+(SELECT MAX(cntr_value) FROM sys.dm_os_performance_counters WHERE object_name LIKE N'%Memory Manager%' AND counter_name=N'Memory Grants Pending') AS memory_grants_pending,\
+(SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process=1) AS user_sessions,\
+(SELECT COUNT(*) FROM sys.dm_exec_requests r JOIN sys.dm_exec_sessions s ON s.session_id=r.session_id WHERE s.is_user_process=1 AND r.session_id<>@@SPID) AS active_requests,\
+(SELECT COUNT(*) FROM sys.dm_exec_requests WHERE blocking_session_id>0) AS blocked_requests,\
+DB_NAME() AS database_name,d.state_desc,d.recovery_model_desc,d.compatibility_level,\
+(SELECT SUM(CONVERT(bigint,size))*8192 FROM sys.database_files WHERE type=0) AS data_bytes,\
+(SELECT SUM(CONVERT(bigint,FILEPROPERTY(name,'SpaceUsed')))*8192 FROM sys.database_files WHERE type=0) AS data_used_bytes,{log} \
+FROM sys.databases d{host_from}{log_from} WHERE d.database_id=DB_ID()"
+    )
+}
+
 impl Resource {
     pub fn sql(&self, major: u32, azure: bool) -> String {
         match self {
+            Self::Health => health_sql(major, azure),
             Self::ObjectProperties{object_id}=>format!("SELECT s.name AS [schema],o.name,o.type_desc,m.definition,m.is_schema_bound,(SELECT COUNT(*) FROM sys.indexes i WHERE i.object_id=o.object_id AND i.index_id>0) AS index_count FROM sys.objects o JOIN sys.schemas s ON s.schema_id=o.schema_id LEFT JOIN sys.sql_modules m ON m.object_id=o.object_id WHERE o.object_id={object_id} UNION ALL SELECT NULL,t.name,N'SQL_TRIGGER',m.definition,m.is_schema_bound,0 FROM sys.triggers t LEFT JOIN sys.sql_modules m ON m.object_id=t.object_id WHERE t.parent_class=0 AND t.object_id={object_id}"),
             Self::EffectivePermissions{server}=>format!("SELECT entity_name,subentity_name,permission_name FROM sys.fn_my_permissions(NULL,'{}') ORDER BY permission_name",if *server{"SERVER"}else{"DATABASE"}),
             Self::QueryStoreHistory{query_id,minutes}=>format!("SELECT p.plan_id,i.start_time,i.end_time,SUM(rs.count_executions) AS executions,SUM(rs.avg_duration*rs.count_executions)/NULLIF(SUM(rs.count_executions),0) AS avg_duration_us,SUM(rs.avg_cpu_time*rs.count_executions)/NULLIF(SUM(rs.count_executions),0) AS avg_cpu_us FROM sys.query_store_plan p JOIN sys.query_store_runtime_stats rs ON rs.plan_id=p.plan_id JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id=rs.runtime_stats_interval_id WHERE p.query_id={query_id} AND i.end_time>DATEADD(minute,-{},SYSDATETIMEOFFSET()) GROUP BY p.plan_id,i.start_time,i.end_time ORDER BY i.start_time,p.plan_id",minutes.clamp(&1,&525600)),
