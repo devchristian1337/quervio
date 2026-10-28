@@ -305,10 +305,15 @@ async fn create_table_scripts_round_trip() {
 async fn create_table_quotes_user_defined_types() {
     const SETUP: &str =
         "CREATE TYPE dbo.[int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int] FROM int;
-         CREATE TABLE dbo.Victim (x int);
-         CREATE TABLE dbo.T (c dbo.[int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int] NOT NULL);";
+         CREATE TABLE dbo.Victim (x int);";
     let _turn = DATABASE_LOCK.lock().await;
     let _database = TestDatabase::create(DATABASE, SETUP).await;
+    // A batch cannot use a type it creates, so the table needs its own.
+    run_scripts(&[
+        "USE [Quervio Tests]]Catalog];
+         CREATE TABLE dbo.T (c dbo.[int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int] NOT NULL);",
+    ])
+    .await;
     let mut session = open().await;
     let tables = catalog::objects(&mut session, DATABASE, ObjectFolder::Tables)
         .await
