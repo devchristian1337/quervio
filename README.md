@@ -136,17 +136,14 @@ tests alone are not a compatibility certification.
 ### Handoff checkpoint — 2026-10-28
 
 This branch is an implementation checkpoint, not a completed server certification.
-The latest TypeScript check and 62 frontend unit tests passed. Six browser tests
-passed before the latest UI additions; the new import-mapping test and final UI
-changes still need a complete rerun. SQL Tools Service initialization over stdio
-was tested successfully, and the Microsoft helper passed five local data tests.
+The TypeScript check, the production build, 62 frontend unit tests and all seven
+browser tests (import mapping included) pass. The Rust workspace suite passes,
+including the process-cancellation fixture, and the 28 SQL integration tests pass
+against the SQL Server 2022 container from `docker-compose.yml`. The Microsoft
+helper builds with `.\scripts\build-microsoft.ps1` and passes its five self-tests.
+SQL Tools Service initialization over stdio passed earlier; its ignored test needs
+the component installed by `.\scripts\install-sqltools.ps1`.
 
-The latest Rust suite reported a process-test fixture failure: its shell child
-exited before cancellation. The fixture now starts PowerShell directly; rerun the
-suite to verify that adjustment. The 28 SQL integration tests were not run because
-the local Docker engine was unavailable. Real SQL Server/Azure workflows, permissions,
-restore, Agent and encryption remain to be exercised on dedicated environments.
-
-Resume with `cargo test --workspace`, `pnpm test:ui`, and
-`.\scripts\build-microsoft.ps1`. Published Microsoft binaries and SDK installations
-are local build artifacts and are intentionally not tracked in Git.
+Real SQL Server/Azure workflows, permissions, restore, Agent and encryption remain
+to be exercised on dedicated environments. Published Microsoft binaries and SDK
+installations are local build artifacts and are intentionally not tracked in Git.
