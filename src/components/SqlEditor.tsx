@@ -161,6 +161,9 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
               tabSize: options.tabSize,
               padding: { top: 8 },
               contextmenu: false,
+              // Hover, suggestions and signatures may pass the editor's edges:
+              // on the first lines a hover above the text was cut off by them.
+              fixedOverflowWidgets: true,
             }}
             onMount={(editor) => {
               registerEditor(editor);
