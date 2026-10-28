@@ -109,12 +109,14 @@ export function Workspace() {
   const active = workbench.tabs.find((t) => t.id === workbench.activeId);
   return (
     <section className="flex h-full min-w-0 flex-col">
-      <div className="flex h-9 shrink-0 items-end gap-1 border-b bg-panel px-2 text-xs">
-        <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto">
+      {/* The query tabs below mark theirs with a top line, so this level
+          marks its selection with a fill: two lines would meet at the border. */}
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b bg-panel px-2 text-xs">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           <button
             className={cn(
-              "-mb-px h-8 shrink-0 border-b-2 px-2",
-              !active ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+              "h-7 shrink-0 rounded-md px-2",
+              !active ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
             )}
             onClick={() => workbench.activate(null)}
           >
@@ -126,8 +128,8 @@ export function Workspace() {
               <div
                 key={tab.id}
                 className={cn(
-                  "group -mb-px flex h-8 max-w-60 shrink-0 items-center gap-1 border-b-2 pl-2",
-                  selected ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+                  "group flex h-7 max-w-60 shrink-0 items-center gap-1 rounded-md pr-1 pl-2",
+                  selected ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                 )}
               >
                 <button
@@ -142,7 +144,7 @@ export function Workspace() {
                   title="Close"
                   // A 20 px target with a 14 px icon, as on the query tabs.
                   className={cn(
-                    "grid size-5 shrink-0 place-items-center rounded hover:bg-accent",
+                    "grid size-5 shrink-0 place-items-center rounded hover:bg-foreground/10",
                     !selected && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
                   )}
                   onClick={() => workbench.close(tab.id)}
@@ -155,7 +157,7 @@ export function Workspace() {
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="mb-0.5 h-7 shrink-0">
+            <Button variant="ghost" size="sm" className="h-7 shrink-0">
               <Wrench /> Tools <ChevronDown className="opacity-50" />
             </Button>
           </DropdownMenuTrigger>
