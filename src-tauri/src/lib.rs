@@ -1,4 +1,8 @@
 mod explorer;
+mod language;
+mod management;
+mod microsoft;
+mod processes;
 mod query;
 mod settings;
 
@@ -16,10 +20,26 @@ pub fn run() {
             copy_querydeck_data(&data_dir);
             app.manage(explorer::ExplorerState::open(&data_dir)?);
             app.manage(query::QueryState::default());
+            app.manage(management::ManagementState::default());
+            app.manage(language::LanguageState::default());
             app.manage(settings::SettingsState::new(&data_dir));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            management::management_capabilities,
+            management::management_read,
+            management::management_prepare,
+            management::management_apply,
+            management::management_cancel,
+            management::management_shutdown,
+            management::management_discard,
+            management::management_dependencies,
+            management::management_bridge,
+            management::management_bridge_prepare,
+            management::management_component_select,
+            management::management_install_language,
+            language::language_request,
+            language::language_close,
             explorer::list_connections,
             explorer::save_connection,
             explorer::delete_connection,
@@ -36,6 +56,8 @@ pub fn run() {
             explorer::tabs_load,
             explorer::tabs_save,
             query::query_open,
+            query::query_sqlcmd_prepare,
+            query::query_sqlcmd_execute,
             query::query_close,
             query::query_execute,
             query::query_cancel,
@@ -47,6 +69,7 @@ pub fn run() {
             query::result_cell,
             query::result_copy,
             query::result_export_markdown,
+            query::result_export_file,
             settings::settings_load,
             settings::settings_save,
             settings::settings_data_dir,

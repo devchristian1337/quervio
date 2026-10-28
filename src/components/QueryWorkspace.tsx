@@ -36,6 +36,7 @@ import { useShortcutLabel } from "@/lib/commands";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
 import { tabEnvironment, useQueries, type QueryTab } from "@/stores/queries";
+import { PlanViewer } from "@/components/management/PlanViewer";
 
 const SqlEditor = lazy(() => import("@/components/SqlEditor"));
 const ResultGrid = lazy(() => import("@/components/ResultGrid"));
@@ -173,7 +174,7 @@ function DatabaseSelector({ tab }: { tab: QueryTab }) {
       value={current}
       onOpenChange={(open) => void load(open)}
       onValueChange={(database) => void useDatabase(tab.id, database)}
-      disabled={tab.status !== "ready"}
+      disabled={tab.status !== "ready" || tab.metadataAvailable === false}
     >
       <SelectTrigger
         size="sm"
@@ -220,7 +221,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
   const executing = tab.status === "executing";
   const environment = useConnections((s) => tabEnvironment(tab, s.connections));
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
+    <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-1 border-b px-2 py-1">
       <Button size="icon" variant="ghost" className="size-7" title={`Open script (${keys.openFile})`} onClick={() => void openFile()}>
         <FolderOpen />
       </Button>
@@ -261,6 +262,10 @@ function Toolbar({ tab }: { tab: QueryTab }) {
       </Button>
       <div className="mx-1 h-5 w-px bg-border" />
       <DatabaseSelector tab={tab} />
+      <select aria-label="Execution plan mode" className="h-7 max-w-40 rounded border bg-background px-1 text-xs" disabled={executing || tab.sqlcmdMode} value={tab.planMode ?? "none"} onChange={e => useQueries.getState().setPlanMode(tab.id, e.target.value as "none" | "estimated" | "actual")}>
+        <option value="none">No plan</option><option value="estimated">Estimated plan</option><option value="actual">Actual plan</option>
+      </select>
+      <label className="ml-1 flex items-center gap-1 text-xs" title="SQLCMD includes, variables and commands are expanded and reviewed before execution"><input type="checkbox" disabled={executing} checked={tab.sqlcmdMode ?? false} onChange={e => useQueries.getState().setSqlcmdMode(tab.id, e.target.checked)} />SQLCMD</label>
       {environment && (
         <span
           className={cn("ml-2 shrink-0 rounded px-2 py-0.5 text-xs font-medium", ENVIRONMENTS[environment].pill)}
@@ -290,7 +295,7 @@ function OutputPanel({ tab }: { tab: QueryTab }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-8 shrink-0 items-end gap-1 border-b bg-panel px-2 text-xs">
-        {(["results", "messages"] as const).map((view) => (
+        {(["results", "messages", "plans"] as const).map((view) => (
           <button
             key={view}
             onClick={() => setView(tab.id, view)}
@@ -307,7 +312,7 @@ function OutputPanel({ tab }: { tab: QueryTab }) {
         ))}
       </div>
       <div className={cn("min-h-0 flex-1", tab.view === "messages" && "overflow-auto")}>
-        {tab.view === "messages" ? <Messages tab={tab} /> : <Results tab={tab} />}
+        {tab.view === "plans" ? <div className="flex h-full flex-col p-2"><PlanViewer plans={tab.plans} /></div> : tab.view === "messages" ? <Messages tab={tab} /> : <Results tab={tab} />}
       </div>
     </div>
   );
@@ -462,7 +467,7 @@ function StatusBar({ tab }: { tab: QueryTab }) {
       <span className="flex items-center gap-1.5">{status}</span>
       <span className="ml-auto">{tab.server?.serverName}</span>
       {connection && (
-        <span>{connection.authentication.kind === "sql" ? connection.authentication.userName : "Windows"}</span>
+        <span>{connection.authentication.kind === "sql" ? connection.authentication.userName : connection.authentication.kind === "entra" ? "Microsoft Entra" : "Windows"}</span>
       )}
       <span>{tab.database}</span>
       <span className="tabular-nums">{formatElapsed(elapsed)}</span>

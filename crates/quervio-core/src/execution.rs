@@ -20,7 +20,8 @@ use crate::session::{Session, int};
 /// Cancels a running Execution from another task.
 #[derive(Clone, Default)]
 pub struct CancelToken {
-    handle: Arc<CancelHandle>,
+    pub(crate) handle: Arc<CancelHandle>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
     timed_out: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -30,14 +31,28 @@ impl CancelToken {
     }
 
     pub fn cancel(&self) {
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         self.handle.cancel();
     }
 
     /// Cancels because the execution timeout expired, which the Messages say.
     pub fn time_out(&self) {
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         self.timed_out
             .store(true, std::sync::atomic::Ordering::SeqCst);
         self.handle.cancel();
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    pub fn cancellation_message(&self) -> &'static str {
+        self.message()
+    }
+    pub fn is_timed_out(&self) -> bool {
+        self.timed_out.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn message(&self) -> &'static str {
@@ -61,6 +76,15 @@ pub enum Outcome {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ExecutionEvent {
+    #[serde(rename_all = "camelCase")]
+    SessionClosed { reason: String },
+    #[serde(rename_all = "camelCase")]
+    SessionChanged {
+        server: crate::session::ServerInfo,
+        connection_id: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Plan { xml: String },
     #[serde(rename_all = "camelCase")]
     BatchStarted { batch: usize, first_line: u32 },
     /// A Message: `PRINT` output, a low-severity `RAISERROR`, or an error.
@@ -112,14 +136,35 @@ impl Session {
         cancel: &CancelToken,
         results: &SharedResults,
         limits: ResultLimits,
+        emit: impl FnMut(ExecutionEvent),
+    ) -> Outcome {
+        self.execute_append(script, base_line, cancel, results, limits, false, emit)
+            .await
+    }
+
+    pub async fn execute_append(
+        &mut self,
+        script: &str,
+        base_line: u32,
+        cancel: &CancelToken,
+        results: &SharedResults,
+        limits: ResultLimits,
+        append: bool,
         mut emit: impl FnMut(ExecutionEvent),
     ) -> Outcome {
         let started = Instant::now();
-        results.write().unwrap().clear();
+        if !append {
+            results.write().unwrap().clear();
+        }
         let mut outcome = Outcome::Succeeded;
-        let mut result_sets = 0;
+        let mut result_sets = results.read().unwrap().len();
 
         'batches: for (index, batch) in batch::split(script).iter().enumerate() {
+            if cancel.is_cancelled() {
+                outcome = Outcome::Cancelled;
+                emit(message(cancel.message(), cancel.message() == TIMED_OUT));
+                break;
+            }
             let line_offset = base_line + batch.first_line;
             for _ in 0..batch.repeat {
                 emit(ExecutionEvent::BatchStarted {
@@ -147,6 +192,36 @@ impl Session {
                             }
                         }
                         Ok(StatementResult::Rows) => {
+                            let is_plan = self.client.get_metadata().iter().any(|c| {
+                                c.column_name.contains("Showplan")
+                                    || c.column_name == "Microsoft SQL Server 2005 XML Showplan"
+                            });
+                            if is_plan {
+                                loop {
+                                    match self.client.next_row().await {
+                                        Ok(Some(row)) => {
+                                            for value in row {
+                                                let mut xml = String::new();
+                                                if crate::format::write_value(&value, &mut xml)
+                                                    .is_some()
+                                                {
+                                                    emit(ExecutionEvent::Plan { xml });
+                                                }
+                                            }
+                                        }
+                                        Ok(None) => break,
+                                        Err(error) => {
+                                            step = Err(error);
+                                            break;
+                                        }
+                                    }
+                                }
+                                if step.is_err() {
+                                    continue;
+                                }
+                                step = self.client.advance().await;
+                                continue;
+                            }
                             let columns: Vec<_> = self
                                 .client
                                 .get_metadata()

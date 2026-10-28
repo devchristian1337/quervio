@@ -2863,6 +2863,8 @@ dependencies = [
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
  "tokio",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

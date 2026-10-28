@@ -29,6 +29,103 @@ pub struct ServerInfo {
 }
 
 impl Session {
+    /// Executes every result in a management batch and stops at the first error.
+    pub async fn command(&mut self, sql: &str) -> Result<Vec<String>> {
+        let mut messages = Vec::new();
+        self.command_controlled(sql, &crate::execution::CancelToken::new(), |text| {
+            messages.push(text)
+        })
+        .await?;
+        Ok(messages)
+    }
+
+    pub async fn command_controlled(
+        &mut self,
+        sql: &str,
+        cancel: &crate::execution::CancelToken,
+        mut emit: impl FnMut(String),
+    ) -> Result<()> {
+        for batch in crate::batch::split(sql) {
+            for _ in 0..batch.repeat {
+                if cancel.is_cancelled() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "Operation cancelled; completed statements may already be committed.",
+                    )
+                    .into());
+                }
+                let result: Result<()> = async {
+                    let options = mssql_tds::connection::tds_client::ExecuteOptions {
+                        cancel: Some(&cancel.handle),
+                        ..Default::default()
+                    };
+                    let mut step = self.client.execute(batch.text.clone(), options).await?;
+                    loop {
+                        match step {
+                            StatementResult::End => break,
+                            StatementResult::Rows => {
+                                while self.client.next_row().await?.is_some() {}
+                            }
+                            _ => {}
+                        }
+                        for info in self.client.take_info_messages() {
+                            emit(info.message);
+                        }
+                        step = self.client.advance().await?;
+                    }
+                    Ok(())
+                }
+                .await;
+                let closed = self.client.close_query().await;
+                result?;
+                closed?;
+            }
+        }
+        Ok(())
+    }
+    /// Bounded metadata read, with exact text conversion and untruncated XML.
+    pub async fn query_table(
+        &mut self,
+        sql: &str,
+        limit: usize,
+    ) -> Result<crate::management::DataTable> {
+        let first = self.client.execute(sql.to_string(), ()).await;
+        let mut table = crate::management::DataTable {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            truncated: false,
+        };
+        let outcome: Result<()> = async {
+            if matches!(first?, StatementResult::Rows) {
+                table.columns = self
+                    .client
+                    .get_metadata()
+                    .iter()
+                    .map(|c| c.column_name.clone())
+                    .collect();
+                while let Some(row) = self.client.next_row().await? {
+                    if table.rows.len() >= limit {
+                        table.truncated = true;
+                        break;
+                    }
+                    table.rows.push(
+                        row.iter()
+                            .map(|v| {
+                                let mut s = String::new();
+                                crate::format::write_value(v, &mut s).map(|()| s)
+                            })
+                            .collect(),
+                    );
+                }
+            }
+            Ok(())
+        }
+        .await;
+        let closed = self.client.close_query().await;
+        outcome?;
+        closed?;
+        Ok(table)
+    }
     /// Logs in to the Server of `connection`. `password` is required for SQL
     /// logins and ignored for Windows authentication.
     pub async fn open(
@@ -36,9 +133,18 @@ impl Session {
         password: Option<String>,
         application_name: &str,
     ) -> Result<Self> {
+        Self::open_with_timeout(connection, password, application_name, None).await
+    }
+
+    pub async fn open_with_timeout(
+        connection: &SavedConnection,
+        password: Option<String>,
+        application_name: &str,
+        timeout: Option<u32>,
+    ) -> Result<Self> {
         let mut context = ClientContext::default();
         context.application_name = application_name.to_string();
-        context.login_timeout = Some(LOGIN_TIMEOUT_SECS);
+        context.login_timeout = Some(timeout.unwrap_or(LOGIN_TIMEOUT_SECS));
         context.database = connection
             .default_database
             .clone()
@@ -53,6 +159,12 @@ impl Session {
             }
             Authentication::Windows => {
                 context.tds_authentication_method = TdsAuthenticationMethod::SSPI;
+            }
+            Authentication::Entra => {
+                context.tds_authentication_method = TdsAuthenticationMethod::AccessToken;
+                context.access_token = Some(password.ok_or_else(|| {
+                    Error::MissingPassword("Microsoft Entra access token".into())
+                })?);
             }
         }
         context.encryption_options.mode = match connection.encrypt {

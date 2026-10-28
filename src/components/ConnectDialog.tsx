@@ -133,7 +133,7 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
               value={draft.authentication.kind}
               onValueChange={(kind) =>
                 update({
-                  authentication: kind === "sql" ? { kind: "sql", userName } : { kind: "windows" },
+                  authentication: kind === "sql" ? { kind: "sql", userName } : kind === "entra" ? {kind: "entra"} : { kind: "windows" },
                 })
               }
             >
@@ -143,6 +143,7 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
               <SelectContent>
                 <SelectItem value="sql">SQL Server Authentication</SelectItem>
                 <SelectItem value="windows">Windows Authentication</SelectItem>
+                <SelectItem value="entra">Microsoft Entra (interactive)</SelectItem>
               </SelectContent>
             </Select>
           </Field>

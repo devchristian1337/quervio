@@ -7,6 +7,7 @@ export type SortDirection = "ascending" | "descending";
 
 /** Mirrors ExecuteOptions in src-tauri/src/query.rs. */
 export interface ExecuteOptions {
+  planMode?: "none" | "estimated" | "actual";
   /** 0 waits forever. */
   timeoutSeconds: number;
   maxRows: number;
@@ -18,7 +19,8 @@ export type Encrypt = "mandatory" | "optional" | "strict";
 
 export type Authentication =
   | { kind: "sql"; userName: string }
-  | { kind: "windows" };
+  | { kind: "windows" }
+  | { kind: "entra" };
 
 export interface SavedConnection {
   id: string;
@@ -50,7 +52,7 @@ export type CopyFormat = "text" | "textWithHeaders" | "markdown";
 /** Mirrors explorer::ScriptKind. */
 export type ScriptKind = "selectTop" | "createTable" | "create" | "alter";
 
-export type ObjectFolder = "tables" | "views" | "storedProcedures" | "functions";
+export type ObjectFolder = "tables" | "views" | "storedProcedures" | "functions" | "databaseTriggers";
 export type TableFolder = "columns" | "keys" | "indexes" | "triggers";
 
 export const api = {
@@ -72,7 +74,7 @@ export const api = {
 
   openQuery: (tabId: string, connectionId: string, database: string | null) =>
     invoke<ServerInfo>("query_open", { tabId, connectionId, database }),
-  closeQuery: (tabId: string) => invoke<void>("query_close", { tabId }),
+  closeQuery: (tabId: string) => invoke<void>("query_close", { tabId }).then(()=>{void invoke("language_close",{tabId}).catch(()=>{});}),
   executeQuery: (
     tabId: string,
     script: string,
@@ -81,6 +83,8 @@ export const api = {
     allowDestructive: boolean,
     onEvent: Channel<ExecutionEvent>,
   ) => invoke<Outcome>("query_execute", { tabId, script, baseLine, options, allowDestructive, onEvent }),
+  sqlcmdPrepare: (tabId: string, script: string, filePath: string | null, baseLine: number) => invoke<{token: string; script: string; hasLocalCommands: boolean}>("query_sqlcmd_prepare", {tabId, script, filePath, baseLine}),
+  sqlcmdExecute: (tabId: string, token: string, options: ExecuteOptions, onEvent: Channel<ExecutionEvent>) => invoke<Outcome>("query_sqlcmd_execute", {tabId, token, confirmed: true, options, onEvent}),
   cancelQuery: (tabId: string) => invoke<void>("query_cancel", { tabId }),
 
   resultRows: (tabId: string, set: number, start: number, count: number) =>
@@ -98,6 +102,7 @@ export const api = {
   ) => invoke<{ rows: number; columns: number }>("result_copy", { tabId, set, rows, columns, format }),
   resultExportMarkdown: (tabId: string, set: number, path: string) =>
     invoke<void>("result_export_markdown", { tabId, set, path }),
+  resultExportFile: (tabId: string, set: number, path: string, format: "csv" | "xlsx") => invoke<void>("result_export_file", {tabId,set,path,format}),
 
   script: (id: string, database: string, objectId: number, kind: ScriptKind) =>
     invoke<string>("explorer_script", { id, database, objectId, kind }),

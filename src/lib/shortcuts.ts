@@ -9,6 +9,7 @@ import { closeTab, openFile, saveTab } from "@/lib/files";
 import { useExplorer } from "@/stores/explorer";
 import { useQueries } from "@/stores/queries";
 import { useSettingsDialog } from "@/stores/dialogs";
+import { useWorkbench } from "@/stores/workbench";
 
 /** New Query on the Object Explorer selection, else on the active tab's server. */
 export function openQueryFromContext() {
@@ -23,6 +24,13 @@ export function openQueryFromContext() {
 }
 
 export function runCommand(id: CommandId) {
+  const workbench = useWorkbench.getState();
+  if (workbench.activeId) {
+    if (id === "closeTab") {workbench.close(workbench.activeId);return;}
+    if (["execute", "cancel", "toggleResults", "format", "save", "saveAs"].includes(id)) return;
+    if (id === "nextTab" || id === "previousTab") {const index = workbench.tabs.findIndex(t => t.id === workbench.activeId);workbench.activate(workbench.tabs[index + (id === "nextTab" ? 1 : -1)]?.id ?? null);return;}
+  }
+  if (id === "execute" && document.querySelector('[role="dialog"]')) return;
   const { activeId, execute, cancel, toggleResults, cycle } = useQueries.getState();
   switch (id) {
     case "execute": {
@@ -89,7 +97,7 @@ export function useGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         // A modal keeps focus until it is closed.
-        if (!(event.target as Element | null)?.closest?.('[role="dialog"]')) findInEditor();
+        if (!useWorkbench.getState().activeId && !(event.target as Element | null)?.closest?.('[role="dialog"]')) findInEditor();
       } else if (reload) {
         event.preventDefault();
       }

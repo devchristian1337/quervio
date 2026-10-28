@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:ui": "playwright test"
   },
   "dependencies": {
     "@ark-ui/react": "^5.39.3",
@@ -36,6 +37,7 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@tauri-apps/cli": "^2",
     "@types/node": "^26.6.5",
     "@types/react": "^19.1.8",

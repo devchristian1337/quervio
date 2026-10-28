@@ -41,6 +41,7 @@ pub enum Authentication {
         user_name: String,
     },
     Windows,
+    Entra,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

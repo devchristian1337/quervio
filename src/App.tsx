@@ -5,7 +5,8 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { ObjectExplorer } from "@/components/ObjectExplorer";
-import { QueryWorkspace } from "@/components/QueryWorkspace";
+import { Workspace } from "@/components/management/Workspace";
+import { SqlcmdConfirmation } from "@/components/management/SqlcmdConfirmation";
 import { Toaster } from "@/components/ui/basic-toast";
 import { SafetyDialogs } from "@/components/SafetyDialogs";
 import { SettingsDialog } from "@/components/SettingsDialog";
@@ -17,6 +18,9 @@ import { applyTheme } from "@/lib/themes";
 import { useTheme } from "@/lib/use-theme";
 import { applyWindowTheme } from "@/lib/window-theme";
 import { useSettings } from "@/stores/settings";
+import {ask} from "@tauri-apps/plugin-dialog";
+import {useOperations} from "@/stores/operations";
+import {management} from "@/lib/management-api";
 
 // The chosen theme, or Light/Dark following Windows.
 function useAppTheme() {
@@ -53,8 +57,11 @@ function useCloseGuard() {
       // Held open until the tabs are saved (they come back on the next
       // start) and open transactions are settled.
       event.preventDefault();
+      const operations=Object.values(useOperations.getState().running);
+      if(operations.length && !await ask(`${operations.length} operation(s) are still running. Cancel them and close Quervio?`,{title:"Operations in progress",kind:"warning",okLabel:"Cancel operations and close",cancelLabel:"Keep working"})) return;
       await saveNow();
       if (await useQueries.getState().settleAllTransactions()) {
+        await management.shutdown();
         closing = true;
         await appWindow.destroy();
       }
@@ -85,10 +92,11 @@ export default function App() {
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel>
-        <QueryWorkspace />
+        <Workspace />
       </ResizablePanel>
     </ResizablePanelGroup>
     <SafetyDialogs />
+    <SqlcmdConfirmation />
     <SettingsDialog />
     <Toaster />
     </>

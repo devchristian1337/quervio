@@ -41,6 +41,7 @@ pub enum ObjectFolder {
     Views,
     StoredProcedures,
     Functions,
+    DatabaseTriggers,
 }
 
 /// Folders under a table (views only have columns).
@@ -79,11 +80,27 @@ pub async fn objects(
     folder: ObjectFolder,
 ) -> Result<Vec<CatalogItem>> {
     let db = quote_name(database);
+    if folder == ObjectFolder::DatabaseTriggers {
+        let rows=session.query(&format!("SELECT name,object_id,is_disabled,is_ms_shipped FROM {db}.sys.triggers WHERE parent_class=0 ORDER BY name")).await?;
+        return rows
+            .iter()
+            .map(|row| {
+                Ok(CatalogItem {
+                    name: text(row, 0)?,
+                    schema: None,
+                    object_id: Some(int(row, 1)?),
+                    detail: flag(row, 2)?.then(|| "disabled".into()),
+                    system: flag(row, 3)?,
+                })
+            })
+            .collect();
+    }
     let (source, filter) = match folder {
         ObjectFolder::Tables => ("sys.tables", "o.type = 'U'"),
         ObjectFolder::Views => ("sys.views", "o.type = 'V'"),
         ObjectFolder::StoredProcedures => ("sys.procedures", "o.type IN ('P', 'PC')"),
         ObjectFolder::Functions => ("sys.objects", "o.type IN ('FN', 'FS', 'IF', 'TF', 'FT')"),
+        ObjectFolder::DatabaseTriggers => unreachable!(),
     };
     let rows = session
         .query(&format!(

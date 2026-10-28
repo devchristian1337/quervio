@@ -36,6 +36,7 @@
     }
   },
   "bundle": {
+    "resources": { "resources/microsoft/": "microsoft/", "../scripts/install-sqltools.ps1": "install-sqltools.ps1" },
     "active": true,
     "targets": [
       "nsis"

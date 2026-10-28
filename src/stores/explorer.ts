@@ -1,6 +1,9 @@
 // Object Explorer tree: nodes are addressed by a path-like key and their
 // children are loaded lazily, one level per expand, then cached until F5.
 import { create } from "zustand";
+import { management, records } from "@/lib/management-api";
+import type { ToolKind } from "@/stores/workbench";
+import {invalidateCatalog} from "@/lib/metadata-events";
 import {
   api,
   errorMessage,
@@ -11,6 +14,10 @@ import {
 } from "@/lib/api";
 
 export type NodeKind =
+  | { type: "tool"; connectionId: string; database: string | null; tool: ToolKind }
+  | { type: "securityFolder"; connectionId: string; database: string | null; server: boolean }
+  | { type: "securityList"; connectionId: string; database: string | null; server: boolean; section: "principals" | "roles" | "serverTriggers" }
+  | { type: "securityObject"; connectionId: string; database: string | null; definition?: string }
   | { type: "server"; connectionId: string }
   | { type: "databases"; connectionId: string }
   | { type: "systemDatabases"; connectionId: string }
@@ -40,6 +47,8 @@ export type NodeKind =
     };
 
 export interface TreeNode {
+  objectName?: string;
+  objectSchema?: string;
   key: string;
   label: string;
   detail?: string | null;
@@ -57,6 +66,7 @@ const OBJECT_FOLDERS: { folder: ObjectFolder; label: string }[] = [
   { folder: "views", label: "Views" },
   { folder: "storedProcedures", label: "Stored Procedures" },
   { folder: "functions", label: "Functions" },
+  { folder: "databaseTriggers", label: "Database Triggers" },
 ];
 
 const TABLE_FOLDERS: { folder: TableFolder; label: string }[] = [
@@ -99,6 +109,9 @@ async function loadChildren(node: TreeNode, cache: Record<string, Children>): Pr
           kind: { type: "databases", connectionId: kind.connectionId },
           expandable: true,
         },
+        {key: `${key}/security`, label: "Security", kind: {type: "securityFolder", connectionId: kind.connectionId, database: null, server: true}, expandable: true},
+        {key: `${key}/triggers`, label: "Server Triggers", kind: {type: "securityList", connectionId: kind.connectionId, database: null, server: true, section: "serverTriggers"}, expandable: true},
+        ...(["activity", "events", "agent"] as const).map(tool => ({key: `${key}/${tool}`, label: tool === "activity" ? "Activity Monitor" : tool === "events" ? "Extended Events" : "SQL Server Agent", kind: {type: "tool" as const, connectionId: kind.connectionId, database: null, tool}, expandable: false})),
       ];
     case "databases": {
       const items = await api.databases(kind.connectionId);
@@ -124,12 +137,19 @@ async function loadChildren(node: TreeNode, cache: Record<string, Children>): Pr
       return items.filter((i) => i.system).map((i) => databaseNode(key, kind.connectionId, i));
     }
     case "database":
-      return OBJECT_FOLDERS.map(({ folder, label }) => ({
+      return [...OBJECT_FOLDERS.map(({ folder, label }) => ({
         key: `${key}/${folder}`,
         label,
-        kind: { type: "objectFolder", connectionId: kind.connectionId, database: kind.database, folder },
+        kind: { type: "objectFolder" as const, connectionId: kind.connectionId, database: kind.database, folder },
         expandable: true,
-      }));
+      })), {key: `${key}/security`, label: "Security", kind: {type: "securityFolder", connectionId: kind.connectionId, database: kind.database, server: false}, expandable: true}, ...(["queryStore", "backup", "maintenance", "diagram", "transfer"] as const).map(tool => ({key: `${key}/${tool}`, label: {queryStore: "Query Store", backup: "Backup / Restore", maintenance: "Maintenance", diagram: "Relationships", transfer: "Import / Export"}[tool], kind: {type: "tool" as const, connectionId: kind.connectionId, database: kind.database, tool}, expandable: false}))];
+    case "securityFolder":
+      return (["principals", "roles"] as const).map(section => ({key: `${key}/${section}`, label: section === "principals" ? kind.server ? "Logins" : "Users" : "Roles", kind: {type: "securityList" as const, connectionId: kind.connectionId, database: kind.database, server: kind.server, section}, expandable: true}));
+    case "securityList": {
+      const data = await management.read({connectionId: kind.connectionId, database: kind.database}, kind.section === "serverTriggers" ? {kind: "serverTriggers"} : {kind: kind.section, server: kind.server});
+      return records(data).map((row, index) => ({key: `${key}/${row.principal_id ?? index}`, label: row.name ?? row.role_name ?? "", detail: row.type_desc, kind: {type: "securityObject" as const, connectionId: kind.connectionId, database: kind.database, definition: row.definition ?? undefined}, expandable: false}));
+    }
+    case "securityObject":case "tool":return [];
     case "objectFolder": {
       const items = await api.objects(kind.connectionId, kind.database, kind.folder);
       const hasColumns = kind.folder === "tables" || kind.folder === "views";
@@ -138,6 +158,8 @@ async function loadChildren(node: TreeNode, cache: Record<string, Children>): Pr
         .map((item) => ({
           key: `${key}/${item.objectId ?? qualified(item)}`,
           label: qualified(item),
+          objectName: item.name,
+          objectSchema: item.schema ?? "dbo",
           detail: item.detail,
           kind: {
             type: "object",
@@ -261,6 +283,7 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     collapse: (key) => set((s) => ({ expanded: { ...s.expanded, [key]: false } })),
 
     refresh: async (node) => {
+      invalidateCatalog();
       if (!node.expandable) return;
       set((s) => ({
         children: prune(s.children, node.key, true),

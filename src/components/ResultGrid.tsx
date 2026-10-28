@@ -392,6 +392,13 @@ export default function ResultGrid({ tabId, set }: Props) {
     }
   }
 
+  async function exportFile(format: "csv" | "xlsx") {
+    const path=await save({defaultPath:`result-${set.index+1}.${format}`,filters:[{name:format==="csv"?"CSV":"Excel",extensions:[format]}]});
+    if(!path)return;
+    try {await api.resultExportFile(tabId,set.index,path,format);toast.success(`Saved ${plural(set.rows,"row")} as ${format.toUpperCase()}`,{description:path});}
+    catch(error){toast.error("Export failed",{description:errorMessage(error)});}
+  }
+
   function onKeyDown(event: React.KeyboardEvent) {
     if (event.key === "Escape" && (selection.rows.length || selection.current || selection.columns.length)) {
       setSelection(emptySelection);
@@ -458,6 +465,8 @@ export default function ResultGrid({ tabId, set }: Props) {
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={() => void copy("markdown", all)}>Copy all as Markdown</ContextMenuItem>
           <ContextMenuItem onSelect={() => void exportMarkdown()}>Save as Markdown…</ContextMenuItem>
+          <ContextMenuItem disabled={!set.done} onSelect={() => void exportFile("csv")}>Save as CSV…</ContextMenuItem>
+          <ContextMenuItem disabled={!set.done} onSelect={() => void exportFile("xlsx")}>Save as Excel…</ContextMenuItem>
           {sort && (
             <>
               <ContextMenuSeparator />

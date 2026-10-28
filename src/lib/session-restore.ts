@@ -8,6 +8,8 @@ import { useConnections } from "@/stores/connections";
 import { useQueries } from "@/stores/queries";
 
 interface SavedTab {
+  sqlcmdMode?: boolean;
+  planMode?: "none" | "estimated" | "actual";
   title: string;
   connectionId: string;
   database: string | null;
@@ -31,6 +33,8 @@ function snapshot(): SavedSession {
       filePath: tab.filePath,
       dirty: tab.dirty,
       text: modelText(tab.id) ?? tab.initialText,
+      sqlcmdMode: tab.sqlcmdMode ?? false,
+      planMode: tab.planMode ?? "none",
     })),
     active: Math.max(0, tabs.findIndex((t) => t.id === activeId)),
   };
@@ -82,6 +86,8 @@ export async function restoreTabs() {
         filePath: tab.filePath,
         dirty: tab.dirty,
         activate: index === active,
+        sqlcmdMode: tab.sqlcmdMode === true,
+        planMode: tab.planMode === "estimated" || tab.planMode === "actual" ? tab.planMode : "none",
       }),
     ),
   );
@@ -96,7 +102,8 @@ useQueries.subscribe((state, previous) => {
       (t, i) =>
         t.database !== previous.tabs[i]?.database ||
         t.title !== previous.tabs[i]?.title ||
-        t.dirty !== previous.tabs[i]?.dirty,
+        t.dirty !== previous.tabs[i]?.dirty ||
+        t.sqlcmdMode !== previous.tabs[i]?.sqlcmdMode || t.planMode !== previous.tabs[i]?.planMode,
     )
   ) {
     scheduleSave();

@@ -31,6 +31,7 @@ import { useShortcutLabel } from "@/lib/commands";
 import { editorThemeName, registerEditorThemes } from "@/lib/themes";
 import { useTheme } from "@/lib/use-theme";
 import { EDITOR_FONT_SIZE, useSettings } from "@/stores/settings";
+import { syncLanguage } from "@/lib/intellisense";
 
 registerMonaco(monaco);
 
@@ -121,8 +122,9 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
   const [selected, setSelected] = useState(false);
 
   const container = useRef<HTMLDivElement>(null);
+  const languageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => () => registerEditor(null), []);
+  useEffect(() => () => {registerEditor(null);if (languageTimer.current) clearTimeout(languageTimer.current);}, []);
   useEffect(() => zoomOnCtrlWheel(container.current!), []);
 
   return (
@@ -142,6 +144,8 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
             onChange={() => {
               useQueries.getState().setDirty(tabId, true);
               scheduleSave();
+              if (languageTimer.current) clearTimeout(languageTimer.current);
+              languageTimer.current = setTimeout(() => {const model = monaco.editor.getModel(monaco.Uri.parse(tabId));if (model) syncLanguage(model);}, 700);
             }}
             theme={editorThemeName(theme)}
             options={{
@@ -161,6 +165,7 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
             onMount={(editor) => {
               registerEditor(editor);
               editor.focus();
+              const model = editor.getModel();if (model) syncLanguage(model);
               // Execute, Cancel, New Query and the rest are app shortcuts
               // (src/lib/shortcuts.ts), so they work everywhere and can be changed.
             }}

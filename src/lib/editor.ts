@@ -93,6 +93,19 @@ export function focusEditor() {
   current?.focus();
 }
 
+export function insertText(text: string, snippet = false) {
+  if (!current) return;
+  current.focus();
+  if (snippet) {
+    const controller = current.getContribution("snippetController2") as {insert: (template: string) => void} | null;
+    controller?.insert(text);
+  } else {
+    const range = current.getSelection();
+    if (range) current.executeEdits("template", [{range, text}]);
+    current.pushUndoStop();
+  }
+}
+
 /** Search the active Query Tab even when a toolbar or results panel has focus. */
 export function findInEditor() {
   current?.focus();
