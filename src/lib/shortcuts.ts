@@ -4,7 +4,7 @@
 // (Ctrl+K Ctrl+C to comment, Ctrl+K Ctrl+F to format the selection, …).
 import { useEffect } from "react";
 import { commandFor, shortcutOf, type CommandId } from "@/lib/commands";
-import { currentScript, formatInEditor, hasSelection } from "@/lib/editor";
+import { currentScript, findInEditor, formatInEditor, hasSelection } from "@/lib/editor";
 import { closeTab, openFile, saveTab } from "@/lib/files";
 import { useExplorer } from "@/stores/explorer";
 import { useQueries } from "@/stores/queries";
@@ -83,6 +83,13 @@ export function useGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         runCommand(command);
+      } else if (shortcut === "Ctrl+F") {
+        // WebView2 otherwise opens its native page-search bar when the
+        // editor does not have focus. Search the active Query Tab instead.
+        event.preventDefault();
+        event.stopPropagation();
+        // A modal keeps focus until it is closed.
+        if (!(event.target as Element | null)?.closest?.('[role="dialog"]')) findInEditor();
       } else if (reload) {
         event.preventDefault();
       }

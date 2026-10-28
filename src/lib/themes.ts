@@ -542,6 +542,11 @@ export function registerEditorThemes(editor: EditorApi) {
         // Transparent: the page behind is the theme's background (or Mica).
         "editor.background": "#00000000",
         "editorGutter.background": "#00000000",
+        // Pinned lines overlay the scrolling document, so unlike the editor
+        // surface they must be opaque (including the line-number gutter).
+        "editorStickyScroll.background": p.bg,
+        "editorStickyScrollGutter.background": p.bg,
+        "editorStickyScrollHover.background": p.panel,
         "editor.foreground": p.fg,
         "editor.lineHighlightBackground": p.lineHighlight,
         "editor.lineHighlightBorder": "#00000000",
