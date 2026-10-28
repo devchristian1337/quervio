@@ -64,10 +64,10 @@ export function Security({ context }: { context: Context }) {
           : member
             ? `ALTER ${server ? "SERVER " : ""}ROLE ${n(role)} ${operation === "add" ? "ADD" : "DROP"} MEMBER ${n(member)};`
             : "";
-  if (section === "permissions" && name) {
+  if (section === "permissions" && name && (server || securable !== "object" || object)) {
     const target = server
       ? ""
-      : securable === "object" && object
+      : securable === "object"
         ? ` ON OBJECT::${q(schema, object)}`
         : securable === "schema"
           ? ` ON SCHEMA::${n(schema)}`
@@ -120,6 +120,7 @@ export function Security({ context }: { context: Context }) {
           value={scope}
           onChange={(v) => {
             setScope(v);
+            setPermission(v === "server" ? "CONNECT SQL" : "SELECT");
             setAuditAction(
               v === "server"
                 ? "FAILED_LOGIN_GROUP"
@@ -330,7 +331,11 @@ export function Security({ context }: { context: Context }) {
             )}
           </div>
           <Operation
-            context={context}
+            context={
+              (server && section === "permissions") || section === "audits" || (server && section === "auditSpecifications")
+                ? { ...context, database: "master" }
+                : context
+            }
             script={script}
             label="Preview security changes"
           />

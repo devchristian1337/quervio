@@ -96,7 +96,7 @@ export function ActivityMonitor({ context }: { context: Context }) {
       {liveXml ? (
         <PlanViewer xml={liveXml} />
       ) : (
-        data.data && <DataGrid data={data.data} />
+        data.data && <DataGrid data={data.data} fill />
       )}
       {view === "live" && (
         <p className="text-xs text-muted-foreground">
@@ -146,6 +146,14 @@ export function QueryStore({ context }: { context: Context }) {
         }
       : null,
   );
+  // master and tempdb cannot use Query Store; the options view is simply empty there.
+  if (context.database && ["master", "tempdb"].includes(context.database.toLowerCase()))
+    return (
+      <Notice>
+        Query Store is not available in {context.database}. Choose a user
+        database in Database above.
+      </Notice>
+    );
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
       <div className="flex flex-wrap items-end gap-3">

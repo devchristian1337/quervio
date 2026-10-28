@@ -264,14 +264,17 @@ export function DataGrid({
   data,
   onRow,
   selected,
+  fill = false,
 }: {
   data: DataTable;
   onRow?: (row: Record<string, string | null>) => void;
   selected?: (row: Record<string, string | null>) => boolean;
+  /** Take the tool's remaining height instead of stopping at 384px. */
+  fill?: boolean;
 }) {
   const numeric=useMemo(()=>data.columns.map((_,index)=>data.rows.some(row=>row[index]!==null) && data.rows.every(row=>row[index]===null || /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(row[index]??""))),[data]);
   return (
-    <div className="max-h-96 shrink-0 overflow-auto rounded-md border">
+    <div className={cn("overflow-auto rounded-md border", fill ? "min-h-0 flex-1" : "max-h-96 shrink-0")}>
       <table className="w-full border-collapse text-[13px]">
         <thead className="sticky top-0 bg-panel">
           <tr>
@@ -514,7 +517,7 @@ export function Operation({
       {error && !preview && <Notice error>{error}</Notice>}
       <Dialog open={preview !== null} onOpenChange={(open) => !open && close()}>
         <DialogContent
-          className="flex max-h-[90vh] max-w-4xl flex-col"
+          className="flex max-h-[90vh] flex-col sm:max-w-4xl"
           onInteractOutside={(e) => busy && e.preventDefault()}
         >
           <DialogHeader>
@@ -526,7 +529,7 @@ export function Operation({
               five minutes
             </DialogDescription>
           </DialogHeader>
-          <pre className={cn(codeClass, "min-h-0 flex-1")}>
+          <pre className={cn(codeClass, "min-h-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]")}>
             {preview?.script}
           </pre>
           {progress && <Notice>{progress}</Notice>}
@@ -686,7 +689,7 @@ export function BridgeOperation({
               and options before applying.
             </DialogDescription>
           </DialogHeader>
-          <pre className={cn(codeClass, "max-h-80")}>
+          <pre className={cn(codeClass, "max-h-80 whitespace-pre-wrap [overflow-wrap:anywhere]")}>
             {JSON.stringify(
               Object.fromEntries(
                 Object.entries(prepared?.args ?? args).filter(

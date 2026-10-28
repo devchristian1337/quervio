@@ -87,7 +87,9 @@ internal static class Program
         catch (Exception error)
         {
             // Do not serialize connection strings, credentials or arbitrary exception objects.
-            string text = error is SqlException sql ? $"SQL {sql.Number}: {sql.Message}" : error.Message;
+            var causes = new List<string>();
+            for (Exception? e = error; e is not null; e = e.InnerException) { string m = e is SqlException sql ? $"SQL {sql.Number}: {sql.Message}" : e.Message, plain = e is SqlException s ? s.Message : e.Message; if (!causes.Any(c => c.Contains(plain, StringComparison.Ordinal))) causes.Add(m); }
+            string text = string.Join(" ", causes);
             if (!string.IsNullOrEmpty(Password)) text = text.Replace(Password, "[redacted]", StringComparison.Ordinal);
             Emit(new { type = "error", message = text }); return 1;
         }
@@ -109,19 +111,20 @@ internal static class Program
         try
         {
             Args = new JsonObject { ["backslashEscaping"] = true };
-            string?[] expected = [null, "", @"\N", @"\prefix", "a,b", "a\"b", "line one\nline two", "à漢字", "99999999999999999999999999999999999999"];
+            string?[] expected = [null, "", @"\N", @"\prefix", "a,b", "a\"b", "line one\nline two", "à漢字", "99999999999999999999999999999999999999", "one\r\n\nthree", "_x0041_ bell\u0007"];
             string path = Path.Combine(directory, "roundtrip.csv");
             File.WriteAllText(path, string.Join(",", Enumerable.Range(0, expected.Length).Select(i => Csv("c" + i))) + Environment.NewLine + string.Join(",", expected.Select(Csv)) + Environment.NewLine, new UTF8Encoding(true));
             var data = FileRows(path, out var headers).Single();
-            if (headers.Length != expected.Length || !data.Select(v => v?.ToString()).SequenceEqual(expected)) throw new Exception("CSV round-trip did not preserve NULL, empty, escaping, Unicode or precision.");
-            if (ConvertCell("99999999999999999999999999999999999999", "decimal").ToString() != expected[^1]) throw new Exception("Decimal(38) precision was lost.");
+            if (headers.Length != expected.Length || !data.Select(v => v?.ToString()).SequenceEqual(expected)) throw new Exception("CSV round-trip did not preserve NULL, empty, escaping, Unicode, blank lines or precision.");
+            if (ConvertCell("99999999999999999999999999999999999999", "decimal").ToString() != expected[8]) throw new Exception("Decimal(38) precision was lost.");
             if (!Equals(ConvertCell("0", "bit"), false) || !Equals(ConvertCell("1", "bit"), true)) throw new Exception("Bit conversion failed.");
             if (ConvertCell("0x00ABFF", "varbinary") is not byte[] bytes || !bytes.SequenceEqual(new byte[] { 0, 171, 255 })) throw new Exception("Binary conversion failed.");
             string workbook = Path.Combine(directory, "roundtrip.xlsx");
             WriteWorkbook(workbook, Enumerable.Range(0, expected.Length).Select(i => "c" + i).ToArray(), new[] { expected });
             var excel = FileRows(workbook, out var excelHeaders).Single();
             if (excelHeaders.Length != expected.Length || !excel.Select(v => v?.ToString()).SequenceEqual(expected)) throw new Exception("Excel round-trip mismatch: " + string.Join(", ", excel.Select((v, i) => $"{i}: {JsonSerializer.Serialize(v)}")));
-            Emit(new { type = "result", value = new { tests = 5, status = "passed" } });
+            if (ConvertCell(1e15, "decimal").ToString() != "1000000000000000" || !Equals(ConvertCell(new DateTime(1899, 12, 31, 12, 30, 0), "time"), new TimeSpan(12, 30, 0))) throw new Exception("Typed Excel values did not convert.");
+            Emit(new { type = "result", value = new { tests = 6, status = "passed" } });
         }
         finally
         {
@@ -164,6 +167,11 @@ internal static class Program
         await using var connection = await Open();
         var server = new Server(new ServerConnection(connection));
         var database = server.Databases[connection.Database] ?? throw new Exception("Database not found.");
+        // One query per collection instead of one per object.
+        server.SetDefaultInitFields(typeof(Table), "IsSystemObject");
+        server.SetDefaultInitFields(typeof(Microsoft.SqlServer.Management.Smo.View), "IsSystemObject");
+        server.SetDefaultInitFields(typeof(StoredProcedure), "IsSystemObject");
+        server.SetDefaultInitFields(typeof(UserDefinedFunction), "IsSystemObject");
         var scripter = new Scripter(server);
         scripter.Options.ScriptSchema = S("mode", "schema") != "data";
         scripter.Options.ScriptData = S("mode") == "data" || S("mode") == "both";
@@ -174,7 +182,8 @@ internal static class Program
         scripter.Options.TargetServerVersion = (SqlServerVersion)Enum.Parse(typeof(SqlServerVersion), "Version" + I("targetVersion", server.VersionMajor) * 10);
         var names = Args["objects"]?.AsArray().Select(o => o!.GetValue<string>()).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var urns = new List<Urn>();
-        bool Include(string schema, string name) => names is null || names.Count == 0 || names.Contains(schema + "." + name);
+        var schemas = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool Include(string schema, string name) { bool included = names is null || names.Count == 0 || names.Contains(schema + "." + name); if (included) schemas.Add(schema); return included; }
         foreach (Table t in database.Tables) if (!t.IsSystemObject && Include(t.Schema, t.Name)) urns.Add(t.Urn);
         if (scripter.Options.ScriptSchema)
         {
@@ -183,28 +192,45 @@ internal static class Program
             foreach (UserDefinedFunction f in database.UserDefinedFunctions) if (!f.IsSystemObject && Include(f.Schema, f.Name)) urns.Add(f.Urn);
             foreach (DatabaseDdlTrigger trigger in database.Triggers) if (names is null || names.Count == 0 || names.Contains(trigger.Name)) urns.Add(trigger.Urn);
         }
+        // SMO scripts objects but not the schemas that hold them.
+        IEnumerable<string> Statements()
+        {
+            if (scripter.Options.ScriptSchema)
+                foreach (string schema in schemas.Where(name => !name.Equals("dbo", StringComparison.OrdinalIgnoreCase)))
+                    yield return $"IF SCHEMA_ID({L(schema)}) IS NULL EXEC(N'CREATE SCHEMA {Q(schema).Replace("'", "''")}');";
+            foreach (string statement in scripter.EnumScript(urns.ToArray())) yield return statement;
+        }
         string? path = Args["path"]?.GetValue<string>();
-        if (path is not null)
+        if (!string.IsNullOrEmpty(path))
         {
             string temp = path + ".quervio-partial-" + Guid.NewGuid().ToString("N");
-            try { await using (var writer = new StreamWriter(temp, false, new UTF8Encoding(true))) { foreach (string statement in scripter.EnumScript(urns.ToArray())) { await writer.WriteLineAsync(statement); await writer.WriteLineAsync("GO"); } } File.Move(temp, path, true); }
+            try { await using (var writer = new StreamWriter(temp, false, new UTF8Encoding(true))) { foreach (string statement in Statements()) { await writer.WriteLineAsync(statement); await writer.WriteLineAsync("GO"); } } File.Move(temp, path, true); }
             finally { if (File.Exists(temp)) File.Delete(temp); }
             return new { path, objects = urns.Count };
         }
-        var text = new StringBuilder(); foreach (string statement in scripter.EnumScript(urns.ToArray())) { text.AppendLine(statement); text.AppendLine("GO"); if (text.Length > 16 * 1024 * 1024) throw new Exception("Script exceeds 16 MB. Choose a file destination."); }
+        var text = new StringBuilder(); foreach (string statement in Statements()) { text.AppendLine(statement); text.AppendLine("GO"); if (text.Length > 16 * 1024 * 1024) throw new Exception("Script exceeds 16 MB. Choose a file destination."); }
         return new { script = text.ToString(), objects = urns.Count };
     }
 
     private static async Task<object> Dac(string action)
     {
         await using var connection = await Open();
-        var service = Connection["authentication"]?["kind"]?.GetValue<string>() == "entra" ? new DacServices(connection.ConnectionString, new SqlTokenProvider()) : new DacServices(connection.ConnectionString);
+        // An open connection's ConnectionString no longer holds the password.
+        var service = Connection["authentication"]?["kind"]?.GetValue<string>() == "entra" ? new DacServices(Builder().ConnectionString, new SqlTokenProvider()) : new DacServices(Builder().ConnectionString);
         service.Message += (s, e) => Progress(e.Message.Message);
         service.ProgressChanged += (s, e) => Progress(e.Status + ": " + e.Message);
         string database = connection.Database, path = S("path");
-        if (action == "extract") { service.Extract(path, database, "Quervio", new Version(1, 0)); return new { path }; }
-        if (action == "bacpacExport") { service.ExportBacpac(path, database); return new { path }; }
-        if (action == "bacpacImport") { using var bac = BacPackage.Load(path); service.ImportBacpac(bac, S("targetDatabase", database)); return new { database = S("targetDatabase", database) }; }
+        // Packages are written beside the destination and moved into place, so an
+        // interrupted export never leaves a broken package under the chosen name.
+        void Package(Action<string> write)
+        {
+            string temp = path + ".quervio-partial-" + Guid.NewGuid().ToString("N") + Path.GetExtension(path);
+            try { write(temp); File.Move(temp, path, true); }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
+        }
+        if (action == "extract") { Package(temp => service.Extract(temp, database, "Quervio", new Version(1, 0))); return new { path }; }
+        if (action == "bacpacExport") { Package(temp => service.ExportBacpac(temp, database)); return new { path }; }
+        if (action == "bacpacImport") { string target = S("targetDatabase") is { Length: > 0 } named ? named : database; using var bac = BacPackage.Load(path); service.ImportBacpac(bac, target); return new { database = target }; }
         using var package = DacPackage.Load(path);
         var options = new DacDeployOptions { BlockOnPossibleDataLoss = true, DropObjectsNotInSource = B("dropMissing"), CreateNewDatabase = false };
         string hash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(path)));
@@ -222,9 +248,13 @@ internal static class Program
     {
         if (Path.GetExtension(path).Equals(".csv", StringComparison.OrdinalIgnoreCase))
         {
-            var parser = new Microsoft.VisualBasic.FileIO.TextFieldParser(path, Encoding.UTF8, true) { HasFieldsEnclosedInQuotes = true, TrimWhiteSpace = false };
-            parser.SetDelimiters(S("delimiter", ",")); columns = parser.ReadFields() ?? throw new Exception("Missing CSV header.");
-            return ReadCsv(parser);
+            string delimiter = S("delimiter", ",");
+            if (delimiter.Length != 1) throw new Exception("The CSV delimiter must be a single character.");
+            var text = new StreamReader(path, Encoding.UTF8, true);
+            var records = CsvRecords(text, delimiter[0]).GetEnumerator();
+            if (!records.MoveNext()) { records.Dispose(); text.Dispose(); throw new Exception("Missing CSV header."); }
+            columns = records.Current;
+            return ReadCsv(text, records);
         }
         var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         var reader = ExcelDataReader.ExcelReaderFactory.CreateReader(stream);
@@ -233,13 +263,38 @@ internal static class Program
         columns = Enumerable.Range(0, reader.FieldCount).Select(i => Convert.ToString(reader.GetValue(i), Invariant) ?? "").ToArray();
         return Path.GetExtension(path).Equals(".xlsx", StringComparison.OrdinalIgnoreCase) ? ReadExactExcel(path, reader) : ReadExcel(reader);
     }
-    private static IEnumerable<object?[]> ReadCsv(Microsoft.VisualBasic.FileIO.TextFieldParser parser)
+    private static IEnumerable<object?[]> ReadCsv(StreamReader reader, IEnumerator<string[]> records)
     {
-        using (parser) while (!parser.EndOfData)
+        using (reader) using (records) while (records.MoveNext())
+            yield return records.Current.Select(v => (object?)(v == S("nullToken", @"\N") ? null : B("backslashEscaping") && v.StartsWith(@"\\", StringComparison.Ordinal) ? v[1..] : v)).ToArray();
+    }
+    /// <summary>RFC 4180 records: quoted fields keep delimiters, quotes and line breaks, blank lines included.</summary>
+    private static IEnumerable<string[]> CsvRecords(TextReader reader, char delimiter)
+    {
+        var fields = new List<string>(); var field = new StringBuilder(); bool quoted = false, any = false;
+        int c;
+        while ((c = reader.Read()) != -1)
         {
-            string[] fields = parser.ReadFields() ?? [];
-            yield return fields.Select(v => (object?)(v == S("nullToken", @"\N") ? null : B("backslashEscaping") && v.StartsWith(@"\\", StringComparison.Ordinal) ? v[1..] : v)).ToArray();
+            char ch = (char)c;
+            if (quoted)
+            {
+                if (ch == '"') { if (reader.Peek() == '"') { reader.Read(); field.Append('"'); } else quoted = false; }
+                else field.Append(ch);
+                continue;
+            }
+            if (ch == '"' && field.Length == 0) { quoted = true; any = true; }
+            else if (ch == delimiter) { fields.Add(field.ToString()); field.Clear(); any = true; }
+            else if (ch == '\r' || ch == '\n')
+            {
+                if (ch == '\r' && reader.Peek() == '\n') reader.Read();
+                // A line with nothing on it is not a record.
+                if (any) { fields.Add(field.ToString()); yield return fields.ToArray(); }
+                fields.Clear(); field.Clear(); any = false;
+            }
+            else { field.Append(ch); any = true; }
         }
+        if (quoted) throw new InvalidDataException("The CSV file ends inside a quoted value.");
+        if (any) { fields.Add(field.ToString()); yield return fields.ToArray(); }
     }
     private static IEnumerable<object?[]> ReadExcel(ExcelDataReader.IExcelDataReader reader)
     {
@@ -297,7 +352,7 @@ internal static class Program
             await using var source = new System.Data.Odbc.OdbcConnection(S("sourceConnection")); await source.OpenAsync();
             await using var command = source.CreateCommand(); command.CommandText = S("sourceQuery"); command.CommandTimeout = 30;
             await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleResult);
-            var rows = new List<string?[]>(); while (rows.Count < 20 && await reader.ReadAsync()) rows.Add(Enumerable.Range(0, reader.FieldCount).Select(i => reader.IsDBNull(i) ? null : Convert.ToString(reader.GetValue(i), Invariant)).ToArray());
+            var rows = new List<string?[]>(); while (rows.Count < 20 && await reader.ReadAsync()) rows.Add(Enumerable.Range(0, reader.FieldCount).Select(i => OdbcValue(reader, i) switch { null => null, byte[] b => "0x" + Convert.ToHexString(b), var v => Convert.ToString(v, Invariant) }).ToArray());
             return new { columns = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToArray(), rows };
         }
         var data = FileRows(S("path"), out var columns);
@@ -311,13 +366,14 @@ internal static class Program
         string target = Q(S("schema", "dbo")) + "." + Q(S("table"));
         try
         {
-            var metadata = new Dictionary<string, (string Type, int Length)>(StringComparer.OrdinalIgnoreCase);
-            await using (var command = new SqlCommand("SELECT c.name,t.name,c.max_length FROM sys.columns c JOIN sys.types t ON t.user_type_id=c.system_type_id AND t.user_type_id=t.system_type_id WHERE c.object_id=OBJECT_ID(@target) AND c.is_computed=0 AND c.generated_always_type=0", connection, transaction))
+            var metadata = new Dictionary<string, (string Name, string Type, int Length)>(StringComparer.OrdinalIgnoreCase);
+            // CLR types (hierarchyid, geometry, geography) share system type 240; alias types resolve to their base type.
+            await using (var command = new SqlCommand("SELECT c.name,CASE WHEN c.system_type_id=240 THEN TYPE_NAME(c.user_type_id) ELSE TYPE_NAME(c.system_type_id) END,c.max_length FROM sys.columns c WHERE c.object_id=OBJECT_ID(@target) AND c.is_computed=0 AND c.generated_always_type=0", connection, transaction))
             {
                 // generated_always_type does not exist on SQL Server 2012/2014.
                 if (int.Parse(connection.ServerVersion.Split('.')[0]) < 13) command.CommandText = command.CommandText.Replace(" AND c.generated_always_type=0", "");
                 command.Parameters.AddWithValue("@target", target);
-                await using var reader = await command.ExecuteReaderAsync(); while (await reader.ReadAsync()) metadata.Add(reader.GetString(0), (reader.GetString(1), reader.GetInt16(2)));
+                await using var reader = await command.ExecuteReaderAsync(); while (await reader.ReadAsync()) metadata.Add(reader.GetString(0), (reader.GetString(0), reader.GetString(1), reader.GetInt16(2)));
             }
             if (metadata.Count == 0) throw new Exception("Destination table not found or no writable columns.");
             using var bulk = new SqlBulkCopy(connection, SqlBulkCopyOptions.CheckConstraints | (B("keepIdentity") ? SqlBulkCopyOptions.KeepIdentity : 0), transaction) { DestinationTableName = target, BatchSize = 2000, BulkCopyTimeout = I("timeout", 0) };
@@ -325,16 +381,38 @@ internal static class Program
             long count = 0;
             async Task Transfer(string[] headers, IEnumerable<object?[]> rows)
             {
-                var columns = headers.Select((name, index) => new { Index = index, Target = mapping[name]?.GetValue<string>() ?? name }).Where(c => metadata.ContainsKey(c.Target)).ToArray();
+                foreach (var (source, value) in mapping)
+                {
+                    string? wanted = value?.GetValue<string>();
+                    if (!string.IsNullOrEmpty(wanted) && !metadata.ContainsKey(wanted)) throw new Exception($"Source column '{source}' is mapped to '{wanted}', which is not a writable column of {target}.");
+                }
+                var columns = headers.Select((name, index) => new { Index = index, Source = name, Target = mapping[name]?.GetValue<string>() ?? name })
+                    .Where(c => metadata.ContainsKey(c.Target)).Select(c => new { c.Index, c.Source, Column = metadata[c.Target] }).ToArray();
                 if (columns.Length == 0) throw new Exception("No source columns map to destination columns.");
-                var batch = new DataTable(); foreach (var c in columns) { batch.Columns.Add(c.Target, CellType(metadata[c.Target].Type)); bulk.ColumnMappings.Add(c.Target, c.Target); }
+                foreach (var c in columns) if (c.Column.Type is "hierarchyid" or "geometry" or "geography") throw new Exception($"Column {c.Column.Name} has type {c.Column.Type}, which import does not convert. Ignore it in the mapping or import into a staging table.");
+                // Bulk copy matches column names exactly, so it gets the names as the table stores them.
+                var batch = new DataTable(); foreach (var c in columns) { batch.Columns.Add(c.Column.Name, CellType(c.Column.Type)); bulk.ColumnMappings.Add(c.Column.Name, c.Column.Name); }
+                // Rows are numbered from the file's first line, the header.
+                long first = count + 2;
+                async Task Flush() { try { await bulk.WriteToServerAsync(batch); } catch (Exception e) { throw new Exception($"Source rows {first}-{count + 1}: {e.Message}", e); } batch.Clear(); first = count + 2; }
                 foreach (var row in rows)
                 {
-                    if (row.Length != headers.Length) throw new Exception($"Source row {count + 2} has {row.Length} fields; expected {headers.Length}.");
-                    batch.Rows.Add(columns.Select(c => ConvertCell(row[c.Index], metadata[c.Target].Type)).ToArray()); count++;
-                    if (batch.Rows.Count >= 2000) { await bulk.WriteToServerAsync(batch); batch.Clear(); Progress("Importing inside one transaction", count); }
+                    long line = count + 2;
+                    if (row.Length != headers.Length) throw new Exception($"Source row {line} has {row.Length} fields; expected {headers.Length}.");
+                    var values = new object[columns.Length];
+                    for (int i = 0; i < columns.Length; i++)
+                    {
+                        var c = columns[i];
+                        try { values[i] = ConvertCell(row[c.Index], c.Column.Type); }
+                        catch (Exception e) { throw new Exception($"Source row {line}, column {c.Source}: {e.Message}", e); }
+                        int limit = c.Column.Length == -1 ? -1 : c.Column.Type is "nchar" or "nvarchar" ? c.Column.Length / 2 : c.Column.Type is "char" or "varchar" or "binary" or "varbinary" ? c.Column.Length : -1;
+                        int length = values[i] switch { string text => text.Length, byte[] bytes => bytes.Length, _ => 0 };
+                        if (limit >= 0 && length > limit) throw new Exception($"Source row {line}, column {c.Source}: {length} characters, but {c.Column.Name} holds {limit}.");
+                    }
+                    batch.Rows.Add(values); count++;
+                    if (batch.Rows.Count >= 2000) { await Flush(); Progress("Importing inside one transaction", count); }
                 }
-                if (batch.Rows.Count > 0) await bulk.WriteToServerAsync(batch);
+                if (batch.Rows.Count > 0) await Flush();
             }
             if (S("source") == "odbc")
             {
@@ -342,7 +420,7 @@ internal static class Program
                 await using var source = new System.Data.Odbc.OdbcConnection(S("sourceConnection")); await source.OpenAsync();
                 await using var command = source.CreateCommand(); command.CommandText = S("sourceQuery"); command.CommandTimeout = 0;
                 using var reader = command.ExecuteReader();
-                IEnumerable<object?[]> Rows() { while (reader.Read()) yield return Enumerable.Range(0, reader.FieldCount).Select(i => reader.IsDBNull(i) ? null : reader.GetValue(i)).ToArray(); }
+                IEnumerable<object?[]> Rows() { while (reader.Read()) yield return Enumerable.Range(0, reader.FieldCount).Select(i => OdbcValue(reader, i)).ToArray(); }
                 await Transfer(Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToArray(), Rows());
             }
             else { var rows = FileRows(S("path"), out var headers); await Transfer(headers, rows); }
@@ -351,9 +429,40 @@ internal static class Program
         catch { await transaction.RollbackAsync(); throw; }
     }
 
+    // decimal(38) does not fit System.Decimal, and OdbcDataReader.IsDBNull reads the value
+    // as one: read decimals as text, where NULL shows as InvalidCastException.
+    private static object? OdbcValue(System.Data.Common.DbDataReader reader, int i)
+    {
+        if (reader.GetFieldType(i) != typeof(decimal)) return reader.IsDBNull(i) ? null : reader.GetValue(i);
+        try { return reader.GetString(i); } catch (InvalidCastException) { return null; }
+    }
+
     private static object ConvertCell(object? value, string type)
     {
         if (value is null || value is DBNull) return DBNull.Value;
+        // Workbooks made in Excel carry numbers, dates and booleans, not text.
+        if (value is double number)
+        {
+            switch (type)
+            {
+                case "float": return number;
+                case "real": return (float)number;
+                case "bit": return number != 0;
+                case "decimal" or "numeric": return new SqlDecimal((decimal)number);
+                case "money" or "smallmoney": return (decimal)number;
+                case "bigint" or "int" or "smallint" or "tinyint":
+                    if (number != Math.Floor(number)) throw new FormatException($"{number.ToString("R", Invariant)} is not a whole number.");
+                    value = ((decimal)number).ToString(Invariant); break;
+                default: value = Math.Abs(number) < 7.9e28 ? ((decimal)number).ToString(Invariant) : number.ToString("R", Invariant); break;
+            }
+        }
+        if (value is bool flag && type != "bit") value = flag ? "1" : "0";
+        if (value is DateTime moment)
+        {
+            if (type == "time") return moment.TimeOfDay;
+            if (type == "datetimeoffset") return new DateTimeOffset(moment, TimeSpan.Zero);
+            if (type is not ("date" or "datetime" or "datetime2" or "smalldatetime")) value = moment.ToString("yyyy-MM-ddTHH:mm:ss.fffffff", Invariant);
+        }
         string text = Convert.ToString(value, Invariant) ?? "";
         return type switch
         {
@@ -449,7 +558,11 @@ internal static class Program
                 {
                     column++; string name = ""; int n = column; while (n > 0) { n--; name = (char)('A' + n % 26) + name; n /= 26; }
                     if (text is null) writer.WriteElement(new Cell { CellReference = name + (index + 1) });
-                    else writer.WriteElement(new Cell(new InlineString(new Text(text) { Space = SpaceProcessingModeValues.Preserve })) { DataType = CellValues.InlineString, CellReference = name + (index + 1) });
+                    else
+                    {
+                        if (text.Length > 32767) throw new Exception($"Row {index}, column {name}: Excel cells hold at most 32,767 characters. Export CSV instead.");
+                        writer.WriteElement(new Cell(new InlineString(new Text(ExcelText(text)) { Space = SpaceProcessingModeValues.Preserve })) { DataType = CellValues.InlineString, CellReference = name + (index + 1) });
+                    }
                 }
                 writer.WriteEndElement();
             }
@@ -459,6 +572,21 @@ internal static class Program
         }
         workbook.Workbook.Append(new Sheets(new Sheet { Id = workbook.GetIdOfPart(worksheet), SheetId = 1, Name = "Data" })); workbook.Workbook.Save();
         return index;
+    }
+
+    // Excel stores carriage returns and characters XML cannot hold as _xHHHH_;
+    // a literal _xHHHH_ in the text is escaped so reading does not decode it.
+    private static string ExcelText(string text)
+    {
+        var result = new StringBuilder(text.Length);
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c == '_' && i + 6 < text.Length && text[i + 1] == 'x' && text[i + 6] == '_' && text.Substring(i + 2, 4).All(Uri.IsHexDigit)) result.Append("_x005F_");
+            else if (c < 0x20 && c != '\t' && c != '\n' || c == '\uFFFE' || c == '\uFFFF') result.Append("_x").Append(((int)c).ToString("X4", Invariant)).Append('_');
+            else result.Append(c);
+        }
+        return result.ToString();
     }
 
     private static async Task<object> EncryptedQuery()

@@ -75,8 +75,11 @@ pub async fn result_export_file(
             if write_result.is_err(){let _=child.kill();}
             let status=child.wait().map_err(message)?;
             let response=output.join().map_err(|_|"Excel writer output failed.")?.map_err(message)?;
+            let last:Option<serde_json::Value>=response.lines().last().and_then(|line|serde_json::from_str(line).ok());
+            // When the writer stops on a value, the broken pipe is only the symptom: report its reason.
+            if let Some(error)=last.as_ref().filter(|l|l["type"]=="error"){return Err(error["message"].as_str().unwrap_or("Excel export failed.").into());}
             write_result?;
-            let last:serde_json::Value=response.lines().last().and_then(|line|serde_json::from_str(line).ok()).ok_or("Excel writer did not return a result.")?;
+            let last=last.ok_or("Excel writer did not return a result.")?;
             if !status.success() || last["type"]!="result"{return Err(last["message"].as_str().unwrap_or("Excel export failed.").into());}
             Ok(())
         } else {

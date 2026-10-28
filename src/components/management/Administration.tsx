@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { api, errorMessage } from "@/lib/api";
-import { sqlLiteral as l, type Context } from "@/lib/management-api";
+import { quoteName as n, sqlLiteral as l, type Context } from "@/lib/management-api";
 import {
   backupScript,
   maintenanceScript,
@@ -32,17 +32,19 @@ export function BackupRestore({
   context: Context;
   azure: boolean;
 }) {
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [mode, setMode] = useState("backup"),
     [kind, setKind] = useState<"full" | "differential" | "log">("full"),
     [path, setPath] = useState(""),
     [inspectedPath, setInspectedPath] = useState(""),
-    [copyOnly, setCopyOnly] = useState(true),
+    [copyOnly, setCopyOnly] = useState(false),
     [compression, setCompression] = useState(false),
     [checksum, setChecksum] = useState(true);
   const [target, setTarget] = useState(""),
     [stopAt, setStopAt] = useState(""),
     [recover, setRecover] = useState(true),
     [replace, setReplace] = useState(false),
+    [disconnect, setDisconnect] = useState(false),
     [sources, setSources] = useState<RestoreSource[]>([]),
     [moves, setMoves] = useState<{ logical: string; physical: string }[]>([]);
   const [resourceId, setResourceId] = useState(""),
@@ -71,9 +73,12 @@ export function BackupRestore({
           recover,
           replace,
         );
+        // Otherwise the restore waits for every session using the database to leave.
+        if (disconnect)
+          script = `IF DB_ID(${l(target)}) IS NOT NULL ALTER DATABASE ${n(target)} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;\n${script}`;
       }
       if (mode === "verify" && path)
-        script = `RESTORE VERIFYONLY FROM ${path.startsWith("https://") ? "URL" : "DISK"}=${l(path)} WITH CHECKSUM;`;
+        script = `RESTORE VERIFYONLY FROM ${path.startsWith("https://") ? "URL" : "DISK"}=${l(path)};`;
     }
   } catch (e) {
     validation = errorMessage(e);
@@ -297,19 +302,26 @@ export function BackupRestore({
               checked={replace}
               onChange={setReplace}
             />
+            <Check
+              label="Disconnect other sessions and roll back their transactions"
+              checked={disconnect}
+              onChange={setDisconnect}
+            />
           </div>
         </>
       )}
       {validation && <Notice error>{validation}</Notice>}
       <Operation
-        context={context}
+        context={mode === "restore" ? { ...context, database: "master" } : context}
         script={script}
         label="Preview backup / restore"
+        onApplied={() => setHistoryRevision((value) => value + 1)}
       />
       <h2 className="border-b pb-2 text-sm font-medium">
         Backup history for {context.database}
       </h2>
-      <ReadTable context={context} resource={{ kind: "backups" }} />
+      {/* Read again after each backup or restore. */}
+      <ReadTable key={historyRevision} context={context} resource={{ kind: "backups" }} />
     </div>
   );
 }
@@ -357,12 +369,12 @@ export function Agent({ context }: { context: Context }) {
       script =
         mode === "delete"
           ? `EXEC msdb.dbo.sp_delete_alert @name=${l(name)};`
-          : `EXEC msdb.dbo.sp_${mode === "update" ? "update" : "add"}_alert @name=${l(name)},@enabled=${enabled ? 1 : 0},@message_id=${messageId},@severity=${severity},@delay_between_responses=60;${operator ? `\nEXEC msdb.dbo.sp_add_notification @alert_name=${l(name)},@operator_name=${l(operator)},@notification_method=1;` : ""}`;
+          : `EXEC msdb.dbo.sp_${mode === "update" ? "update" : "add"}_alert @name=${l(name)},@enabled=${enabled ? 1 : 0},@message_id=${messageId},@severity=${severity},@delay_between_responses=60;${operator ? `\nIF EXISTS (SELECT 1 FROM msdb.dbo.sysnotifications s JOIN msdb.dbo.sysalerts a ON a.id=s.alert_id JOIN msdb.dbo.sysoperators o ON o.id=s.operator_id WHERE a.name=${l(name)} AND o.name=${l(operator)})\n  EXEC msdb.dbo.sp_update_notification @alert_name=${l(name)},@operator_name=${l(operator)},@notification_method=1;\nELSE\n  EXEC msdb.dbo.sp_add_notification @alert_name=${l(name)},@operator_name=${l(operator)},@notification_method=1;` : ""}`;
   }
   const validStep = /^\d+$/.test(stepId) && Number(stepId) > 0;
   const stepScript =
     jobId && stepName && validStep
-      ? `EXEC msdb.dbo.sp_${mode === "update" ? "update" : mode === "delete" ? "delete" : "add"}_jobstep @job_id=${l(jobId)},@step_id=${stepId}${mode === "delete" ? "" : `,@step_name=${l(stepName)},@subsystem=N'TSQL',@database_name=${l(context.database ?? "master")},@command=${l(command)},@on_success_action=1,@on_fail_action=2`};`
+      ? `EXEC msdb.dbo.sp_${mode === "update" ? "update" : mode === "delete" ? "delete" : "add"}_jobstep @job_id=${l(jobId)},@step_id=${stepId}${mode === "delete" ? "" : `,@step_name=${l(stepName)},@subsystem=N'TSQL',@database_name=${l(context.database ?? "master")},@command=${l(command)}${mode === "update" ? "" : ",@on_success_action=1"},@on_fail_action=2`};${mode !== "update" && mode !== "delete" ? `${Number(stepId) > 1 ? `\nEXEC msdb.dbo.sp_update_jobstep @job_id=${l(jobId)},@step_id=${Number(stepId) - 1},@on_success_action=3;` : ""}\nIF EXISTS (SELECT 1 FROM msdb.dbo.sysjobsteps WHERE job_id=${l(jobId)} AND step_id>${Number(stepId)}) EXEC msdb.dbo.sp_update_jobstep @job_id=${l(jobId)},@step_id=${Number(stepId)},@on_success_action=3;` : ""}`
       : "";
   const validSchedule =
     /^\d+$/.test(interval) && Number(interval) > 0 && /^\d\d:\d\d$/.test(time);
@@ -371,7 +383,7 @@ export function Agent({ context }: { context: Context }) {
       ? mode === "delete" && /^\d+$/.test(scheduleId)
         ? `EXEC msdb.dbo.sp_detach_schedule @job_id=${l(jobId)},@schedule_id=${scheduleId};`
         : mode === "update" && /^\d+$/.test(scheduleId)
-          ? `EXEC msdb.dbo.sp_update_schedule @schedule_id=${scheduleId},@name=${l(schedule)},@enabled=${enabled ? 1 : 0},@freq_type=${frequency},@freq_interval=${interval},@freq_recurrence_factor=1,@active_start_time=${Number(time.replace(":", "")) * 100};`
+          ? `EXEC msdb.dbo.sp_update_schedule @schedule_id=${scheduleId},@new_name=${l(schedule)},@enabled=${enabled ? 1 : 0},@freq_type=${frequency},@freq_interval=${interval},@freq_recurrence_factor=1,@active_start_time=${Number(time.replace(":", "")) * 100};`
           : `EXEC msdb.dbo.sp_add_jobschedule @job_id=${l(jobId)},@name=${l(schedule)},@enabled=${enabled ? 1 : 0},@freq_type=${frequency},@freq_interval=${interval},@freq_recurrence_factor=1,@active_start_time=${Number(time.replace(":", "")) * 100};`
       : "";
   return (
@@ -577,7 +589,7 @@ export function Maintenance({
       script = maintenanceScript(name, context.database, tasks, hour, minute);
       if (replace)
         script =
-          `IF EXISTS(SELECT 1 FROM msdb.dbo.sysjobs WHERE name=${l(name)}) EXEC msdb.dbo.sp_delete_job @job_name=${l(name)},@delete_unused_schedule=0;\n` +
+          `IF EXISTS(SELECT 1 FROM msdb.dbo.sysjobs WHERE name=${l(name)}) EXEC msdb.dbo.sp_delete_job @job_name=${l(name)},@delete_unused_schedule=1;\n` +
           script;
     }
   } catch (e) {

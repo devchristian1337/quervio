@@ -133,17 +133,24 @@ Windows authentication, Azure SQL/Managed Instance, Agent, restore and encryptio
 must be validated on corresponding dedicated environments; compilation and mock
 tests alone are not a compatibility certification.
 
-### Handoff checkpoint — 2026-10-28
+### Verification — 2026-10-28
 
-This branch is an implementation checkpoint, not a completed server certification.
-The TypeScript check, the production build, 62 frontend unit tests and all seven
-browser tests (import mapping included) pass. The Rust workspace suite passes,
-including the process-cancellation fixture, and the 28 SQL integration tests pass
-against the SQL Server 2022 container from `docker-compose.yml`. The Microsoft
-helper builds with `.\scripts\build-microsoft.ps1` and passes its five self-tests.
-SQL Tools Service initialization over stdio passed earlier; its ignored test needs
-the component installed by `.\scripts\install-sqltools.ps1`.
+The TypeScript check, the production build, 62 frontend unit tests, seven browser
+tests, the Rust workspace suite, the 28 SQL integration tests and the Microsoft
+helper's six self-tests pass. The SQL integration tests run against the SQL Server
+2022 container from `docker-compose.yml`, started with `MSSQL_AGENT_ENABLED=true`
+for the Agent checks.
 
-Real SQL Server/Azure workflows, permissions, restore, Agent and encryption remain
-to be exercised on dedicated environments. Published Microsoft binaries and SDK
-installations are local build artifacts and are intentionally not tracked in Git.
+On that container, the SQL the management tools generate was executed for real:
+table and foreign-key designers, backup/restore chains with STOPAT and MOVE,
+maintenance jobs run through SQL Server Agent, Query Store forcing, Extended
+Events, logins/users/roles/permissions, SQL Server Audit, TDE and every read the
+tools issue. The helper's SMO scripting, DacFx extract/publish/bacpac, CSV/Excel/
+ODBC import and export round trips, Microsoft Query and cancellation were run
+the same way. The desktop app was also driven by hand against that server.
+
+Not covered: Windows and Entra authentication, Azure SQL, SQL Server versions
+other than 2022, URL backups, and Always Encrypted operations that create
+certificates in the Windows store. SQL Tools Service needs the component
+installed by `.\scripts\install-sqltools.ps1`. Published Microsoft binaries and
+SDK installations are local build artifacts and are intentionally not tracked in Git.

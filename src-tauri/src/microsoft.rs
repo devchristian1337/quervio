@@ -11,6 +11,27 @@ use tokio::{
     process::Command,
 };
 
+/// A killed bridge cannot clean up: remove the `<path>.quervio-partial-*` files
+/// it writes before moving a finished file into place.
+fn remove_partial_files(arguments: &Value) {
+    let Some(path) = arguments.get("path").and_then(Value::as_str).filter(|p| !p.is_empty()) else {
+        return;
+    };
+    let path = std::path::Path::new(path);
+    let (Some(directory), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) else {
+        return;
+    };
+    let prefix = format!("{name}.quervio-partial-");
+    let Ok(entries) = std::fs::read_dir(if directory.as_os_str().is_empty() { std::path::Path::new(".") } else { directory }) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().to_str().is_some_and(|file| file.starts_with(&prefix)) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 pub fn is_write(action: &str) -> bool {
     matches!(
         action,
@@ -153,7 +174,7 @@ pub async fn run(
     let mut lines = BufReader::new(child.stdout.take().ok_or("Bridge stdout unavailable")?).lines();
     let mut output = None;
     loop {
-        let line = tokio::select! {line=lines.next_line()=>line.map_err(message)?,_=tokio::time::sleep(std::time::Duration::from_millis(200))=>{if cancel.is_cancelled(){if let Some(pid)=child.id(){crate::processes::terminate_tree(pid).await;}let _=child.kill().await;let _=child.wait().await;return Err("Microsoft operation cancelled. Server and Azure changes may remain or continue.".into());}continue;}};
+        let line = tokio::select! {line=lines.next_line()=>line.map_err(message)?,_=tokio::time::sleep(std::time::Duration::from_millis(200))=>{if cancel.is_cancelled(){if let Some(pid)=child.id(){crate::processes::terminate_tree(pid).await;}let _=child.kill().await;let _=child.wait().await;remove_partial_files(&request.arguments);return Err("Microsoft operation cancelled. Server and Azure changes may remain or continue.".into());}continue;}};
         let Some(line) = line else {
             break;
         };

@@ -4,6 +4,11 @@ const TOOLS: Record<string, string> = {"activity": "Activity Monitor", "querySto
 async function openTool(page: Page, tool: string) {
   await page.getByRole("button", { name: "Tools", exact: true }).click();
   await page.getByRole("menuitem", { name: TOOLS[tool], exact: true }).click();
+  // master cannot use Query Store.
+  if (tool === "queryStore") {
+    await page.getByRole("combobox", { name: "Database", exact: true }).click();
+    await page.getByRole("option", { name: "Sales", exact: true }).click();
+  }
 }
 test.beforeEach(async ({ page }) => {
   await page.goto("/?mock");
