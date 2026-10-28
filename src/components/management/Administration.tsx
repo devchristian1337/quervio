@@ -11,14 +11,17 @@ import {
   type RestoreSource,
 } from "@/lib/sql-management";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   BridgeOperation,
+  Check,
   Choice,
   DataGrid,
   Notice,
   Operation,
   ReadTable,
   Text,
+  textareaClass,
   useRead,
 } from "./shared";
 
@@ -168,36 +171,26 @@ export function BackupRestore({
             ]}
           />
           <div className="flex gap-4 text-sm">
-            <label>
-              <input
-                type="checkbox"
-                checked={copyOnly}
-                disabled={kind === "differential"}
-                onChange={(e) => setCopyOnly(e.target.checked)}
-              />{" "}
-              Copy-only
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={compression}
-                onChange={(e) => setCompression(e.target.checked)}
-              />{" "}
-              Compression
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={checksum}
-                onChange={(e) => setChecksum(e.target.checked)}
-              />{" "}
-              Checksum
-            </label>
+            <Check
+              label="Copy-only"
+              checked={copyOnly}
+              disabled={kind === "differential"}
+              onChange={setCopyOnly}
+            />
+            <Check
+              label="Compression"
+              checked={compression}
+              onChange={setCompression}
+            />
+            <Check
+              label="Checksum"
+              checked={checksum}
+              onChange={setChecksum}
+            />
           </div>
         </>
       )}
       <Button
-        size="sm"
         variant="outline"
         className="self-start"
         disabled={!path}
@@ -207,7 +200,7 @@ export function BackupRestore({
       </Button>
       {inspectedPath && (
         <>
-          <h2 className="text-sm font-semibold">Backup media headers</h2>
+          <h2 className="border-b pb-2 text-sm font-medium">Backup media headers</h2>
           <ReadTable
             context={context}
             resource={{ kind: "backupHeader", path: inspectedPath }}
@@ -229,7 +222,7 @@ export function BackupRestore({
               ]);
             }}
           />
-          <h2 className="text-sm font-semibold">
+          <h2 className="border-b pb-2 text-sm font-medium">
             Logical files · select a file to map its destination
           </h2>
           <ReadTable
@@ -266,7 +259,6 @@ export function BackupRestore({
                 {source.path}
               </span>
               <Button
-                size="sm"
                 variant="ghost"
                 onClick={() =>
                   setSources((s) => s.filter((_, i) => i !== index))
@@ -295,22 +287,16 @@ export function BackupRestore({
             type="datetime-local"
           />
           <div className="flex gap-4 text-sm">
-            <label>
-              <input
-                type="checkbox"
-                checked={recover}
-                onChange={(e) => setRecover(e.target.checked)}
-              />{" "}
-              Recover final backup
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={replace}
-                onChange={(e) => setReplace(e.target.checked)}
-              />{" "}
-              WITH REPLACE: overwrite destination
-            </label>
+            <Check
+              label="Recover final backup"
+              checked={recover}
+              onChange={setRecover}
+            />
+            <Check
+              label="WITH REPLACE: overwrite destination"
+              checked={replace}
+              onChange={setReplace}
+            />
           </div>
         </>
       )}
@@ -320,7 +306,7 @@ export function BackupRestore({
         script={script}
         label="Preview backup / restore"
       />
-      <h2 className="text-sm font-semibold">
+      <h2 className="border-b pb-2 text-sm font-medium">
         Backup history for {context.database}
       </h2>
       <ReadTable context={context} resource={{ kind: "backups" }} />
@@ -425,14 +411,11 @@ export function Agent({ context }: { context: Context }) {
           }
         />
         <Text label="Name" value={name} onChange={setName} />
-        <label className="text-sm">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-          />{" "}
-          Enabled
-        </label>
+        <Check
+          label="Enabled"
+          checked={enabled}
+          onChange={setEnabled}
+        />
         {section === "operators" && (
           <Text label="Email address" value={email} onChange={setEmail} />
         )}
@@ -466,7 +449,7 @@ export function Agent({ context }: { context: Context }) {
       </div>
       {section === "jobs" && jobId && (
         <>
-          <h2 className="text-sm font-semibold">Job steps</h2>
+          <h2 className="border-b pb-2 text-sm font-medium">Job steps</h2>
           <ReadTable
             context={context}
             resource={{ kind: "jobSteps", jobId }}
@@ -488,7 +471,7 @@ export function Agent({ context }: { context: Context }) {
           </div>
           <textarea
             aria-label="T-SQL job step"
-            className="min-h-32 rounded border bg-background p-2 font-mono text-xs"
+            className={cn(textareaClass, "min-h-32")}
             value={command}
             onChange={(e) => setCommand(e.target.value)}
           />
@@ -497,7 +480,7 @@ export function Agent({ context }: { context: Context }) {
             script={stepScript}
             label="Preview job step"
           />
-          <h2 className="text-sm font-semibold">Schedule</h2>
+          <h2 className="border-b pb-2 text-sm font-medium">Schedule</h2>
           <div className="grid grid-cols-3 gap-3">
             <Text
               label="Schedule ID (update/detach)"
@@ -544,7 +527,7 @@ export function Agent({ context }: { context: Context }) {
             script={scheduleScript}
             label="Preview schedule"
           />
-          <h2 className="text-sm font-semibold">Execution history</h2>
+          <h2 className="border-b pb-2 text-sm font-medium">Execution history</h2>
           <ReadTable
             context={context}
             resource={{ kind: "jobHistory", jobId }}
@@ -649,10 +632,10 @@ export function Maintenance({
           onChange={setTime}
           type="time"
         />
-        <Button size="sm" variant="outline" onClick={() => void file(false)}>
+        <Button variant="outline" onClick={() => void file(false)}>
           Save flow
         </Button>
-        <Button size="sm" variant="outline" onClick={() => void file(true)}>
+        <Button variant="outline" onClick={() => void file(true)}>
           Open flow
         </Button>
       </div>
@@ -662,7 +645,7 @@ export function Maintenance({
         while Quervio is closed.
       </Notice>
       <div className="grid min-h-72 grid-cols-[minmax(220px,1fr)_2fr] gap-3">
-        <div className="flex flex-col gap-2 rounded border p-3">
+        <div className="flex flex-col gap-2 rounded-md border p-3">
           {tasks.map((item, index) => (
             <button
               key={item.id}
@@ -685,7 +668,7 @@ export function Maintenance({
                 dragged.current = null;
               }}
               onClick={() => setSelected(index)}
-              className={`rounded border px-3 py-3 text-left text-sm ${selected === index ? "border-primary bg-accent" : "bg-panel"}`}
+              className={`rounded-md border px-3 py-3 text-left text-sm ${selected === index ? "border-primary bg-accent" : "bg-panel"}`}
             >
               <span className="mr-2 text-muted-foreground">{index + 1}</span>
               {item.kind}
@@ -705,7 +688,6 @@ export function Maintenance({
             </button>
           ))}
           <Button
-            size="sm"
             variant="outline"
             onClick={() => {
               setTasks((t) => [...t, newTask()]);
@@ -762,7 +744,7 @@ export function Maintenance({
             {task.kind === "sql" && (
               <textarea
                 aria-label="Maintenance T-SQL"
-                className="min-h-32 rounded border bg-background p-2 font-mono text-xs"
+                className={cn(textareaClass, "min-h-32")}
                 value={task.sql}
                 onChange={(e) => change({ sql: e.target.value })}
               />
@@ -796,7 +778,6 @@ export function Maintenance({
               ]}
             />
             <Button
-              size="sm"
               variant="outline"
               onClick={() => {
                 setTasks((values) =>
@@ -818,14 +799,11 @@ export function Maintenance({
           </div>
         )}
       </div>
-      <label className="text-sm">
-        <input
-          type="checkbox"
-          checked={replace}
-          onChange={(e) => setReplace(e.target.checked)}
-        />
-        Replace an existing job with the same name
-      </label>
+      <Check
+        label="Replace an existing job with the same name"
+        checked={replace}
+        onChange={setReplace}
+      />
       {validation && <Notice error>{validation}</Notice>}
       {error && <Notice error>{error}</Notice>}
       {agentAvailable ? (
@@ -841,7 +819,6 @@ export function Maintenance({
             SQL script.
           </Notice>
           <Button
-            size="sm"
             variant="outline"
             disabled={!script}
             onClick={() => void saveScript(script)}

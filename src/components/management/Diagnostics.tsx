@@ -13,8 +13,6 @@ import { Button } from "@/components/ui/button";
 import {
   Choice,
   DataGrid,
-  Field,
-  inputClass,
   Notice,
   Operation,
   Text,
@@ -82,7 +80,6 @@ export function ActivityMonitor({ context }: { context: Context }) {
           />
         )}
         <Button
-          size="sm"
           variant="outline"
           onClick={data.refresh}
           disabled={data.loading}
@@ -90,7 +87,7 @@ export function ActivityMonitor({ context }: { context: Context }) {
           {data.loading ? "Loading…" : "Refresh"}
         </Button>
         {data.updated && (
-          <span className="text-xs text-muted-foreground">
+          <span className="flex h-9 items-center text-xs text-muted-foreground">
             Updated {data.updated.toLocaleTimeString()}
           </span>
         )}
@@ -185,7 +182,7 @@ export function QueryStore({ context }: { context: Context }) {
             ["43200", "Last 30 days"],
           ]}
         />
-        <Button size="sm" variant="outline" onClick={queries.refresh}>
+        <Button variant="outline" onClick={queries.refresh}>
           Refresh
         </Button>
         <Operation
@@ -247,12 +244,12 @@ export function QueryStore({ context }: { context: Context }) {
       )}
       {query && (
         <>
-          <h2 className="text-sm font-semibold">
+          <h2 className="border-b pb-2 text-sm font-medium">
             Runtime history · selected interval
           </h2>
           {history.error && <Notice error>{history.error}</Notice>}
           {history.data && <DataGrid data={history.data} />}
-          <h2 className="text-sm font-semibold">
+          <h2 className="border-b pb-2 text-sm font-medium">
             Plans for query {query} · all retained runtime statistics
           </h2>
           {plans.error && <Notice error>{plans.error}</Notice>}
@@ -276,22 +273,20 @@ export function QueryStore({ context }: { context: Context }) {
                   label="Remove forcing"
                   onApplied={plans.refresh}
                 />
-                <Field label="Compare against">
-                  <select
-                    className={inputClass}
-                    value={compare}
-                    onChange={(e) => setCompare(e.target.value)}
-                  >
-                    <option value="">No comparison</option>
-                    {records(plans.data)
+                <Choice
+                  label="Compare against"
+                  value={compare}
+                  onChange={setCompare}
+                  options={[
+                    ["", "No comparison"],
+                    ...records(plans.data)
                       .filter((r) => r.plan_id !== plan)
-                      .map((r) => (
-                        <option key={r.plan_id} value={r.plan_id ?? ""}>
-                          Plan {r.plan_id} · {r.avg_duration_us} µs
-                        </option>
-                      ))}
-                  </select>
-                </Field>
+                      .map((r): [string, string] => [
+                        r.plan_id ?? "",
+                        `Plan ${r.plan_id} · ${r.avg_duration_us} µs`,
+                      ]),
+                  ]}
+                />
               </div>
             </>
           )}
@@ -476,7 +471,7 @@ export function ExtendedEvents({
               value={path}
               onChange={setPath}
             />
-            <Button size="sm" variant="outline" onClick={() => void loadFile()}>
+            <Button variant="outline" onClick={() => void loadFile()}>
               Read file
             </Button>
           </>

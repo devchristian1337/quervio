@@ -8,6 +8,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useSqlcmdConfirmation } from "@/stores/sqlcmd";
+import { cn } from "@/lib/utils";
+import { codeClass } from "./shared";
 export function SqlcmdConfirmation() {
   const { pending, answer } = useSqlcmdConfirmation();
   return (
@@ -21,7 +23,7 @@ export function SqlcmdConfirmation() {
               : "Includes and variables have been expanded. Confirm the batches and server switches before execution."}
           </DialogDescription>
         </DialogHeader>
-        <pre className="min-h-0 flex-1 overflow-auto rounded border bg-background p-3 font-mono text-xs select-text">
+        <pre className={cn(codeClass, "min-h-0 flex-1")}>
           {pending?.script}
         </pre>
         <DialogFooter>

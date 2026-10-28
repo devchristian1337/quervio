@@ -6,14 +6,17 @@ import {
   type Context,
   type DataTable,
 } from "@/lib/management-api";
+import { cn } from "@/lib/utils";
 import {
+  BridgeOperation,
+  Check,
   Choice,
-  Text,
+  DataGrid,
+  Notice,
   Operation,
   ReadTable,
-  Notice,
-  BridgeOperation,
-  DataGrid,
+  Text,
+  textareaClass,
 } from "./shared";
 
 export function Security({ context }: { context: Context }) {
@@ -193,14 +196,11 @@ export function Security({ context }: { context: Context }) {
               <>
                 {server ? (
                   <>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={windows}
-                        onChange={(e) => setWindows(e.target.checked)}
-                      />
-                      Windows login
-                    </label>
+                    <Check
+                      label="Windows login"
+                      checked={windows}
+                      onChange={setWindows}
+                    />
                     {!windows && (
                       <Text
                         label="Password"
@@ -338,7 +338,7 @@ export function Security({ context }: { context: Context }) {
       )}
       {section === "permissions" && (
         <>
-          <h2 className="text-sm font-semibold">
+          <h2 className="border-b pb-2 text-sm font-medium">
             Effective permissions of the current login
           </h2>
           <Notice>
@@ -619,17 +619,14 @@ export function MicrosoftQuery({ context }: { context: Context }) {
         uses a separate session and closes it on completion; open transactions
         are rolled back when it closes.
       </Notice>
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={entra}
-          onChange={(e) => setEntra(e.target.checked)}
-        />
-        Microsoft Entra interactive authentication
-      </label>
+      <Check
+        label="Microsoft Entra interactive authentication"
+        checked={entra}
+        onChange={setEntra}
+      />
       <textarea
         aria-label="Microsoft SQL query"
-        className="min-h-56 rounded border bg-background p-3 font-mono text-xs"
+        className={cn(textareaClass, "min-h-56")}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
@@ -639,7 +636,7 @@ export function MicrosoftQuery({ context }: { context: Context }) {
       </label>
       <textarea
         aria-label="Typed SqlClient parameters"
-        className="min-h-28 rounded border bg-background p-3 font-mono text-xs"
+        className={cn(textareaClass, "min-h-28")}
         value={parameters}
         onChange={(e) => setParameters(e.target.value)}
       />

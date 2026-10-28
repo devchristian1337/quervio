@@ -10,6 +10,7 @@ import {
   Play,
   Save,
   Square,
+  Workflow,
   X,
   XCircle,
 } from "lucide-react";
@@ -17,6 +18,7 @@ import { closeTab as closeTabSafely, openFile, saveTab } from "@/lib/files";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StartScreen } from "@/components/StartScreen";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { LoaderGooeyBlobs } from "@/components/ui/loaders-gooey-blobs";
 import {
   ContextMenu,
@@ -262,10 +264,40 @@ function Toolbar({ tab }: { tab: QueryTab }) {
       </Button>
       <div className="mx-1 h-5 w-px bg-border" />
       <DatabaseSelector tab={tab} />
-      <select aria-label="Execution plan mode" className="h-7 max-w-40 rounded border bg-background px-1 text-xs" disabled={executing || tab.sqlcmdMode} value={tab.planMode ?? "none"} onChange={e => useQueries.getState().setPlanMode(tab.id, e.target.value as "none" | "estimated" | "actual")}>
-        <option value="none">No plan</option><option value="estimated">Estimated plan</option><option value="actual">Actual plan</option>
-      </select>
-      <label className="ml-1 flex items-center gap-1 text-xs" title="SQLCMD includes, variables and commands are expanded and reviewed before execution"><input type="checkbox" disabled={executing} checked={tab.sqlcmdMode ?? false} onChange={e => useQueries.getState().setSqlcmdMode(tab.id, e.target.checked)} />SQLCMD</label>
+      <Select
+        value={tab.planMode ?? "none"}
+        disabled={executing || tab.sqlcmdMode}
+        onValueChange={(mode) => useQueries.getState().setPlanMode(tab.id, mode as "none" | "estimated" | "actual")}
+      >
+        <SelectTrigger
+          size="sm"
+          aria-label="Execution plan mode"
+          // Like the database dropdown beside it.
+          className="ml-1 w-40 gap-1.5 px-2 py-0 data-[size=sm]:h-7"
+          title="Execution plan"
+        >
+          <Workflow className="size-4 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-left">
+            <SelectValue />
+          </span>
+        </SelectTrigger>
+        <SelectContent position="popper" align="start" className="w-(--radix-select-trigger-width)">
+          <SelectItem value="none">No plan</SelectItem>
+          <SelectItem value="estimated">Estimated plan</SelectItem>
+          <SelectItem value="actual">Actual plan</SelectItem>
+        </SelectContent>
+      </Select>
+      <label
+        className="ml-1 flex h-7 cursor-pointer items-center gap-2 rounded-md px-2 text-sm select-none hover:bg-accent has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50"
+        title="SQLCMD includes, variables and commands are expanded and reviewed before execution"
+      >
+        <Checkbox
+          disabled={executing}
+          checked={tab.sqlcmdMode ?? false}
+          onCheckedChange={(checked) => useQueries.getState().setSqlcmdMode(tab.id, checked === true)}
+        />
+        SQLCMD
+      </label>
       {environment && (
         <span
           className={cn("ml-2 shrink-0 rounded px-2 py-0.5 text-xs font-medium", ENVIRONMENTS[environment].pill)}
