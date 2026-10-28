@@ -95,6 +95,7 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
             computed: row.computed_expression ?? "",
             defaultValue: row.default_expression ?? "",
             defaultName: row.default_name ?? undefined,
+            collation: row.collation_name ?? undefined,
           })),
         };
         setModel(value);
@@ -137,7 +138,7 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
       constraint === "INDEX"
         ? `CREATE INDEX ${n(constraintName)} ON ${q(model.schema, model.name)} (${columns});`
         : constraint === "DROP"
-          ? `ALTER TABLE ${q(model.schema, model.name)} DROP CONSTRAINT ${n(constraintName)};`
+          ? `IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(${l(q(model.schema, model.name))}) AND name=${l(constraintName)} AND is_primary_key=0 AND is_unique_constraint=0)\n  DROP INDEX ${n(constraintName)} ON ${q(model.schema, model.name)};\nELSE\n  ALTER TABLE ${q(model.schema, model.name)} DROP CONSTRAINT ${n(constraintName)};`
           : `ALTER TABLE ${q(model.schema, model.name)} ADD CONSTRAINT ${n(constraintName)} ${constraint}${constraint === "CHECK" ? ` (${expression})` : ` (${columns})`};`;
   }
   return (
@@ -958,7 +959,7 @@ export function RelationshipDiagram({ context }: { context: Context }) {
 
 export function ObjectProperties({ tab }: { tab: ToolTab }) {
   const [databaseAction,setDatabaseAction]=useState("inspect"),[newDatabase,setNewDatabase]=useState(""),[recovery,setRecovery]=useState("FULL"),[readOnly,setReadOnly]=useState("READ_ONLY"),[force,setForce]=useState(false);
-  const databaseScript=databaseAction==="create" && newDatabase ? `CREATE DATABASE ${n(newDatabase)};` : databaseAction==="drop" && tab.database ? `DROP DATABASE ${n(tab.database)};` : databaseAction==="recovery" && tab.database ? `ALTER DATABASE ${n(tab.database)} SET RECOVERY ${recovery};` : databaseAction==="access" && tab.database ? `ALTER DATABASE ${n(tab.database)} SET ${readOnly}${force?" WITH ROLLBACK IMMEDIATE":""};` : "";
+  const databaseScript=databaseAction==="create" && newDatabase ? `CREATE DATABASE ${n(newDatabase)};` : databaseAction==="drop" && tab.database ? `${force ? `ALTER DATABASE ${n(tab.database)} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;\n` : ""}DROP DATABASE ${n(tab.database)};` : databaseAction==="recovery" && tab.database ? `ALTER DATABASE ${n(tab.database)} SET RECOVERY ${recovery};` : databaseAction==="access" && tab.database ? `ALTER DATABASE ${n(tab.database)} SET ${readOnly}${force?" WITH ROLLBACK IMMEDIATE":""};` : "";
   const [definition, setDefinition] = useState(""),
     [error, setError] = useState<string | null>(null),
     [kind, setKind] = useState("TABLE");
@@ -976,15 +977,21 @@ export function ObjectProperties({ tab }: { tab: ToolTab }) {
       const type = object.type_desc ?? "";
       if (!disposed)
         setKind(
-          type.includes("TABLE")
-            ? "TABLE"
-            : type.includes("VIEW")
-              ? "VIEW"
-              : type.includes("PROCEDURE")
-                ? "PROCEDURE"
-                : type.includes("TRIGGER")
-                  ? "TRIGGER"
-                  : "FUNCTION",
+          type.includes("FUNCTION")
+            ? "FUNCTION"
+            : type.includes("TABLE")
+              ? "TABLE"
+              : type.includes("VIEW")
+                ? "VIEW"
+                : type.includes("PROCEDURE")
+                  ? "PROCEDURE"
+                  : type.includes("TRIGGER")
+                    ? "TRIGGER"
+                    : type === "SEQUENCE_OBJECT"
+                      ? "SEQUENCE"
+                      : type === "SYNONYM"
+                        ? "SYNONYM"
+                        : "FUNCTION",
         );
       if (type === "USER_TABLE") {
         const sql = await api.script(
@@ -1022,7 +1029,7 @@ export function ObjectProperties({ tab }: { tab: ToolTab }) {
             : { kind: "properties" }
         }
       />
-      {!tab.objectId && <><Choice label="Database operation" value={databaseAction} onChange={setDatabaseAction} options={[["inspect","Inspect properties"],["create","Create database"],["recovery","Change recovery model"],["access","Change read-only state"],["drop","Drop selected database"]]}/>{databaseAction==="create" && <Text label="New database name" value={newDatabase} onChange={setNewDatabase}/>} {databaseAction==="recovery" && <Choice label="Recovery model" value={recovery} onChange={setRecovery} options={["FULL","SIMPLE","BULK_LOGGED"]}/>} {databaseAction==="access" && <><Choice label="Access mode" value={readOnly} onChange={setReadOnly} options={["READ_ONLY","READ_WRITE"]}/><Check label="Disconnect existing sessions and roll back their open transactions" checked={force} onChange={setForce}/></>} {databaseScript && <Operation context={{...tab,database:"master"}} script={databaseScript} label="Preview database operation"/>}</>}
+      {!tab.objectId && <><Choice label="Database operation" value={databaseAction} onChange={setDatabaseAction} options={[["inspect","Inspect properties"],["create","Create database"],["recovery","Change recovery model"],["access","Change read-only state"],["drop","Drop selected database"]]}/>{databaseAction==="create" && <Text label="New database name" value={newDatabase} onChange={setNewDatabase}/>} {databaseAction==="recovery" && <Choice label="Recovery model" value={recovery} onChange={setRecovery} options={["FULL","SIMPLE","BULK_LOGGED"]}/>} {databaseAction==="access" && <Choice label="Access mode" value={readOnly} onChange={setReadOnly} options={["READ_ONLY","READ_WRITE"]}/>}{(databaseAction==="access" || databaseAction==="drop") && <Check label="Disconnect existing sessions and roll back their open transactions" checked={force} onChange={setForce}/>} {databaseScript && <Operation context={{...tab,database:"master"}} script={databaseScript} label="Preview database operation"/>}</>}
       {tab.objectId && <>
       <textarea
         aria-label="Object SQL definition"
@@ -1041,7 +1048,7 @@ export function ObjectProperties({ tab }: { tab: ToolTab }) {
             label="Object type for DROP"
             value={kind}
             onChange={setKind}
-            options={["TABLE", "VIEW", "PROCEDURE", "FUNCTION", "TRIGGER"]}
+            options={["TABLE", "VIEW", "PROCEDURE", "FUNCTION", "TRIGGER", "SEQUENCE", "SYNONYM"]}
           />
           <Operation
             context={tab}

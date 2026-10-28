@@ -20,6 +20,8 @@ export interface ColumnDefinition {
   computed: string;
   defaultValue: string;
   defaultName?: string;
+  /** The column's collation, kept when ALTER COLUMN restates its type. */
+  collation?: string;
 }
 export interface TableDefinition {
   schema: string;
@@ -72,23 +74,31 @@ export function tableScript(
     return `CREATE TABLE ${target} (\n  ${[...table.columns.map(column), ...(table.primaryKey.length ? [`PRIMARY KEY (${table.primaryKey.map(n).join(", ")})`] : [])].join(",\n  ")}\n);`;
   if (table.schema !== original.schema || table.name !== original.name)
     throw new Error("Change schema and object names in the SQL editor.");
-  const statements: string[] = [];
+  // An existing column is the one that carries its original name; a column
+  // without one matches by name only when no renamed column claims it, so a
+  // new column may reuse a name another column was renamed from.
+  const matched = new Map<ColumnDefinition, ColumnDefinition>();
   for (const old of original.columns) {
-    const next = table.columns.find(
-      (c) => (c.originalName ?? c.name) === old.name,
-    );
+    const next =
+      table.columns.find((c) => c.originalName === old.name) ??
+      table.columns.find(
+        (c) =>
+          c.originalName === undefined && c.name === old.name && !matched.has(c),
+      );
+    if (next) matched.set(next, old);
+  }
+  const drops: string[] = [],
+    renames: { from: string; to: string }[] = [],
+    changes: string[] = [];
+  for (const old of original.columns) {
+    const next = [...matched].find(([, o]) => o === old)?.[0];
     if (!next) {
       if (old.defaultName)
-        statements.push(
-          `ALTER TABLE ${target} DROP CONSTRAINT ${n(old.defaultName)};`,
-        );
-      statements.push(`ALTER TABLE ${target} DROP COLUMN ${n(old.name)};`);
+        drops.push(`ALTER TABLE ${target} DROP CONSTRAINT ${n(old.defaultName)};`);
+      drops.push(`ALTER TABLE ${target} DROP COLUMN ${n(old.name)};`);
       continue;
     }
-    if (next.name !== old.name)
-      statements.push(
-        `EXEC sys.sp_rename @objname=${l(`${target}.${n(old.name)}`)}, @newname=${l(next.name)}, @objtype=N'COLUMN';`,
-      );
+    if (next.name !== old.name) renames.push({ from: old.name, to: next.name });
     if (
       next.identity !== old.identity ||
       next.seed !== old.seed ||
@@ -98,30 +108,49 @@ export function tableScript(
       throw new Error(
         "Identity/computed changes require a reviewed SQL migration; this designer never recreates the table.",
       );
-    if (next.type !== old.type || next.nullable !== old.nullable)
-      statements.push(
-        `ALTER TABLE ${target} ALTER COLUMN ${n(next.name)} ${columnType(next.type)} ${next.nullable ? "NULL" : "NOT NULL"};`,
+    const retyped = next.type !== old.type;
+    const defaultChanged = next.defaultValue !== old.defaultValue;
+    // SQL Server will not change the type of a column a default depends on.
+    const dropDefault = !!old.defaultName && (defaultChanged || retyped);
+    if (dropDefault)
+      changes.push(`ALTER TABLE ${target} DROP CONSTRAINT ${n(old.defaultName!)};`);
+    if (retyped || next.nullable !== old.nullable) {
+      const collation =
+        old.collation && /char|text/i.test(next.type)
+          ? ` COLLATE ${collationName(old.collation)}`
+          : "";
+      changes.push(
+        `ALTER TABLE ${target} ALTER COLUMN ${n(next.name)} ${columnType(next.type)}${collation} ${next.nullable ? "NULL" : "NOT NULL"};`,
       );
-    if (next.defaultValue !== old.defaultValue) {
-      if (old.defaultName)
-        statements.push(
-          `ALTER TABLE ${target} DROP CONSTRAINT ${n(old.defaultName)};`,
-        );
-      if (next.defaultValue)
-        statements.push(
-          `ALTER TABLE ${target} ADD DEFAULT ${next.defaultValue} FOR ${n(next.name)};`,
-        );
     }
+    if ((dropDefault || (defaultChanged && !old.defaultName)) && next.defaultValue.trim())
+      changes.push(
+        `ALTER TABLE ${target} ADD ${old.defaultName && !defaultChanged ? `CONSTRAINT ${n(old.defaultName)} ` : ""}DEFAULT ${next.defaultValue} FOR ${n(next.name)};`,
+      );
   }
-  for (const added of table.columns.filter(
-    (c) => !original.columns.some((o) => o.name === (c.originalName ?? c.name)),
-  ))
+  const statements = [...drops];
+  // Renames that reuse a name still in use (a swap) go through temporary names.
+  const taken = new Set(original.columns.map((c) => c.name.toLowerCase()));
+  const viaTemporary = renames.some((r) => taken.has(r.to.toLowerCase()));
+  const rename = (from: string, to: string) =>
+    `EXEC sys.sp_rename @objname=${l(`${target}.${n(from)}`)}, @newname=${l(to)}, @objtype=N'COLUMN';`;
+  if (viaTemporary) {
+    renames.forEach((r, i) => statements.push(rename(r.from, `__quervio_rename_${i}`)));
+    renames.forEach((r, i) => statements.push(rename(`__quervio_rename_${i}`, r.to)));
+  } else renames.forEach((r) => statements.push(rename(r.from, r.to)));
+  statements.push(...changes);
+  for (const added of table.columns.filter((c) => !matched.has(c)))
     statements.push(`ALTER TABLE ${target} ADD ${column(added)};`);
   if (JSON.stringify(table.primaryKey) !== JSON.stringify(original.primaryKey))
     throw new Error(
       "Edit an existing primary key through the constraints script to preserve its name and storage options.",
     );
   return statements.length ? transactional(statements.join("\n")) : "";
+}
+
+function collationName(value: string) {
+  if (!/^[A-Za-z0-9_]{1,128}$/.test(value)) throw new Error(`Invalid collation: ${value}`);
+  return value;
 }
 
 export function transactional(sql: string) {
@@ -363,7 +392,11 @@ export function maintenanceScript(
         `EXEC msdb.dbo.sp_add_jobstep @job_id=@job, @step_id=${i + 1}, @step_name=${l(`${i + 1}. ${t.kind}`)}, @subsystem=N'TSQL', @database_name=${l(database)}, @command=${l(taskSql(t))}, @on_success_action=${t.nextSuccess ? 4 : i === tasks.length - 1 ? 1 : 3}${t.nextSuccess ? `, @on_success_step_id=${ids.get(t.nextSuccess)}` : ""}, @on_fail_action=${t.nextFailure ? 4 : 2}${t.nextFailure ? `, @on_fail_step_id=${ids.get(t.nextFailure)}` : ""};`,
     )
     .join("\n");
-  return `SET XACT_ABORT ON;\nBEGIN TRANSACTION;\nDECLARE @job uniqueidentifier;\nEXEC msdb.dbo.sp_add_job @job_name=${l(name)}, @enabled=1, @description=N'Quervio maintenance flow', @job_id=@job OUTPUT;\n${steps}\nEXEC msdb.dbo.sp_add_jobschedule @job_id=@job, @name=${l(name + " daily")}, @freq_type=4, @freq_interval=1, @active_start_time=${hour * 10000 + minute * 100};\nEXEC msdb.dbo.sp_add_jobserver @job_id=@job;\nCOMMIT TRANSACTION;`;
+  // msdb procedures report failures with RAISERROR, which XACT_ABORT does not
+  // turn into a rollback; TRY/CATCH does, so a failed step leaves no half job.
+  return transactional(
+    `DECLARE @job uniqueidentifier;\nEXEC msdb.dbo.sp_add_job @job_name=${l(name)}, @enabled=1, @description=N'Quervio maintenance flow', @job_id=@job OUTPUT;\n${steps}\nEXEC msdb.dbo.sp_add_jobschedule @job_id=@job, @name=${l(name + " daily")}, @freq_type=4, @freq_interval=1, @active_start_time=${hour * 10000 + minute * 100};\nEXEC msdb.dbo.sp_add_jobserver @job_id=@job;`,
+  );
 }
 
 export function queryStoreAction(
