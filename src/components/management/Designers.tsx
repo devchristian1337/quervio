@@ -18,15 +18,19 @@ import {
 import type { ToolTab } from "@/stores/workbench";
 import {useQueries} from "@/stores/queries";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
+  Check,
   Choice,
+  codeClass,
   DataGrid,
-  Field,
+  Dropdown,
   inputClass,
   Notice,
   Operation,
   ReadTable,
   Text,
+  textareaClass,
   useRead,
 } from "./shared";
 
@@ -154,9 +158,9 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
       {!loaded && !error && <Notice>Loading table metadata…</Notice>}
       {loaded && (
         <>
-          <div className="overflow-auto rounded border">
-            <table className="w-full text-xs">
-              <thead>
+          <div className="overflow-auto rounded-md border">
+            <table className="w-full text-sm">
+              <thead className="bg-panel">
                 <tr>
                   {[
                     "Column",
@@ -169,7 +173,7 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
                     ...(!original ? ["PK"] : []),
                     "",
                   ].map((name) => (
-                    <th key={name} className="px-2 py-2 text-left font-medium">
+                    <th key={name} className="h-8 px-2 text-left text-xs font-medium whitespace-nowrap text-muted-foreground">
                       {name}
                     </th>
                   ))}
@@ -189,42 +193,36 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
                     <td className="p-1">
                       <input
                         aria-label={`Column ${i + 1} type`}
-                        className={`${inputClass} w-36`}
+                        className={cn(inputClass, "w-36")}
                         value={c.type}
                         onChange={(e) => change(i, { type: e.target.value })}
                       />
                     </td>
-                    <td className="p-2">
-                      <input
+                    <td className="px-2 text-center">
+                      <Check
                         aria-label={`Column ${i + 1} nullable`}
-                        type="checkbox"
                         checked={c.nullable}
-                        onChange={(e) =>
-                          change(i, { nullable: e.target.checked })
-                        }
+                        onChange={(nullable) => change(i, { nullable })}
                       />
                     </td>
-                    <td className="p-2">
-                      <input
+                    <td className="px-2 text-center">
+                      <Check
                         aria-label={`Column ${i + 1} identity`}
-                        type="checkbox"
                         checked={c.identity}
-                        onChange={(e) =>
-                          change(i, { identity: e.target.checked })
-                        }
+                        onChange={(identity) => change(i, { identity })}
                       />
                     </td>
                     <td className="p-1">
                       <div className="flex gap-1">
                         <input
                           aria-label="Identity seed"
-                          className={`${inputClass} w-14`}
+                          className={cn(inputClass, "w-16")}
                           value={c.seed}
                           onChange={(e) => change(i, { seed: e.target.value })}
                         />
                         <input
                           aria-label="Identity increment"
-                          className={`${inputClass} w-14`}
+                          className={cn(inputClass, "w-16")}
                           value={c.increment}
                           onChange={(e) =>
                             change(i, { increment: e.target.value })
@@ -253,18 +251,17 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
                       />
                     </td>
                     {!original && (
-                      <td className="p-2">
-                        <input
+                      <td className="px-2 text-center">
+                        <Check
                           aria-label={`Column ${i + 1} primary key`}
-                          type="checkbox"
                           checked={
                             model.primaryKey.includes(c.name) && !!c.name
                           }
                           disabled={!c.name}
-                          onChange={(e) =>
+                          onChange={(checked) =>
                             setModel((m) => ({
                               ...m,
-                              primaryKey: e.target.checked
+                              primaryKey: checked
                                 ? [...m.primaryKey, c.name]
                                 : m.primaryKey.filter(
                                     (name) => name !== c.name,
@@ -276,7 +273,6 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
                     )}
                     <td className="p-1">
                       <Button
-                        size="sm"
                         variant="ghost"
                         onClick={() =>
                           setModel((m) => ({
@@ -296,7 +292,6 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
             </table>
           </div>
           <Button
-            size="sm"
             variant="outline"
             className="self-start"
             onClick={() =>
@@ -321,7 +316,7 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
               constraints controls for keys and indexes.
             </Notice>
           )}
-          <h2 className="mt-2 text-sm font-semibold">
+          <h2 className="mt-2 border-b pb-2 text-sm font-medium">
             Constraints and indexes
           </h2>
           <div className="flex flex-wrap items-end gap-3">
@@ -427,21 +422,17 @@ export function ViewDesigner({ tab }: { tab: ToolTab }) {
       script += `\nGROUP BY ${selected.map((c) => "s." + n(c)).join(", ")}`;
     script += ";";
   }
-  function objectOptions() {
-    return choices.map((r) => (
-      <option key={r.object_id} value={r.object_id ?? ""}>
-        {r.schema}.{r.name}
-      </option>
-    ));
+  function objectOptions(none: string): [string, string][] {
+    return [
+      ["", none],
+      ...choices.map((r): [string, string] => [r.object_id ?? "", `${r.schema}.${r.name}`]),
+    ];
   }
-  function columnOptions(data: typeof columns.data) {
-    return data
-      ? records(data).map((r) => (
-          <option key={r.name} value={r.name ?? ""}>
-            {r.name}
-          </option>
-        ))
-      : null;
+  function columnOptions(none: string, data: typeof columns.data): [string, string][] {
+    return [
+      ["", none],
+      ...(data ? records(data).map((r): [string, string] => [r.name ?? "", r.name ?? ""]) : []),
+    ];
   }
   return (
     <div className="flex flex-col gap-3 overflow-auto">
@@ -463,132 +454,108 @@ export function ViewDesigner({ tab }: { tab: ToolTab }) {
         />
       </div>
       {error && <Notice error>{error}</Notice>}
-      {indexedView && <Notice>Changing this indexed view requires an explicit migration that preserves its indexes. The designer will not apply an ALTER automatically.<Button size="sm" variant="outline" onClick={()=>void useQueries.getState().open(tab.connectionId,tab.database,{text:definition,dirty:true})}>Open definition in query</Button></Notice>}
+      {indexedView && <Notice>Changing this indexed view requires an explicit migration that preserves its indexes. The designer will not apply an ALTER automatically.<Button variant="outline" onClick={()=>void useQueries.getState().open(tab.connectionId,tab.database,{text:definition,dirty:true})}>Open definition in query</Button></Notice>}
       {protectedView && !indexedView && <Notice>The original view options are retained in SQL. Graphical replacement is unavailable for this definition.</Notice>}
       {sqlMode ? (
         <textarea
           aria-label="View SQL definition"
-          className="min-h-72 rounded border bg-background p-3 font-mono text-xs"
+          className={cn(textareaClass, "min-h-72")}
           value={definition}
           onChange={(e) => setDefinition(e.target.value)}
         />
       ) : (
         <>
-          <Field label="Source object">
-            <select
-              className={inputClass}
-              value={source}
-              onChange={(e) => {
-                setSource(e.target.value);
-                setSelected([]);
-              }}
-            >
-              <option value="">Select source</option>
-              {objectOptions()}
-            </select>
-          </Field>
+          <Choice
+            label="Source object"
+            className="max-w-md"
+            value={source}
+            onChange={(value) => {
+              setSource(value);
+              setSelected([]);
+            }}
+            options={objectOptions("Select source")}
+          />
           <div className="flex flex-wrap gap-3">
             {columns.data &&
               records(columns.data).map((r) => (
-                <label key={r.name} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(r.name ?? "")}
-                    onChange={(e) =>
-                      setSelected((s) =>
-                        e.target.checked
-                          ? [...s, r.name ?? ""]
-                          : s.filter((c) => c !== r.name),
-                      )
-                    }
+                <Check
+                  key={r.name}
+                  label={r.name}
+                  checked={selected.includes(r.name ?? "")}
+                  onChange={(checked) =>
+                  setSelected((s) =>
+                  checked
+                  ? [...s, r.name ?? ""]
+                  : s.filter((c) => c !== r.name),
+                  )
+                  }
                   />
-                  {r.name}
-                </label>
-              ))}
-          </div>
-          <div className="grid grid-cols-4 gap-3">
-            <Field label="Join object">
-              <select
-                className={inputClass}
-                value={joinSource}
-                onChange={(e) => setJoinSource(e.target.value)}
-              >
-                <option value="">No join</option>
-                {objectOptions()}
-              </select>
-            </Field>
-            <Choice
-              label="Join type"
-              value={joinKind}
-              onChange={setJoinKind}
-              options={["INNER", "LEFT", "RIGHT", "FULL"]}
-            />
-            <Field label="Source key">
-              <select
-                className={inputClass}
-                value={joinLeft}
-                onChange={(e) => setJoinLeft(e.target.value)}
-              >
-                <option value="">Select column</option>
-                {columnOptions(columns.data)}
-              </select>
-            </Field>
-            <Field label="Joined key">
-              <select
-                className={inputClass}
-                value={joinRight}
-                onChange={(e) => setJoinRight(e.target.value)}
-              >
-                <option value="">Select column</option>
-                {columnOptions(joined.data)}
-              </select>
-            </Field>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Field label="Filter column">
-              <select
-                className={inputClass}
-                value={whereColumn}
-                onChange={(e) => setWhereColumn(e.target.value)}
-              >
-                <option value="">No filter</option>
-                {columnOptions(columns.data)}
-              </select>
-            </Field>
-            <Choice
-              label="Comparison"
-              value={operator}
-              onChange={setOperator}
-              options={[
-                "=",
-                "<>",
-                ">",
-                "<",
-                ">=",
-                "<=",
-                "LIKE",
-                "IS NULL",
-                "IS NOT NULL",
-              ]}
-            />
-            <Text
-              label="Filter value (literal)"
-              value={value}
-              onChange={setValue}
-            />
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={group}
-                onChange={(e) => setGroup(e.target.checked)}
-              />
-              Group selected columns
-            </label>
+                  ))}
+                  </div>
+                  <div className="grid grid-cols-4 gap-3">
+                  <Choice
+                  label="Join object"
+                  value={joinSource}
+                  onChange={setJoinSource}
+                  options={objectOptions("No join")}
+                  />
+                  <Choice
+                  label="Join type"
+                  value={joinKind}
+                  onChange={setJoinKind}
+                  options={["INNER", "LEFT", "RIGHT", "FULL"]}
+                  />
+                  <Choice
+                  label="Source key"
+                  value={joinLeft}
+                  onChange={setJoinLeft}
+                  options={columnOptions("Select column", columns.data)}
+                  />
+                  <Choice
+                  label="Joined key"
+                  value={joinRight}
+                  onChange={setJoinRight}
+                  options={columnOptions("Select column", joined.data)}
+                  />
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                  <Choice
+                  label="Filter column"
+                  value={whereColumn}
+                  onChange={setWhereColumn}
+                  options={columnOptions("No filter", columns.data)}
+                  />
+                  <Choice
+                  label="Comparison"
+                  value={operator}
+                  onChange={setOperator}
+                  options={[
+                  "=",
+                  "<>",
+                  ">",
+                  "<",
+                  ">=",
+                  "<=",
+                  "LIKE",
+                  "IS NULL",
+                  "IS NOT NULL",
+                  ]}
+                  />
+                  <Text
+                  label="Filter value (literal)"
+                  value={value}
+                  onChange={setValue}
+                  />
+                  <Check
+                  label="Group selected columns"
+                  checked={group}
+                  onChange={setGroup}
+                />
           </div>
         </>
       )}
       {script && !sqlMode && (
-        <pre className="max-h-60 overflow-auto rounded border p-3 text-xs select-text">
+        <pre className={cn(codeClass, "max-h-60")}>
           {script}
         </pre>
       )}
@@ -632,7 +599,8 @@ export function RelationshipDiagram({ context }: { context: Context }) {
   function position(id: string, i: number) {
     return (
       positions[id] ?? {
-        x: (i % 4) * 250 + 20,
+        // 110px between boxes leaves room for the key name on its line.
+        x: (i % 4) * 320 + 20,
         y: Math.floor(i / 4) * 120 + 20,
       }
     );
@@ -727,7 +695,6 @@ export function RelationshipDiagram({ context }: { context: Context }) {
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
       <div className="flex items-center gap-3">
         <Button
-          size="sm"
           variant="outline"
           onClick={() => {
             objects.refresh();
@@ -736,29 +703,26 @@ export function RelationshipDiagram({ context }: { context: Context }) {
         >
           Refresh
         </Button>
-        <Button size="sm" variant="outline" onClick={() => void file(false)}>
+        <Button variant="outline" onClick={() => void file(false)}>
           Export layout
         </Button>
-        <Button size="sm" variant="outline" onClick={() => void file(true)}>
+        <Button variant="outline" onClick={() => void file(true)}>
           Import layout
         </Button>
-        <label className="ml-auto text-xs">
-          Zoom{" "}
-          <input
-            aria-label="Diagram zoom"
-            type="range"
-            min="0.4"
-            max="1.5"
-            step="0.1"
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
-          />
-        </label>
+        <Dropdown
+          aria-label="Diagram zoom"
+          className="ml-auto w-28"
+          value={String(zoom)}
+          onChange={(value) => setZoom(Number(value))}
+          options={[0.5, 0.75, 1, 1.25, 1.5].map(
+            (level): [string, string] => [String(level), `${level * 100}%`],
+          )}
+        />
       </div>
       {(objects.error || relations.error || error) && (
         <Notice error>{objects.error ?? relations.error ?? error}</Notice>
       )}
-      <div className="h-96 shrink-0 overflow-auto rounded border">
+      <div className="h-96 shrink-0 overflow-auto rounded-md border">
         <svg
           width={
             Math.max(
@@ -818,8 +782,18 @@ export function RelationshipDiagram({ context }: { context: Context }) {
                       t.name === link.referenced_table,
                   );
                 if (a < 0 || b < 0) return null;
-                const from = position(tables[a].object_id!, a),
-                  to = position(tables[b].object_id!, b);
+                const parentBox = position(tables[a].object_id!, a),
+                  referencedBox = position(tables[b].object_id!, b);
+                // From the facing edges, so the line never crosses a box.
+                const rightward = parentBox.x <= referencedBox.x;
+                const from = {
+                    x: parentBox.x + (rightward ? 210 : 0),
+                    y: parentBox.y + 35,
+                  },
+                  to = {
+                    x: referencedBox.x + (rightward ? 0 : 210),
+                    y: referencedBox.y + 35,
+                  };
                 return (
                   <g
                     key={i}
@@ -827,18 +801,23 @@ export function RelationshipDiagram({ context }: { context: Context }) {
                     className="cursor-pointer"
                   >
                     <path
-                      d={`M${from.x + 210},${from.y + 35} L${to.x},${to.y + 35}`}
+                      d={`M${from.x},${from.y} L${to.x},${to.y}`}
                       stroke="var(--primary)"
                       strokeWidth="2"
                       fill="none"
                     />
                     <text
-                      x={(from.x + to.x) / 2 + 90}
-                      y={(from.y + to.y) / 2 + 25}
+                      x={(from.x + to.x) / 2}
+                      y={(from.y + to.y) / 2 - 6}
+                      textAnchor="middle"
                       fill="var(--muted-foreground)"
-                      fontSize="10"
+                      stroke="var(--card)"
+                      strokeWidth="4"
+                      paintOrder="stroke"
+                      fontSize="11"
                     >
-                      {link.name}
+                      {link.name && link.name.length > 16 ? `${link.name.slice(0, 15)}…` : link.name}
+                      <title>{link.name}</title>
                     </text>
                   </g>
                 );
@@ -886,17 +865,17 @@ export function RelationshipDiagram({ context }: { context: Context }) {
                   <rect
                     width="210"
                     height="70"
-                    rx="5"
-                    fill="var(--panel)"
+                    rx="6"
+                    fill="var(--card)"
                     stroke="var(--border)"
                   />
-                  <text x="12" y="25" fontSize="12" fill="var(--foreground)">
+                  <text x="12" y="28" fontSize="13" fontWeight="500" fill="var(--foreground)">
                     {`${t.schema}.${t.name}`.slice(0, 28)}
                   </text>
                   <text
                     x="12"
-                    y="47"
-                    fontSize="11"
+                    y="50"
+                    fontSize="12"
                     fill="var(--muted-foreground)"
                   >
                     {
@@ -914,42 +893,32 @@ export function RelationshipDiagram({ context }: { context: Context }) {
           </g>
         </svg>
       </div>
-      <h2 className="text-sm font-semibold">Foreign key</h2>
+      <h2 className="border-b pb-2 text-sm font-medium">Foreign key</h2>
       <div className="grid grid-cols-3 gap-3">
-        <Field label="Parent table">
-          <select
-            className={inputClass}
-            value={parent}
-            onChange={(e) => setParent(e.target.value)}
-          >
-            <option value="">Select table</option>
-            {tables.map((t) => (
-              <option key={t.object_id} value={t.object_id ?? ""}>
-                {t.schema}.{t.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <Choice
+          label="Parent table"
+          value={parent}
+          onChange={setParent}
+          options={[
+            ["", "Select table"],
+            ...tables.map((t): [string, string] => [t.object_id ?? "", `${t.schema}.${t.name}`]),
+          ]}
+        />
         <Text
           label="Parent columns, in order"
           value={left}
           onChange={setLeft}
         />
         <Text label="Constraint name" value={keyName} onChange={setKeyName} />
-        <Field label="Referenced table">
-          <select
-            className={inputClass}
-            value={referenced}
-            onChange={(e) => setReferenced(e.target.value)}
-          >
-            <option value="">Select table</option>
-            {tables.map((t) => (
-              <option key={t.object_id} value={t.object_id ?? ""}>
-                {t.schema}.{t.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <Choice
+          label="Referenced table"
+          value={referenced}
+          onChange={setReferenced}
+          options={[
+            ["", "Select table"],
+            ...tables.map((t): [string, string] => [t.object_id ?? "", `${t.schema}.${t.name}`]),
+          ]}
+        />
         <Text
           label="Referenced columns, in order"
           value={right}
@@ -967,14 +936,11 @@ export function RelationshipDiagram({ context }: { context: Context }) {
           onChange={setOnUpdate}
           options={["NO ACTION", "CASCADE", "SET NULL", "SET DEFAULT"]}
         />
-        <label className="flex items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={replace}
-            onChange={(e) => setReplace(e.target.checked)}
-          />
-          Replace existing constraint with this name
-        </label>
+        <Check
+          label="Replace existing constraint with this name"
+          checked={replace}
+          onChange={setReplace}
+        />
       </div>
       {validation && <Notice error>{validation}</Notice>}
       <Operation
@@ -1056,13 +1022,13 @@ export function ObjectProperties({ tab }: { tab: ToolTab }) {
             : { kind: "properties" }
         }
       />
-      {!tab.objectId && <><Choice label="Database operation" value={databaseAction} onChange={setDatabaseAction} options={[["inspect","Inspect properties"],["create","Create database"],["recovery","Change recovery model"],["access","Change read-only state"],["drop","Drop selected database"]]}/>{databaseAction==="create" && <Text label="New database name" value={newDatabase} onChange={setNewDatabase}/>} {databaseAction==="recovery" && <Choice label="Recovery model" value={recovery} onChange={setRecovery} options={["FULL","SIMPLE","BULK_LOGGED"]}/>} {databaseAction==="access" && <><Choice label="Access mode" value={readOnly} onChange={setReadOnly} options={["READ_ONLY","READ_WRITE"]}/><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={force} onChange={e=>setForce(e.target.checked)}/>Disconnect existing sessions and roll back their open transactions</label></>} {databaseScript && <Operation context={{...tab,database:"master"}} script={databaseScript} label="Preview database operation"/>}</>}
+      {!tab.objectId && <><Choice label="Database operation" value={databaseAction} onChange={setDatabaseAction} options={[["inspect","Inspect properties"],["create","Create database"],["recovery","Change recovery model"],["access","Change read-only state"],["drop","Drop selected database"]]}/>{databaseAction==="create" && <Text label="New database name" value={newDatabase} onChange={setNewDatabase}/>} {databaseAction==="recovery" && <Choice label="Recovery model" value={recovery} onChange={setRecovery} options={["FULL","SIMPLE","BULK_LOGGED"]}/>} {databaseAction==="access" && <><Choice label="Access mode" value={readOnly} onChange={setReadOnly} options={["READ_ONLY","READ_WRITE"]}/><Check label="Disconnect existing sessions and roll back their open transactions" checked={force} onChange={setForce}/></>} {databaseScript && <Operation context={{...tab,database:"master"}} script={databaseScript} label="Preview database operation"/>}</>}
       {tab.objectId && <>
       <textarea
         aria-label="Object SQL definition"
         value={definition}
         onChange={(e) => setDefinition(e.target.value)}
-        className="min-h-72 rounded border bg-background p-3 font-mono text-xs"
+        className={cn(textareaClass, "min-h-72")}
       />
       <Operation
         context={tab}

@@ -11,7 +11,13 @@ import { api, errorMessage } from "@/lib/api";
 import { useQueries } from "@/stores/queries";
 import type { Context } from "@/lib/management-api";
 import { Button } from "@/components/ui/button";
-import { Notice, Text } from "./shared";
+import { cn } from "@/lib/utils";
+import {
+  Check,
+  Notice,
+  Text,
+  textareaClass,
+} from "./shared";
 
 export function Templates({ context }: { context: Context }) {
   const { templates, save: store, remove, replace } = useTemplates();
@@ -43,7 +49,6 @@ export function Templates({ context }: { context: Context }) {
       <div className="flex items-end gap-3">
         <Text label="Search templates" value={search} onChange={setSearch} />
         <Button
-          size="sm"
           variant="outline"
           onClick={() =>
             setSelected({
@@ -58,16 +63,16 @@ export function Templates({ context }: { context: Context }) {
         >
           New template
         </Button>
-        <Button size="sm" variant="outline" onClick={() => void file(false)}>
+        <Button variant="outline" onClick={() => void file(false)}>
           Export
         </Button>
-        <Button size="sm" variant="outline" onClick={() => void file(true)}>
+        <Button variant="outline" onClick={() => void file(true)}>
           Import
         </Button>
       </div>
       {error && <Notice error>{error}</Notice>}
       <div className="grid min-h-0 flex-1 grid-cols-[240px_1fr] gap-3">
-        <div className="overflow-auto rounded border">
+        <div className="overflow-auto rounded-md border p-1">
           {templates
             .filter((t) =>
               `${t.name} ${t.category} ${t.description}`
@@ -77,7 +82,10 @@ export function Templates({ context }: { context: Context }) {
             .map((t) => (
               <button
                 key={t.id}
-                className={`block w-full border-b p-3 text-left text-sm ${selected?.id === t.id ? "bg-accent" : "hover:bg-accent/40"}`}
+                className={cn(
+                  "block w-full rounded-sm px-3 py-2 text-left text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                  selected?.id === t.id ? "bg-accent" : "hover:bg-accent/40",
+                )}
                 onClick={() => setSelected({ ...t })}
               >
                 {t.name}
@@ -108,26 +116,21 @@ export function Templates({ context }: { context: Context }) {
               aria-label="SQL template body"
               value={selected.body}
               onChange={(e) => patch({ body: e.target.value })}
-              className="min-h-52 flex-1 rounded border bg-background p-3 font-mono text-xs"
+              className={cn(textareaClass, "min-h-52 flex-1")}
             />
-            <label className="flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
-                checked={selected.snippet}
-                onChange={(e) => patch({ snippet: e.target.checked })}
-              />
-              Show in editor completion · Monaco placeholders are supported
-            </label>
+            <Check
+              label="Show in editor completion · Monaco placeholders are supported"
+              checked={selected.snippet}
+              onChange={(snippet) => patch({ snippet })}
+            />
             <div className="flex flex-wrap gap-2">
               <Button
-                size="sm"
                 disabled={!selected.name || !selected.body}
                 onClick={() => store(selected)}
               >
                 Save template
               </Button>
               <Button
-                size="sm"
                 variant="outline"
                 onClick={() => {
                   insertText(selected.body, selected.snippet);
@@ -137,7 +140,6 @@ export function Templates({ context }: { context: Context }) {
                 Insert into current query
               </Button>
               <Button
-                size="sm"
                 variant="outline"
                 onClick={() =>
                   void useQueries
@@ -153,7 +155,6 @@ export function Templates({ context }: { context: Context }) {
                 Open as new query
               </Button>
               <Button
-                size="sm"
                 variant="ghost"
                 onClick={() => {
                   remove(selected.id);

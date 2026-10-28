@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { type Context, type DataTable } from "@/lib/management-api";
+import { cn } from "@/lib/utils";
 import {
   BridgeOperation,
+  Check,
   Choice,
+  codeClass,
   DataGrid,
+  Field,
+  inputClass,
   Notice,
   Text,
-  inputClass,
+  textareaClass,
 } from "./shared";
 import { Button } from "@/components/ui/button";
 
@@ -112,7 +117,6 @@ export function Transfer({ context }: { context: Context }) {
           />
         </div>
         <Button
-          size="sm"
           variant="outline"
           onClick={() =>
             void choose(
@@ -186,14 +190,14 @@ export function Transfer({ context }: { context: Context }) {
           {preview && (
             <>
               <DataGrid data={preview} />
-              <h2 className="text-sm font-semibold">Column mapping</h2>
-              <div className="max-h-72 shrink-0 overflow-auto rounded border">
+              <h2 className="border-b pb-2 text-sm font-medium">Column mapping</h2>
+              <div className="max-h-72 shrink-0 overflow-auto rounded-md border">
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr>
-                      <th className="p-2 text-left">Source column</th>
-                      <th className="p-2 text-left">Destination column</th>
-                      <th className="p-2 text-left">Ignore</th>
+                  <thead className="bg-panel">
+                    <tr className="text-xs text-muted-foreground">
+                      <th className="h-8 px-3 text-left font-medium">Source column</th>
+                      <th className="h-8 px-3 text-left font-medium">Destination column</th>
+                      <th className="h-8 px-3 text-center font-medium">Ignore</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -203,8 +207,8 @@ export function Transfer({ context }: { context: Context }) {
                         : (parsed as Record<string, string>);
                       return (
                         <tr key={index} className="border-t">
-                          <td className="p-2">{column}</td>
-                          <td className="p-2">
+                          <td className="px-3 py-1">{column}</td>
+                          <td className="px-3 py-1">
                             <input
                               className={inputClass}
                               aria-label={`Destination column for ${column}`}
@@ -221,62 +225,55 @@ export function Transfer({ context }: { context: Context }) {
                               }
                             />
                           </td>
-                          <td className="p-2">
-                            <input
-                              type="checkbox"
+                          <td className="px-3 py-1 text-center">
+                            <Check
                               aria-label={`Ignore source column ${column}`}
                               checked={values[column] === ""}
-                              onChange={(e) =>
-                                setMapping(
-                                  JSON.stringify(
-                                    {
-                                      ...values,
-                                      [column]: e.target.checked ? "" : column,
-                                    },
-                                    null,
-                                    2,
-                                  ),
-                                )
+                              onChange={(checked) =>
+                              setMapping(
+                              JSON.stringify(
+                              {
+                              ...values,
+                              [column]: checked ? "" : column,
+                              },
+                              null,
+                              2,
+                              ),
+                              )
                               }
+                              />
+                              </td>
+                              </tr>
+                              );
+                              })}
+                              </tbody>
+                              </table>
+                              </div>
+                              </>
+                              )}
+                              {source === "file" && (
+                              <Check
+                              label="Decode Quervio CSV backslash escaping (enable for files exported by Quervio)"
+                              checked={backslashEscaping}
+                              onChange={setBackslashEscaping}
                             />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
           )}
-          {source === "file" && (
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={backslashEscaping}
-                onChange={(e) => setBackslashEscaping(e.target.checked)}
-              />
-              Decode Quervio CSV backslash escaping (enable for files exported
-              by Quervio)
-            </label>
-          )}
-          <label className="text-xs text-muted-foreground">
-            Column mapping: source names to destination names. Omitted names map
-            identically.
-          </label>
-          <textarea
-            aria-label="Column mapping JSON"
-            className="min-h-24 rounded border bg-background p-2 font-mono text-xs"
-            value={mapping}
-            onChange={(e) => setMapping(e.target.value)}
-          />
-          <label className="text-sm">
-            <input
-              type="checkbox"
-              checked={keepIdentity}
-              onChange={(e) => setKeepIdentity(e.target.checked)}
+          <Field label="Column mapping JSON" htmlFor="column-mapping">
+            <textarea
+              id="column-mapping"
+              className={cn(textareaClass, "min-h-24")}
+              value={mapping}
+              onChange={(e) => setMapping(e.target.value)}
             />
-            Keep source identity values
-          </label>
+            <p className="text-xs text-muted-foreground">
+              Source names to destination names. Omitted names map identically.
+            </p>
+          </Field>
+          <Check
+            label="Keep source identity values"
+            checked={keepIdentity}
+            onChange={setKeepIdentity}
+          />
           <Notice>
             Import uses one destination transaction, validates constraints and
             rolls back on conversion or transfer errors. CSV uses \N for NULL; a
@@ -368,17 +365,14 @@ export function Transfer({ context }: { context: Context }) {
       )}
       {mode === "publish" && (
         <>
-          <label className="text-sm">
-            <input
-              type="checkbox"
-              checked={dropMissing}
-              onChange={(e) => {
-                setDropMissing(e.target.checked);
-                setPackageHash("");
-              }}
-            />
-            Drop destination objects absent from the package
-          </label>
+          <Check
+            label="Drop destination objects absent from the package"
+            checked={dropMissing}
+            onChange={(checked) => {
+              setDropMissing(checked);
+              setPackageHash("");
+            }}
+          />
           <BridgeOperation
             context={context}
             action="dacPreview"
@@ -395,7 +389,7 @@ export function Transfer({ context }: { context: Context }) {
             }}
           />
           {report && (
-            <pre className="max-h-96 overflow-auto rounded border p-3 text-xs select-text">
+            <pre className={cn(codeClass, "max-h-96")}>
               {report}
             </pre>
           )}

@@ -1,14 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
 
+const TOOLS: Record<string, string> = {"activity": "Activity Monitor", "queryStore": "Query Store", "events": "Extended Events / Profiler", "table": "Table Designer", "view": "View Designer", "diagram": "Relationships", "backup": "Backup / Restore", "agent": "SQL Server Agent", "maintenance": "Maintenance", "transfer": "Import / Export / Scripts", "security": "Security / Audit", "encryption": "Encryption", "encryptedQuery": "Microsoft Query", "templates": "Templates / Snippets", "components": "Microsoft Components", "properties": "Object Properties"};
 async function openTool(page: Page, tool: string) {
-  await page
-    .getByRole("combobox", { name: "Open management tool" })
-    .selectOption(tool);
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByRole("menuitem", { name: TOOLS[tool], exact: true }).click();
 }
 test.beforeEach(async ({ page }) => {
   await page.goto("/?mock");
   await expect(
-    page.getByRole("combobox", { name: "Open management tool" }),
+    page.getByRole("button", { name: "Tools", exact: true }),
   ).toBeVisible();
 });
 
@@ -144,9 +144,8 @@ test("inactive monitoring stops polling and preserves the selected view", async 
     };
   });
   await openTool(page, "activity");
-  await page
-    .getByRole("combobox", { name: "Refresh", exact: true })
-    .selectOption("1");
+  await page.getByRole("combobox", { name: "Refresh", exact: true }).click();
+  await page.getByRole("option", { name: "1 second", exact: true }).click();
   await expect(
     page.getByText("SELECT Id, Name FROM dbo.Customer", { exact: true }),
   ).toBeVisible();

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { api, errorMessage } from "@/lib/api";
-import { Notice } from "./shared";
+import { Dropdown, Notice } from "./shared";
 
 interface PlanNode {
   id: number;
@@ -158,42 +158,36 @@ export function PlanViewer({
           Save .sqlplan
         </Button>
         {(plans?.length ?? 0) > 1 && (
-          <select
+          <Dropdown
             aria-label="Statement plan"
-            className="rounded border bg-background p-1 text-xs"
-            value={index}
-            onChange={(e) => {
-              setIndex(Number(e.target.value));
+            size="sm"
+            className="w-32"
+            value={String(index)}
+            onChange={(value) => {
+              setIndex(Number(value));
               setLoaded(null);
               setSelected(null);
             }}
-          >
-            {plans!.map((_, i) => (
-              <option key={i} value={i}>
-                Plan {i + 1}
-              </option>
-            ))}
-          </select>
-        )}
-        <label className="ml-auto flex items-center gap-2 text-xs">
-          Zoom
-          <input
-            aria-label="Plan zoom"
-            type="range"
-            min="0.3"
-            max="1.5"
-            step="0.1"
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
+            options={plans!.map((_, i): [string, string] => [String(i), `Plan ${i + 1}`])}
           />
-        </label>
+        )}
+        <Dropdown
+          aria-label="Plan zoom"
+          size="sm"
+          className="ml-auto w-28"
+          value={String(zoom)}
+          onChange={(value) => setZoom(Number(value))}
+          options={[0.5, 0.75, 1, 1.25, 1.5].map(
+            (level): [string, string] => [String(level), `${level * 100}%`],
+          )}
+        />
       </div>
       {error && <Notice error>{error}</Notice>}
       {typeof parsed === "string" ? (
         <Notice error>{parsed}</Notice>
       ) : parsed ? (
         <div className="flex min-h-0 flex-1 gap-2">
-          <div className="min-h-0 flex-1 overflow-auto rounded border">
+          <div className="min-h-0 flex-1 overflow-auto rounded-md border">
             <svg
               role="img"
               aria-label="Execution plan operator tree"
@@ -272,8 +266,8 @@ export function PlanViewer({
             </svg>
           </div>
           {chosen && (
-            <aside className="w-72 shrink-0 overflow-auto rounded border p-3 text-xs">
-              <h3 className="mb-2 font-semibold">{chosen.operation}</h3>
+            <aside className="w-72 shrink-0 overflow-auto rounded-md border p-3 text-xs select-text">
+              <h3 className="mb-2 text-sm font-medium">{chosen.operation}</h3>
               {chosen.attributes.map(([name, value]) => (
                 <div key={name} className="mb-2 break-words">
                   <span className="text-muted-foreground">{name}: </span>

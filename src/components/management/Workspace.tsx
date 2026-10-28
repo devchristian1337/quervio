@@ -18,7 +18,27 @@ import {
   type Dependency,
   type ServerCapabilities,
 } from "@/lib/management-api";
-import { Choice, inputClass, Notice } from "./shared";
+import { cn } from "@/lib/utils";
+import { ChevronDown, Wrench, X } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Choice, Notice } from "./shared";
+
+// The Tools menu, by what each tool is for.
+const TOOL_GROUPS: readonly (readonly [string, readonly ToolKind[]])[] = [
+  ["Monitoring", ["activity", "queryStore", "events"]],
+  ["Design", ["table", "view", "diagram", "properties"]],
+  ["Administration", ["backup", "agent", "maintenance", "transfer"]],
+  ["Security", ["security", "encryption", "encryptedQuery"]],
+  ["Quervio", ["templates", "components"]],
+];
 
 const Diagnostics = {
   activity: lazy(() =>
@@ -89,57 +109,74 @@ export function Workspace() {
   const active = workbench.tabs.find((t) => t.id === workbench.activeId);
   return (
     <section className="flex h-full min-w-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b bg-panel px-2">
-        <button
-          className={`h-full shrink-0 border-b-2 px-2 text-xs ${!active ? "border-primary" : "border-transparent text-muted-foreground"}`}
-          onClick={() => workbench.activate(null)}
-        >
-          Queries
-        </button>
-        {workbench.tabs.map((tab) => (
-          <div
-            key={tab.id}
-            className={`flex h-full shrink-0 items-center border-b-2 ${active?.id === tab.id ? "border-primary" : "border-transparent text-muted-foreground"}`}
+      <div className="flex h-9 shrink-0 items-end gap-1 border-b bg-panel px-2 text-xs">
+        <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto">
+          <button
+            className={cn(
+              "-mb-px h-8 shrink-0 border-b-2 px-2",
+              !active ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => workbench.activate(null)}
           >
-            <button
-              className="max-w-52 truncate px-2 text-xs"
-              title={`${TOOL_NAMES[tab.kind]} · ${tab.database ?? "Server"}`}
-              onClick={() => workbench.activate(tab.id)}
-            >
-              {tab.name ?? TOOL_NAMES[tab.kind]}
-            </button>
-            <button
-              aria-label={`Close ${TOOL_NAMES[tab.kind]}`}
-              className="px-2 text-xs hover:text-foreground"
-              onClick={() => workbench.close(tab.id)}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-        <select
-          aria-label="Open management tool"
-          className="ml-auto h-7 w-44 shrink-0 rounded border bg-background px-2 text-xs"
-          value=""
-          onChange={(e) =>
-            e.target.value &&
-            workbench.open(e.target.value as ToolKind, context)
-          }
-        >
-          <option value="">Tools…</option>
-          {Object.entries(TOOL_NAMES).map(([kind, label]) => (
-            <option
-              key={kind}
-              value={kind}
-              disabled={
-                !context.connectionId &&
-                !["templates", "components"].includes(kind)
-              }
-            >
-              {label}
-            </option>
-          ))}
-        </select>
+            Queries
+          </button>
+          {workbench.tabs.map((tab) => {
+            const selected = active?.id === tab.id;
+            return (
+              <div
+                key={tab.id}
+                className={cn(
+                  "group -mb-px flex h-8 max-w-60 shrink-0 items-center gap-1 border-b-2 pl-2",
+                  selected ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <button
+                  className="min-w-0 truncate"
+                  title={`${TOOL_NAMES[tab.kind]} · ${tab.database ?? "Server"}`}
+                  onClick={() => workbench.activate(tab.id)}
+                >
+                  {tab.name ?? TOOL_NAMES[tab.kind]}
+                </button>
+                <button
+                  aria-label={`Close ${TOOL_NAMES[tab.kind]}`}
+                  title="Close"
+                  // A 20 px target with a 14 px icon, as on the query tabs.
+                  className={cn(
+                    "grid size-5 shrink-0 place-items-center rounded hover:bg-accent",
+                    !selected && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+                  )}
+                  onClick={() => workbench.close(tab.id)}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="mb-0.5 h-7 shrink-0">
+              <Wrench /> Tools <ChevronDown className="opacity-50" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60">
+            {TOOL_GROUPS.map(([group, kinds], index) => (
+              <DropdownMenuGroup key={group}>
+                {index > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuLabel>{group}</DropdownMenuLabel>
+                {kinds.map((kind) => (
+                  <DropdownMenuItem
+                    key={kind}
+                    disabled={!context.connectionId && kind !== "templates" && kind !== "components"}
+                    onSelect={() => workbench.open(kind, context)}
+                  >
+                    {TOOL_NAMES[kind]}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <div className={`min-h-0 flex-1 ${active ? "hidden" : ""}`}>
         <QueryWorkspace />
@@ -252,13 +289,13 @@ function ToolFrame({ tab, active = true }: { tab: ToolTab; active?: boolean }) {
     <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
       <header className="flex shrink-0 flex-wrap items-end gap-3">
         <div className="mr-auto">
-          <h1 className="text-base font-semibold">
+          <h1 className="text-lg font-semibold">
             {tab.name
               ? `${TOOL_NAMES[tab.kind]} · ${tab.schema ?? "dbo"}.${tab.name}`
               : TOOL_NAMES[tab.kind]}
           </h1>
           {capabilities && (
-            <p className="pt-1 text-xs text-muted-foreground">
+            <p className="pt-0.5 text-sm text-muted-foreground">
               {capabilities.edition} · {capabilities.version}
             </p>
           )}
@@ -267,6 +304,7 @@ function ToolFrame({ tab, active = true }: { tab: ToolTab; active?: boolean }) {
           <>
             <Choice
               label="Server"
+              className="w-48"
               value={connectionId}
               onChange={(id) => {
                 setConnectionId(id);
@@ -274,21 +312,16 @@ function ToolFrame({ tab, active = true }: { tab: ToolTab; active?: boolean }) {
               }}
               options={connections.map((c) => [c.id, displayName(c)] as const)}
             />
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Database
-              <select
-                className={inputClass}
-                value={database || capabilities?.database || ""}
-                onChange={(e) => setDatabase(e.target.value)}
-              >
-                <option value="">Default database</option>
-                {databases.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <Choice
+              label="Database"
+              className="w-48"
+              value={database || capabilities?.database || ""}
+              onChange={setDatabase}
+              options={[
+                ["", "Default database"],
+                ...databases.map((name): [string, string] => [name, name]),
+              ]}
+            />
           </>
         )}
       </header>
@@ -362,7 +395,6 @@ function Components() {
       {error && <Notice error>{error}</Notice>}
       {progress && <Notice>{progress}</Notice>}
       <Button
-        size="sm"
         variant="outline"
         className="self-start"
         disabled={installing}
@@ -373,8 +405,8 @@ function Components() {
           : "Install SQL Tools Service 6.0.20261023.1"}
       </Button>
       {dependencies.map((dependency, index) => (
-        <div key={dependency.name} className="rounded border p-3">
-          <h2 className="text-sm font-semibold">{dependency.name}</h2>
+        <div key={dependency.name} className="rounded-md border p-3">
+          <h2 className="text-sm font-medium">{dependency.name}</h2>
           <p className="pt-1 text-xs text-muted-foreground">
             {dependency.available ? "Available" : "Missing"}
             {dependency.path ? ` · ${dependency.path}` : ""}
@@ -383,7 +415,6 @@ function Components() {
             {dependency.help}
           </p>
           <Button
-            size="sm"
             variant="outline"
             onClick={() => void select(index === 0 ? "bridge" : "language")}
           >
@@ -397,7 +428,6 @@ function Components() {
         run locally under your Windows account.
       </Notice>
       <Button
-        size="sm"
         className="self-start"
         variant="outline"
         onClick={refresh}
