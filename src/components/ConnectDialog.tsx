@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/interfaces-select";
 import { api, errorMessage, type Encrypt, type Environment, type SavedConnection } from "@/lib/api";
 import { ENVIRONMENTS } from "@/lib/environment";
-import { newConnection, useConnections } from "@/stores/connections";
+import { newConnection, transportWarning, useConnections } from "@/stores/connections";
 
 type TestState =
   | { status: "idle" }
@@ -68,6 +68,7 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
           ? "Enter the password to test or save."
           : null;
   const canSubmit = missing === null;
+  const warning = transportWarning(draft);
 
   const cleaned = (): SavedConnection => ({
     ...draft,
@@ -222,6 +223,7 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
             />
             Trust server certificate
           </label>
+          {warning && <p className="-mt-2 text-xs text-amber-500">{warning}</p>}
 
           {test.status !== "idle" && <TestResult state={test} />}
           {error && <p className="text-sm text-destructive select-text">{error}</p>}

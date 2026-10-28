@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { FormatError, formatScript, sameTokens, splitOnGo } from "@/lib/format-sql";
+import { FormatError, formatRange, formatScript, sameScript, sameTokens, splitOnGo } from "@/lib/format-sql";
+
+const goLines = (script: string) => splitOnGo(script).filter((piece) => piece.kind === "go");
+
+/** The formatted script, or null when the formatter refuses it. */
+function formattedOrRefused(script: string): string | null {
+  try {
+    return formatScript(script);
+  } catch (error) {
+    if (error instanceof FormatError) return null;
+    throw error;
+  }
+}
 
 describe("formatScript", () => {
   it("lays out a query in the SSMS style", () => {
@@ -84,6 +96,59 @@ describe("formatScript", () => {
   it("keeps CRLF input working", () => {
     expect(formatScript("select 1\r\nGO\r\nselect 2\r\n")).toBe("SELECT 1\nGO\n\nSELECT 2\n");
   });
+
+  it("never moves the end of a nested comment", () => {
+    // As written the Server reads `2 / <comment> 1 AND 0=1`; laid out by a
+    // formatter that sees `//` as a comment, `*/` would become `* /` and
+    // the WHERE would turn into `2 / 1 OR 1=1`.
+    expect(() => formatScript("DELETE FROM dbo.t WHERE id = 2//* /* */\n*/1 AND 0=1 -- */ 1 OR 1=1\n")).toThrow(FormatError);
+  });
+
+  it("refuses `//`, which the formatter misreads as a comment", () => {
+    expect(() => formatScript("select 4//2")).toThrow(/`\/\/`/);
+    expect(formatScript("select '//' -- a // b\n")).toContain("'//'");
+  });
+
+  it("never turns a line with more than GO into a separator", () => {
+    const script = "CREATE PROCEDURE dbo.p AS SELECT 1 -- c\ngo DROP TABLE dbo.t\n";
+    expect(goLines(script)).toEqual([]);
+    const formatted = formattedOrRefused(script);
+    if (formatted !== null) expect(goLines(formatted)).toEqual([]);
+  });
+
+  it("reads GO lines with Rust's whitespace and counts", () => {
+    // U+FEFF is not White_Space for batch.rs, so this is not a separator,
+    // and formatting must not trim it into one.
+    const bom = "CREATE PROCEDURE dbo.p AS SELECT 1\n﻿go\nDROP TABLE dbo.t\n";
+    expect(goLines(bom)).toEqual([]);
+    const formatted = formattedOrRefused(bom);
+    if (formatted !== null) expect(goLines(formatted)).toEqual([]);
+
+    // Rust parses `+5` as a count, so this one is a separator, kept as written.
+    expect(goLines("SELECT 1\ngo +5\nSELECT 2\n")).toEqual([{ kind: "go", line: "go +5" }]);
+    expect(formatScript("SELECT 1\ngo +5\nSELECT 2\n")).toBe("SELECT 1\ngo +5\n\nSELECT 2\n");
+    expect(goLines("SELECT 1\ngo 99999999999\n")).toEqual([]);
+  });
+});
+
+describe("formatRange", () => {
+  it("formats a selection in place", () => {
+    const document = "select 1\nselect a,b from t\n";
+    expect(formatRange(document, 9, document.length)).toBe("SELECT a,\n    b\nFROM t\n");
+  });
+
+  it("refuses a selection that starts inside a comment", () => {
+    const document = "DELETE FROM dbo.t /*\nok */ WHERE id = 1 -- */\n";
+    expect(() => formatRange(document, document.indexOf("ok"), document.length)).toThrow(/inside a comment/);
+  });
+});
+
+describe("sameScript", () => {
+  it("notices a new or lost GO line", () => {
+    expect(sameScript("select 1 -- c\ngo select 2", "select 1 -- c\ngo\nselect 2")).toBe(false);
+    expect(sameScript("select 1\ngo\nselect 2", "select 1\n\nselect 2")).toBe(false);
+    expect(sameScript("select 1\nGO 2\n", "SELECT 1\ngo 2\n")).toBe(true);
+  });
 });
 
 describe("sameTokens", () => {
@@ -96,5 +161,11 @@ describe("sameTokens", () => {
     expect(sameTokens("where a>=1", "where a> =1")).toBe(false);
     expect(sameTokens("select N'x'", "select N 'x'")).toBe(false);
     expect(sameTokens("select 1e3", "select 1 e3")).toBe(false);
+  });
+
+  it("reads nested block comments as SQL Server does", () => {
+    expect(sameTokens("a /* x /* y */ */ b", "a /* x /* y */ */ b")).toBe(true);
+    expect(sameTokens("a /* x /* y */ */ b", "a /* x /* y */ * / b")).toBe(false);
+    expect(sameTokens("2 / /* /* */\n*/ 1 AND 0=1 -- */ 1 OR 1=1", "2 / /* /* */\n* / 1 AND 0 = 1 -- */ 1 OR 1=1")).toBe(false);
   });
 });

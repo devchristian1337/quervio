@@ -76,8 +76,9 @@ export const api = {
     script: string,
     baseLine: number,
     options: ExecuteOptions,
+    allowDestructive: boolean,
     onEvent: Channel<ExecutionEvent>,
-  ) => invoke<Outcome>("query_execute", { tabId, script, baseLine, options, onEvent }),
+  ) => invoke<Outcome>("query_execute", { tabId, script, baseLine, options, allowDestructive, onEvent }),
   cancelQuery: (tabId: string) => invoke<void>("query_cancel", { tabId }),
 
   resultRows: (tabId: string, set: number, start: number, count: number) =>

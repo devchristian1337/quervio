@@ -47,11 +47,14 @@ void Promise.all([
 // Format Document (Shift+Alt+F) and Format Selection (Ctrl+K Ctrl+F). The
 // formatter is large, so it loads on first use. An edit is all or nothing,
 // and Ctrl+Z undoes it.
-async function formatEdits(text: string, range: monaco.IRange): Promise<monaco.languages.TextEdit[]> {
-  const { formatScript, FormatError } = await import("@/lib/format-sql");
+async function formatEdits(model: monaco.editor.ITextModel, range: monaco.IRange): Promise<monaco.languages.TextEdit[]> {
+  const { formatRange, FormatError } = await import("@/lib/format-sql");
   try {
-    const formatted = formatScript(text, useSettings.getState().settings.formatting);
-    return formatted === text ? [] : [{ range, text: formatted }];
+    // The whole document goes along, so a selection is checked in context.
+    const start = model.getOffsetAt({ lineNumber: range.startLineNumber, column: range.startColumn });
+    const end = model.getOffsetAt({ lineNumber: range.endLineNumber, column: range.endColumn });
+    const formatted = formatRange(model.getValue(), start, end, useSettings.getState().settings.formatting);
+    return formatted === model.getValueInRange(range) ? [] : [{ range, text: formatted }];
   } catch (error) {
     toast.error("Could not format", {
       description: error instanceof FormatError ? error.message : errorMessage(error),
@@ -60,13 +63,13 @@ async function formatEdits(text: string, range: monaco.IRange): Promise<monaco.l
   }
 }
 monaco.languages.registerDocumentFormattingEditProvider("sql", {
-  provideDocumentFormattingEdits: (model) => formatEdits(model.getValue(), model.getFullModelRange()),
+  provideDocumentFormattingEdits: (model) => formatEdits(model, model.getFullModelRange()),
 });
 monaco.languages.registerDocumentRangeFormattingEditProvider("sql", {
   provideDocumentRangeFormattingEdits: (model, range) => {
     // Whole lines, so a statement is never cut in the middle of a word.
     const lines = new monaco.Range(range.startLineNumber, 1, range.endLineNumber, model.getLineMaxColumn(range.endLineNumber));
-    return formatEdits(model.getValueInRange(lines), lines);
+    return formatEdits(model, lines);
   },
 });
 

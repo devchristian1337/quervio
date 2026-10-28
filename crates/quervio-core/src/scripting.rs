@@ -150,7 +150,8 @@ pub async fn create_table(session: &mut Session, database: &str, object_id: i64)
         .query(&format!(
             "SELECT c.name, t.name, c.max_length, c.precision, c.scale, c.is_nullable,
                     CAST(ic.seed_value AS bigint), CAST(ic.increment_value AS bigint),
-                    dc.name, dc.definition, cc.definition, CAST(ISNULL(cc.is_persisted, 0) AS bit)
+                    dc.name, dc.definition, cc.definition, CAST(ISNULL(cc.is_persisted, 0) AS bit),
+                    CASE WHEN t.is_user_defined = 1 THEN SCHEMA_NAME(t.schema_id) END
              FROM {db}.sys.columns c
              JOIN {db}.sys.types t ON t.user_type_id = c.user_type_id
              LEFT JOIN {db}.sys.identity_columns ic ON ic.object_id = c.object_id AND ic.column_id = c.column_id
@@ -170,6 +171,7 @@ pub async fn create_table(session: &mut Session, database: &str, object_id: i64)
         } else {
             let column_type = SqlType {
                 name: text(row, 1)?,
+                schema: optional_text(row, 12)?,
                 max_length: int(row, 2)?,
                 precision: int(row, 3)?,
                 scale: int(row, 4)?,
