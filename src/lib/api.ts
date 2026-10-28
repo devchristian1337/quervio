@@ -60,6 +60,8 @@ export const api = {
   deleteConnection: (id: string) => invoke<void>("delete_connection", { id }),
   testConnection: (connection: SavedConnection, password: string | null) =>
     invoke<ServerInfo>("test_connection", { connection, password }),
+  connectionDatabases: (connection: SavedConnection, password: string | null) =>
+    invoke<CatalogItem[]>("connection_databases", { connection, password }),
   connect: (id: string) => invoke<ServerInfo>("explorer_connect", { id }),
   disconnect: (id: string) => invoke<void>("explorer_disconnect", { id }),
   databases: (id: string) => invoke<CatalogItem[]>("explorer_databases", { id }),

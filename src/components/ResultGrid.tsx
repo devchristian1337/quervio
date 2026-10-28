@@ -35,6 +35,7 @@ import { ValueViewer } from "@/components/ValueViewer";
 import { api, errorMessage, type CopyFormat, type SortDirection } from "@/lib/api";
 import { mix, withAlpha } from "@/lib/color";
 import { CellKind, decodeWindow, type Cell } from "@/lib/results";
+import { displayCellText, mergeColumnWidths, minimumColumnWidths, SORT_ZONE, type MeasureGridText } from "@/lib/result-column-widths";
 import type { Palette } from "@/lib/themes";
 import { useTheme } from "@/lib/use-theme";
 import type { ResultSetSummary } from "@/stores/queries";
@@ -47,11 +48,15 @@ const SANS = "Inter, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif
 
 /** Whether the bundled fonts are in, so the canvas draws with them and not a fallback. */
 function useFontsReady() {
-  const [ready, setReady] = useState(() => document.fonts.check('13px "Inter"'));
+  const [ready, setReady] = useState(() => document.fonts.check('13px "Inter"') && document.fonts.check('13px "JetBrains Mono"'));
   useEffect(() => {
     if (ready) return;
     let live = true;
-    void Promise.all([document.fonts.load('400 13px "Inter"'), document.fonts.load('500 12px "Inter"')]).then(
+    void Promise.all([
+      document.fonts.load('400 13px "Inter"'),
+      document.fonts.load('500 12px "Inter"'),
+      document.fonts.load('400 13px "JetBrains Mono"'),
+    ]).then(
       () => live && setReady(true),
     );
     return () => {
@@ -77,9 +82,6 @@ function drawTabular(ctx: CanvasRenderingContext2D, text: string, right: number,
     x += w;
   });
 }
-/** Width of the sort arrow's click target at the right of a header. */
-const SORT_ZONE = 28;
-
 const SIZES: Record<Density, { row: number; header: number; font: number; padding: number }> = {
   comfortable: { row: 32, header: 36, font: 13, padding: 12 },
   compact: { row: 24, header: 28, font: 12, padding: 8 },
@@ -121,11 +123,6 @@ function gridTheme(p: Palette, kind: "light" | "dark", density: Density, monospa
     markerFontStyle: `${Math.max(11, size.font - 2)}px`,
     editorFontSize: `${size.font}px`,
   };
-}
-
-/** Approximate pixel width of grid text. */
-function textWidth(text: string, monospace: boolean) {
-  return Math.min(text.length, 60) * (monospace ? 7.3 : 7);
 }
 
 function plural(count: number, noun: string) {
@@ -189,6 +186,7 @@ export default function ResultGrid({ tabId, set }: Props) {
   const pending = useRef(new Set<number>());
   const [selection, setSelection] = useState<GridSelection>(emptySelection);
   const [widths, setWidths] = useState<Record<number, number>>({});
+  const [measuredWidths, setMeasuredWidths] = useState<number[]>([]);
   const [viewer, setViewer] = useState<{ row: number; column: number } | null>(null);
   const [sort, setSort] = useState<Sort>(null);
   // Bumped after a sort so every cell is read again in the new order.
@@ -205,6 +203,36 @@ export default function ResultGrid({ tabId, set }: Props) {
     [p.muted, base.baseFontStyle],
   );
 
+  const measure = useMemo<MeasureGridText>(() => {
+    const ctx = document.createElement("canvas").getContext("2d")!;
+    const bodyFont = `${base.baseFontStyle} ${base.fontFamily}`;
+    ctx.font = bodyFont;
+    const digit = Math.max(...[..."0123456789"].map((character) => ctx.measureText(character).width));
+    return (text, role) => {
+      ctx.font = role === "header" ? `${base.headerFontStyle} ${base.fontFamily}`
+        : role === "null" ? `italic ${bodyFont}` : bodyFont;
+      // Match drawTabular: Inter numbers use the widest digit's advance.
+      if (role === "number" && !monospace) {
+        return [...text].reduce((sum, character) => sum + (character >= "0" && character <= "9" ? digit : ctx.measureText(character).width), 0);
+      }
+      return ctx.measureText(text).width;
+    };
+  }, [base.baseFontStyle, base.headerFontStyle, base.fontFamily, monospace, fontsReady]);
+
+  const headerWidths = useMemo(
+    () => minimumColumnWidths(set.columns, set.kinds, [], base.cellHorizontalPadding!, measure),
+    [set.columns, set.kinds, base.cellHorizontalPadding, measure],
+  );
+  const minimumWidths = useMemo(
+    () => mergeColumnWidths(measuredWidths, headerWidths),
+    [measuredWidths, headerWidths],
+  );
+
+  // Density, typeface or finished font loading changes the text's real width.
+  useEffect(() => {
+    setMeasuredWidths(minimumColumnWidths(set.columns, set.kinds, [...blocks.current.values()].flat(), base.cellHorizontalPadding!, measure));
+  }, [set.columns, set.kinds, base.cellHorizontalPadding, measure]);
+
   const columns = useMemo<GridColumn[]>(
     () =>
       set.columns.map((name, index) => {
@@ -213,11 +241,11 @@ export default function ResultGrid({ tabId, set }: Props) {
         return {
           id: String(index),
           title,
-          width: widths[index] ?? Math.max(72, textWidth(title, monospace) + 24 + SORT_ZONE),
+          width: Math.max(widths[index] ?? 0, minimumWidths[index]),
           themeOverride: sorted ? { bgCell: sortedTint, bgHeader: sortedTint, textHeader: p.fg } : undefined,
         };
       }),
-    [set.columns, widths, sort, sortedTint, p.fg, monospace],
+    [set.columns, widths, minimumWidths, sort, sortedTint, p.fg],
   );
 
   const fetchBlock = useCallback(
@@ -228,23 +256,10 @@ export default function ResultGrid({ tabId, set }: Props) {
         const buffer = await api.resultRows(tabId, set.index, block * BLOCK, BLOCK);
         const rows = decodeWindow(buffer);
         blocks.current.set(block, rows);
-        if (block === 0) {
-          // Size columns to their first rows, like SSMS; a user resize wins.
-          setWidths((current) => {
-            const sized = { ...current };
-            set.columns.forEach((name, column) => {
-              if (sized[column] !== undefined) return;
-              const longest = Math.max(
-                textWidth(name || "(No column name)", monospace) + SORT_ZONE,
-                ...rows
-                  .slice(0, 50)
-                  .map((row) => textWidth(row[column]?.kind === CellKind.Null ? "NULL" : (row[column]?.text ?? ""), monospace)),
-              );
-              sized[column] = Math.min(400, Math.max(72, longest + 28));
-            });
-            return sized;
-          });
-        }
+        // Include every fetched row, even in later blocks. Manual resizing
+        // can add room, but may never clip a header or a loaded cell's text.
+        const required = minimumColumnWidths(set.columns, set.kinds, rows, base.cellHorizontalPadding!, measure);
+        setMeasuredWidths((current) => mergeColumnWidths(current, required));
         const damaged: { cell: Item }[] = [];
         for (let row = block * BLOCK; row < block * BLOCK + BLOCK; row++) {
           for (let column = 0; column < set.columns.length; column++) damaged.push({ cell: [column, row] });
@@ -256,7 +271,7 @@ export default function ResultGrid({ tabId, set }: Props) {
         pending.current.delete(block);
       }
     },
-    [tabId, set.index, set.columns, monospace],
+    [tabId, set.index, set.columns, set.kinds, base.cellHorizontalPadding, measure],
   );
 
   const getCellContent = useCallback(
@@ -280,8 +295,7 @@ export default function ResultGrid({ tabId, set }: Props) {
           themeOverride: nullTheme,
         };
       }
-      const flat = cell.text.replace(/\r?\n|\r/g, " ");
-      const display = cell.kind === CellKind.Preview ? `${flat}…` : flat;
+      const display = displayCellText(cell);
       return { kind: GridCellKind.Text, data: cell.text, displayData: display, allowOverlay: false, contentAlign: align };
     },
     // `order` is a dependency on purpose: a new function makes the grid redraw every cell.
@@ -418,7 +432,8 @@ export default function ResultGrid({ tabId, set }: Props) {
               gridSelection={selection}
               onGridSelectionChange={setSelection}
               keybindings={{ copy: false, paste: false, search: false }}
-              onColumnResize={(_column, width, index) => setWidths((w) => ({ ...w, [index]: width }))}
+              maxColumnWidth={Math.max(10_000, ...minimumWidths)}
+              onColumnResize={(_column, width, index) => setWidths((w) => ({ ...w, [index]: Math.max(width, minimumWidths[index]) }))}
               onCellActivated={([column, row]) => setViewer({ row, column })}
               onHeaderClicked={(column, event) => {
                 // The arrow sorts; the rest of the header selects the column, as in SSMS.
