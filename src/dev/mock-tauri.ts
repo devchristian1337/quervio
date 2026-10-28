@@ -89,6 +89,15 @@ mockIPC(async (cmd, args) => {
         case "definition":return table(["definition"], [["CREATE VIEW dbo.CustomerNames AS SELECT Id, Name FROM dbo.Customer;"]]);
         case "properties":return table(["name", "state_desc", "recovery_model_desc", "compatibility_level"], [[String(a.database ?? "master"), "ONLINE", "FULL", "160"]]);
         case "activity":return table(["session_id", "login_name", "database_name", "status", "command", "blocking_session_id", "wait_type", "wait_ms", "cpu_ms", "elapsed_ms", "text"], [["52", "support", "Sales", "running", "SELECT", "0", null, "0", "12", "35", "SELECT Id, Name FROM dbo.Customer"]]);
+        case "health": {
+          // Moves a little on each read, like a live server.
+          const wobble = (base: number, spread: number, whole = false) => {const v = Math.max(0, base + (Math.random() - 0.5) * spread);return String(whole ? Math.round(v) : v);};
+          const now = new Date();
+          return table(
+            ["server_name", "product_version", "edition", "sampled_at", "cpu_count", "max_workers_count", "active_workers", "started_at", "total_physical_memory_kb", "available_physical_memory_kb", "physical_memory_in_use_kb", "volume_bytes", "volume_used_percent", "cpu_percent", "batch_requests", "memory_grants_pending", "user_sessions", "active_requests", "blocked_requests", "database_name", "state_desc", "recovery_model_desc", "compatibility_level", "data_bytes", "data_used_bytes", "log_bytes", "log_used_percent"],
+            [["MOCK-SQL01", "16.0.4305.5", "Developer Edition (64-bit)", now.toISOString().slice(0, 23), "8", "576", wobble(60, 20, true), new Date(now.getTime() - 9.5 * 3600e3).toISOString().slice(0, 23), "16777216", wobble(5000000, 400000, true), "6291456", "536870912000", "71.4", wobble(38, 30), String(Math.floor(now.getTime() / 100)), "0", "14", wobble(3, 4, true), "1", String(a.database ?? "master"), "ONLINE", "FULL", "160", "2147483648", "1610612736", "536870912", wobble(22, 6)]],
+          );
+        }
         case "waits":return table(["wait_type", "waiting_tasks_count", "wait_time_ms", "signal_wait_time_ms"], [["PAGEIOLATCH_SH", "15", "120", "4"]]);
         case "io":return table(["database_name", "name", "num_of_reads", "num_of_writes", "io_stall_read_ms", "io_stall_write_ms"], [["Sales", "Sales_Data", "400", "120", "38", "12"]]);
         case "cpu":return table(["sample_tick", "sql_process_cpu_percent", "system_idle_percent"], [["1000", "3", "90"], ["2000", "4", "89"], ["3000", "2", "94"]]);
@@ -114,7 +123,7 @@ mockIPC(async (cmd, args) => {
       return {mock: true, message: "No Microsoft operation was executed in browser mock mode."};
     }
     case "query_sqlcmd_prepare":return {token: "mock-sqlcmd", script: a.script, hasLocalCommands: /!!|:out|:error/i.test(String(a.script))};
-    case "language_request":return {result: null, diagnostics: []};
+    case "language_request":return {result: null};
     case "list_connections":
       return [connection];
     case "explorer_connect":

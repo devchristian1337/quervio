@@ -1,4 +1,26 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
+import {
+  ServerCard,
+  ServerCardHeader,
+  ServerCardMeter,
+  ServerCardSpec,
+  ServerCardSpecs,
+  ServerCardStatus,
+  ServerCardTitle,
+  type ServerStatus,
+} from "@/components/ui/server-card";
+import { Tip } from "@/components/ui/flexnative-tooltip";
+import { LiveLine, type LivePoint, type LiveSeries } from "@/components/ui/bjork-live-line";
+import { cn } from "@/lib/utils";
+import {
+  bytes,
+  databaseStatus,
+  duration,
+  figures,
+  product,
+  serverPressure,
+  type Health,
+} from "@/lib/server-health";
 import {
   management,
   records,
@@ -46,6 +68,7 @@ export function ActivityMonitor({ context }: { context: Context }) {
     : null;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <ServerHealth context={context} refreshSeconds={Number(interval)} />
       <ViewTabs
         label="Activity"
         value={view}
@@ -109,6 +132,231 @@ export function ActivityMonitor({ context }: { context: Context }) {
     </div>
   );
 }
+
+// Each card rises in turn when the monitor opens, once.
+const ENTER =
+  "animate-in fade-in slide-in-from-bottom-2 duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] fill-mode-both motion-reduce:animate-none";
+
+/**
+ * The server and the database as they are now: CPU, memory and disk, the
+ * workload, and the database's space. They refresh with the monitor's
+ * Refresh interval, and pause with it while the tool is hidden.
+ */
+function ServerHealth({
+  context,
+  refreshSeconds,
+}: {
+  context: Context;
+  refreshSeconds: number;
+}) {
+  const health = useRead(context, { kind: "health" }, refreshSeconds);
+  const row = useMemo(
+    () => (health.data ? (records(health.data)[0] ?? null) : null),
+    [health.data],
+  );
+  // The sample before this one, for the rate of batch requests.
+  const samples = useRef<{ current: Health | null; previous: Health | null }>({
+    current: null,
+    previous: null,
+  });
+  if (row && samples.current.current !== row) {
+    samples.current = { previous: samples.current.current, current: row };
+  }
+  const f = row ? figures(row, samples.current.previous) : null;
+  const pressure = f ? serverPressure(f) : [];
+
+  // Each sample becomes a point of the charts, stamped when it arrived.
+  const [history, setHistory] = useState<Record<"cpu" | "memory" | "batches", LivePoint[]>>({
+    cpu: [],
+    memory: [],
+    batches: [],
+  });
+  useEffect(() => {
+    if (!row) return;
+    const sample = figures(row, samples.current.previous);
+    const t = Date.now();
+    const add = (points: LivePoint[], v: number | null) =>
+      v === null ? points : [...points, { t, v }].slice(-HISTORY_POINTS);
+    setHistory((h) => ({
+      cpu: add(h.cpu, sample.cpuPercent),
+      memory: add(h.memory, sample.memoryPercent),
+      batches: add(h.batches, sample.batchesPerSecond),
+    }));
+  }, [row]);
+  const usage = useMemo<LiveSeries[]>(
+    () => [
+      { id: "cpu", label: "CPU", data: history.cpu },
+      { id: "memory", label: "Memory", data: history.memory },
+    ],
+    [history.cpu, history.memory],
+  );
+  const status: ServerStatus = health.error && !row
+    ? "offline"
+    : !row
+      ? "provisioning"
+      : pressure.length
+        ? "degraded"
+        : "online";
+  const label =
+    status === "offline"
+      ? "Unreachable"
+      : status === "provisioning"
+        ? "Connecting"
+        : status === "degraded"
+          ? "Under pressure"
+          : "Online";
+  const database = row ? databaseStatus(row.state_desc) : "provisioning";
+  const count = (value: number | null | undefined) =>
+    value === null || value === undefined ? "—" : value.toLocaleString();
+  return (
+    <section
+      aria-label="Server status"
+      className="grid shrink-0 gap-3 md:grid-cols-2 xl:grid-cols-3"
+    >
+      <ServerCard className={ENTER}>
+        <ServerCardHeader>
+          <ServerCardTitle
+            region={
+              row
+                ? `${product(row.product_version, row.edition)} · up ${duration(f!.uptimeSeconds)}`
+                : (health.error ?? "Reading the server…")
+            }
+          >
+            {row?.server_name ?? "Server"}
+          </ServerCardTitle>
+          <Tip label={pressure.length ? pressure.join(", ") : undefined}>
+            <ServerCardStatus status={status}>{label}</ServerCardStatus>
+          </Tip>
+        </ServerCardHeader>
+        <ServerCardSpecs>
+          <ServerCardSpec icon="cpu" label="CPUs">
+            {count(f ? (row?.cpu_count ? Number(row.cpu_count) : null) : null)}
+          </ServerCardSpec>
+          <ServerCardSpec icon="memory" label="Memory">
+            {bytes(f?.memoryTotal ?? null)}
+          </ServerCardSpec>
+          <ServerCardSpec icon="disk" label="Disk">
+            {bytes(f?.diskTotal ?? null)}
+          </ServerCardSpec>
+        </ServerCardSpecs>
+        <div className="grid gap-3">
+          <ServerCardMeter label="CPU" value={f?.cpuPercent ?? null} />
+          <ServerCardMeter
+            label="Memory"
+            value={f?.memoryPercent ?? null}
+            detail={f?.sqlMemory ? `SQL Server ${bytes(f.sqlMemory)}` : undefined}
+          />
+          <ServerCardMeter label="Disk" value={f?.diskPercent ?? null} />
+        </div>
+      </ServerCard>
+
+      <ServerCard className={ENTER} style={{ animationDelay: "60ms" }}>
+        <ServerCardHeader>
+          <ServerCardTitle
+            region={
+              f?.batchesPerSecond !== null && f?.batchesPerSecond !== undefined
+                ? `${f.batchesPerSecond.toLocaleString(undefined, { maximumFractionDigits: 1 })} batch requests a second`
+                : "Batch requests a second after the next refresh"
+            }
+          >
+            Workload
+          </ServerCardTitle>
+        </ServerCardHeader>
+        <ServerCardSpecs>
+          <ServerCardSpec label="Sessions">{count(f?.sessions)}</ServerCardSpec>
+          <ServerCardSpec label="Running">{count(f?.running)}</ServerCardSpec>
+          <ServerCardSpec label="Blocked">{count(f?.blocked)}</ServerCardSpec>
+        </ServerCardSpecs>
+        <div className="grid gap-3">
+          <LiveLine
+            data={history.batches}
+            window={HISTORY_WINDOW}
+            height={96}
+            yDomain="auto"
+            formatValue={formatRate}
+            showPauseButton={false}
+            scrub
+            ariaLabel="Batch requests a second"
+          />
+          <ServerCardMeter
+            label="Worker threads"
+            value={f?.workersPercent ?? null}
+            detail={
+              row?.active_workers && row.max_workers_count
+                ? `${Number(row.active_workers).toLocaleString()} of ${Number(row.max_workers_count).toLocaleString()}`
+                : undefined
+            }
+          />
+        </div>
+      </ServerCard>
+
+      <ServerCard className={ENTER} style={{ animationDelay: "120ms" }}>
+        <ServerCardHeader>
+          <ServerCardTitle
+            region={
+              row
+                ? `${row.recovery_model_desc?.toLowerCase() ?? "—"} recovery · compatibility ${row.compatibility_level ?? "—"}`
+                : undefined
+            }
+          >
+            {row?.database_name ?? context.database ?? "Database"}
+          </ServerCardTitle>
+          <ServerCardStatus status={database}>
+            {row?.state_desc
+              ? row.state_desc.charAt(0) + row.state_desc.slice(1).toLowerCase().replace(/_/g, " ")
+              : "Connecting"}
+          </ServerCardStatus>
+        </ServerCardHeader>
+        <ServerCardSpecs>
+          <ServerCardSpec label="Data">{bytes(number(row?.data_bytes))}</ServerCardSpec>
+          <ServerCardSpec label="Used">{bytes(number(row?.data_used_bytes))}</ServerCardSpec>
+          <ServerCardSpec label="Log">{bytes(number(row?.log_bytes))}</ServerCardSpec>
+        </ServerCardSpecs>
+        <div className="grid gap-3">
+          {/* Files grow by themselves: how full they are is neutral. */}
+          <ServerCardMeter label="Data files" value={f?.dataPercent ?? null} thresholds={[2, 2]} />
+          <ServerCardMeter label="Log" value={f?.logPercent ?? null} thresholds={[2, 2]} />
+        </div>
+      </ServerCard>
+      <ServerCard
+        className={cn(ENTER, "md:col-span-2 xl:col-span-3")}
+        style={{ animationDelay: "180ms" }}
+      >
+        <ServerCardHeader>
+          <ServerCardTitle
+            region={
+              refreshSeconds
+                ? `Last 5 minutes · a sample every ${refreshSeconds === 1 ? "second" : `${refreshSeconds} seconds`}`
+                : "Last 5 minutes · a sample on each manual refresh"
+            }
+          >
+            CPU and memory
+          </ServerCardTitle>
+        </ServerCardHeader>
+        <LiveLine
+          series={usage}
+          window={HISTORY_WINDOW}
+          height={128}
+          yDomain={[0, 100]}
+          threshold={{ value: 90, label: "90%" }}
+          formatValue={formatPercent}
+          scrub
+          ariaLabel="CPU and memory use"
+        />
+      </ServerCard>
+    </section>
+  );
+}
+
+// Five minutes of samples at the fastest refresh, one a second.
+const HISTORY_WINDOW = 5 * 60 * 1000;
+const HISTORY_POINTS = 300;
+const formatPercent = (v: number) => `${Math.round(v)}%`;
+const formatRate = (v: number) =>
+  `${v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 1 : 0 })}/s`;
+
+const number = (value: string | null | undefined) =>
+  value === null || value === undefined ? null : Number(value);
 
 export function QueryStore({ context }: { context: Context }) {
   const [minutes, setMinutes] = useState("60"),

@@ -32,6 +32,20 @@ async fn management_catalog_and_capabilities_use_a_separate_session() {
             .iter()
             .any(|r| r[1].as_deref() == Some("Items"))
     );
+    // The Activity Monitor's cards: one row, every figure filled on a box SQL Server.
+    let health = management::read(&mut session, Resource::Health)
+        .await
+        .unwrap();
+    assert_eq!(health.rows.len(), 1);
+    let value = |name: &str| {
+        let index = health.columns.iter().position(|c| c == name).unwrap();
+        health.rows[0][index].clone()
+    };
+    assert_eq!(value("database_name").as_deref(), Some("Quervio_Management_Catalog"));
+    assert_eq!(value("state_desc").as_deref(), Some("ONLINE"));
+    for name in ["cpu_count", "active_workers", "cpu_percent", "batch_requests", "total_physical_memory_kb", "volume_used_percent", "data_bytes", "log_used_percent", "user_sessions"] {
+        assert!(value(name).is_some(), "{name} is NULL");
+    }
     let properties=session.query_table("SELECT N'It''s exact', CAST(NULL AS nvarchar(1)),CAST(99999999999999999999999999999999999999 AS decimal(38,0))",10).await.unwrap();
     assert_eq!(properties.rows[0][0].as_deref(), Some("It's exact"));
     assert_eq!(properties.rows[0][1], None);
