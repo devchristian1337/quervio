@@ -93,6 +93,12 @@ export function focusEditor() {
   current?.focus();
 }
 
+/** Search the active Query Tab even when a toolbar or results panel has focus. */
+export function findInEditor() {
+  current?.focus();
+  void current?.getAction("actions.find")?.run();
+}
+
 /** Monaco keeps models after the editor switches path; free a closed tab's. */
 export function disposeModel(tabId: string) {
   monaco?.editor.getModel(monaco.Uri.parse(tabId))?.dispose();
