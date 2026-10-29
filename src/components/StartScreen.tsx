@@ -1,6 +1,7 @@
 import { FolderOpen, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/flexnative-tooltip";
+import { ScrollFade } from "@/components/ui/scroll-fade";
 import { displayName, type SavedConnection } from "@/lib/api";
 import { useShortcutLabel, type CommandId } from "@/lib/commands";
 import { ENVIRONMENTS } from "@/lib/environment";
@@ -25,7 +26,7 @@ export function StartScreen() {
   const showConnect = useConnectDialog((s) => s.show);
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <ScrollFade className="min-h-0 flex-1">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-10 pt-12 pb-10">
         <header className="flex items-center gap-4">
           <img src={prisma} alt="" className="size-12 object-contain select-none" draggable={false} />
@@ -73,7 +74,7 @@ export function StartScreen() {
           </dl>
         </section>
       </div>
-    </div>
+    </ScrollFade>
   );
 }
 

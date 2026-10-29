@@ -23,6 +23,7 @@ import { GlowingKeyboard } from "@/components/ui/glowing-keyboard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/interfaces-select";
+import { ScrollFade } from "@/components/ui/scroll-fade";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { COMMANDS, commandFor, keysOf, shortcutOf, type Command } from "@/lib/commands";
@@ -96,14 +97,14 @@ export function SettingsDialog() {
             </Button>
           </div>
         </nav>
-        <div className="min-w-0 flex-1 overflow-y-auto px-8 py-6">
+        <ScrollFade className="min-w-0 flex-1 px-8 py-6">
           {section === "appearance" && <AppearanceSection />}
           {section === "editor" && <EditorSection />}
           {section === "results" && <ResultsSection />}
           {section === "query" && <QuerySection />}
           {section === "shortcuts" && <ShortcutsSection />}
           {section === "about" && <AboutSection />}
-        </div>
+        </ScrollFade>
       </DialogContent>
     </Dialog>
   );

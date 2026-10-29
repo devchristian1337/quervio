@@ -12,6 +12,7 @@
     "test:ui": "playwright test"
   },
   "dependencies": {
+    "@animate-ui/react": "2.4.1",
     "@ark-ui/react": "^5.39.3",
     "@glideapps/glide-data-grid": "6.0.4-alpha24",
     "@monaco-editor/react": "^4.7.0",

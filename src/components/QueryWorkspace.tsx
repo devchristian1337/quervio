@@ -20,6 +20,7 @@ import { StartScreen } from "@/components/StartScreen";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/flexnative-tooltip";
 import { Checkbox } from "@/components/ui/radix-checkbox";
+import { useScrollFade } from "@/components/ui/scroll-fade";
 import { Tabs } from "@/components/ui/vercel-tabs";
 import { LoaderGooeyBlobs } from "@/components/ui/loaders-gooey-blobs";
 import {
@@ -352,6 +353,9 @@ function Toolbar({ tab }: { tab: QueryTab }) {
 
 function OutputPanel({ tab }: { tab: QueryTab }) {
   const setView = useQueries((s) => s.setView);
+  // Only the messages scroll here; the grids and plans scroll on their own.
+  const output = useRef<HTMLDivElement>(null);
+  useScrollFade(output, { enabled: tab.view === "messages" });
   return (
     <div className="flex h-full flex-col">
       <Tabs
@@ -376,7 +380,7 @@ function OutputPanel({ tab }: { tab: QueryTab }) {
           { id: "plans", label: "Plans" },
         ]}
       />
-      <div className={cn("min-h-0 flex-1", tab.view === "messages" && "overflow-auto")}>
+      <div ref={output} className={cn("min-h-0 flex-1", tab.view === "messages" && "overflow-auto")}>
         {tab.view === "plans" ? <div className="flex h-full flex-col p-2"><PlanViewer plans={tab.plans} /></div> : tab.view === "messages" ? <Messages tab={tab} /> : <Results tab={tab} />}
       </div>
     </div>
