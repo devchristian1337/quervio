@@ -25,6 +25,17 @@ pub fn run() {
             app.manage(language::LanguageState::default());
             app.manage(settings::SettingsState::new(&data_dir));
             app.manage(updates::UpdateState::default());
+            // The page shows the window once it has drawn. If it never gets
+            // there (a script error), show it anyway rather than run unseen.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                if let Some(window) = handle.get_webview_window("main") {
+                    if !window.is_visible().unwrap_or(true) {
+                        let _ = window.show();
+                    }
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
