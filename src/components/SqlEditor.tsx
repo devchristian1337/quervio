@@ -176,7 +176,7 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent
-        className="w-64"
+        className="min-w-64"
         // Keep the keyboard in the editor, not on the menu's trigger.
         onCloseAutoFocus={(event) => {
           event.preventDefault();

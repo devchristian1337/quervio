@@ -99,7 +99,7 @@ export function TextFieldMenu({ children }: { children: ReactNode }) {
       >
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-52" onCloseAutoFocus={(event) => {
+      <ContextMenuContent className="min-w-52" onCloseAutoFocus={(event) => {
         event.preventDefault();
         restoreSelection();
       }}>
