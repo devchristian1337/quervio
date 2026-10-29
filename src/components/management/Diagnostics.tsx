@@ -67,7 +67,7 @@ export function ActivityMonitor({ context }: { context: Context }) {
     ? data.data.rows[0]?.[0]
     : null;
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
       <ServerHealth context={context} refreshSeconds={Number(interval)} />
       <ViewTabs
         label="Activity"
