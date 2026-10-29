@@ -87,3 +87,59 @@ describe("the Production guard of a Query Tab", () => {
     expect(vi.mocked(api.executeQuery).mock.calls[1][4]).toBe(false);
   });
 });
+
+describe("an Execution's running state", () => {
+  const development = { ...production, id: "c3", environment: "development" as const };
+  const select = { text: "SELECT 1", baseLine: 0 };
+  // Holds the Execution open and hands back its event channel.
+  function pendingExecution() {
+    let finish = () => {};
+    let channel: { onmessage: (event: unknown) => void } | undefined;
+    vi.mocked(api.executeQuery).mockImplementationOnce((...args) => {
+      channel = args[5] as unknown as typeof channel;
+      return new Promise((resolve) => (finish = () => resolve("succeeded")));
+    });
+    return { send: (event: unknown) => channel?.onmessage(event), finish: () => finish() };
+  }
+  const tab = (id: string) => useQueries.getState().tabs.find((t) => t.id === id)!;
+  const old = { text: "old", isError: false };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useQueries.setState({ tabs: [], activeId: null });
+  });
+
+  it("keeps the last output on screen until the new one arrives", async () => {
+    const id = await openTab(development);
+    useQueries.setState((s) => ({ tabs: s.tabs.map((t) => ({ ...t, messages: [old] })) }));
+    const run = pendingExecution();
+    const done = useQueries.getState().execute(id, select);
+    expect(tab(id)).toMatchObject({ status: "executing", longRunning: false, messages: [old] });
+
+    run.send({ type: "message", text: "new", isError: false });
+    expect(tab(id).messages).toEqual([{ type: "message", text: "new", isError: false }]);
+    run.finish();
+    await done;
+    expect(tab(id)).toMatchObject({ status: "ready", longRunning: false });
+  });
+
+  it("shows itself running once it outlasts the threshold", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await openTab(development);
+      useQueries.setState((s) => ({ tabs: s.tabs.map((t) => ({ ...t, messages: [old] })) }));
+      const run = pendingExecution();
+      const done = useQueries.getState().execute(id, select);
+      vi.advanceTimersByTime(299);
+      expect(tab(id)).toMatchObject({ longRunning: false, messages: [old] });
+      vi.advanceTimersByTime(1);
+      expect(tab(id)).toMatchObject({ longRunning: true, messages: [], outcome: null });
+
+      run.finish();
+      await done;
+      expect(tab(id)).toMatchObject({ status: "ready", longRunning: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

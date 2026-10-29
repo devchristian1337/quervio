@@ -43,8 +43,10 @@ export interface QueryTab {
   messages: MessageLine[];
   resultSets: ResultSetSummary[];
   outcome: Outcome | null;
-  /** Bumped on every Execution so grids drop rows cached from the last one. */
+  /** Bumped when an Execution's output replaces the last one's, so grids drop rows cached from it. */
   runId: number;
+  /** The Execution has run longer than LONG_RUN_MS: only then does the UI show it running. */
+  longRunning: boolean;
   startedAt: number | null;
   elapsedMs: number | null;
   view: "results" | "messages" | "plans";
@@ -139,6 +141,9 @@ async function endTransactions(tabs: QueryTab[], commit: boolean) {
   return true;
 }
 
+/** How long an Execution runs before the UI shows it running. */
+const LONG_RUN_MS = 300;
+
 export const useQueries = create<QueriesState>((set, get) => {
   const patch = (id: string, change: Partial<QueryTab> | ((tab: QueryTab) => Partial<QueryTab>)) =>
     set((s) => ({
@@ -185,6 +190,7 @@ export const useQueries = create<QueriesState>((set, get) => {
         resultSets: [],
         outcome: null,
         runId: 0,
+        longRunning: false,
         startedAt: null,
         elapsedMs: null,
         view: "messages",
@@ -252,20 +258,27 @@ export const useQueries = create<QueriesState>((set, get) => {
           allowDestructive = true;
         }
       }
-      patch(id, {
-        status: "executing",
-        messages: [],
-        resultSets: [],
-        outcome: null,
-        runId: tab.runId + 1,
-        plans: [],
-        startedAt: Date.now(),
-        elapsedMs: null,
-        error: null,
-      });
+      // A quick Execution goes straight from the last output to its own: that
+      // stays until this one sends something or runs past LONG_RUN_MS, and
+      // only then does the UI show it running. Executing blocks a second run
+      // from the start.
+      const startedAt = Date.now();
+      let replaced = false;
+      const replaceOutput = () => {
+        if (replaced) return;
+        replaced = true;
+        // The outcome and time stay until this run's own replace them.
+        patch(id, (t) => ({ messages: [], resultSets: [], plans: [], runId: t.runId + 1, startedAt }));
+      };
+      patch(id, { status: "executing", longRunning: false, error: null });
+      const longRun = setTimeout(() => {
+        replaceOutput();
+        patch(id, (t) => (t.status === "executing" ? { longRunning: true, outcome: null, elapsedMs: null } : {}));
+      }, LONG_RUN_MS);
 
       const channel = new Channel<ExecutionEvent>();
       channel.onmessage = (event) => {
+        if (event.type !== "batchStarted" && event.type !== "sessionChanged") replaceOutput();
         switch (event.type) {
           case "sessionClosed":
             patch(id,{status:"disconnected",error:event.reason,openTransactions:0});
@@ -334,13 +347,17 @@ export const useQueries = create<QueriesState>((set, get) => {
         if (sqlcmdToken) await api.sqlcmdExecute(id, sqlcmdToken, executeOptions(), channel);
         else await api.executeQuery(id, script.text, script.baseLine, { ...executeOptions(), planMode: tab.planMode ?? "none" }, allowDestructive, channel);
       } catch (error) {
+        replaceOutput();
         patch(id, (t) => ({
           messages: [...t.messages, { text: errorMessage(error), isError: true }],
           outcome: "failed",
+          elapsedMs: Date.now() - startedAt,
           view: "messages",
         }));
       } finally {
-        patch(id, (t) => ({ status: t.status === "executing" ? "ready" : t.status }));
+        clearTimeout(longRun);
+        replaceOutput();
+        patch(id, (t) => ({ status: t.status === "executing" ? "ready" : t.status, longRunning: false }));
       }
     },
 
