@@ -2,6 +2,7 @@ import * as React from "react"
 import * as SelectPrimitive from "@radix-ui/react-select"
 import { Check, ChevronDown, ChevronUp } from "lucide-react"
 
+import { useScrollFadeRef } from "@/components/ui/scroll-fade"
 import { cn } from "@/lib/utils"
 
 function Select({
@@ -55,6 +56,8 @@ function SelectContent({
     align = "center",
     ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+    // The viewport mounts each time the list opens.
+    const fadeViewport = useScrollFadeRef<HTMLDivElement>()
     return (
         <SelectPrimitive.Portal>
             <SelectPrimitive.Content
@@ -71,6 +74,7 @@ function SelectContent({
             >
                 <SelectScrollUpButton />
                 <SelectPrimitive.Viewport
+                    ref={fadeViewport}
                     className={cn(
                         "p-1",
                         position === "popper" &&

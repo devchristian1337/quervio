@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/flexnative-tooltip";
+import { useScrollFade } from "@/components/ui/scroll-fade";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -58,6 +59,7 @@ export function ObjectExplorer() {
   const newQueryKey = useShortcutLabel("newQuery");
   const dialog = useConnectDialog();
   const treeRef = useRef<HTMLDivElement>(null);
+  useScrollFade(treeRef);
 
   useEffect(() => {
     if (!loaded) void load();
