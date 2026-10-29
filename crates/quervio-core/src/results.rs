@@ -93,6 +93,12 @@ impl ResultSet {
             ));
         }
         fn field(out: &mut impl Write, value: Option<&str>, escape: bool) -> io::Result<()> {
+            if value.is_some_and(is_spreadsheet_formula) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "CSV contains formula-like text in a value or column name. Export as Excel (.xlsx) to preserve it safely as text.",
+                ));
+            }
             out.write_all(b"\"")?;
             match value {
                 None => out.write_all(br"\N")?,
@@ -344,6 +350,23 @@ impl ResultSet {
     }
 }
 
+// Quoting a CSV field does not stop spreadsheet formula interpretation. Reject
+// ambiguous text rather than silently changing values used in data round trips.
+fn is_spreadsheet_formula(text: &str) -> bool {
+    let text = text.trim_start_matches(|c: char| {
+        c.is_whitespace() || c.is_control() || matches!(c, '\u{feff}' | '\u{200b}')
+    });
+    if text.starts_with(['+', '-'])
+        && text
+            .bytes()
+            .all(|c| c.is_ascii_digit() || b".+-eE".contains(&c))
+        && text.parse::<f64>().is_ok()
+    {
+        return false;
+    }
+    text.starts_with(['=', '+', '-', '@', '＝', '＋', '－', '＠'])
+}
+
 /// Case-insensitive, like the default SQL Server collations; ties fall back
 /// to exact order so the result is stable.
 fn compare_text(left: &str, right: &str) -> Ordering {
@@ -429,6 +452,79 @@ mod tests {
         assert!(text.contains(r#""2","\N""#));
         assert!(text.contains(r#"Bianchi, ""Gino"""#));
         assert!(text.lines().nth(1).unwrap().starts_with(r#""3""#));
+    }
+
+    #[test]
+    fn csv_rejects_formula_cells_and_headers_without_changing_data() {
+        for text in [
+            "=1+1",
+            "+SUM(A1)",
+            "-1+2",
+            "@SUM(A1)",
+            " \t\r\n=1+1",
+            "\u{feff}=1",
+            "\u{200b}=1",
+            "＝1+1",
+            "＋SUM(A1)",
+            "－1+2",
+            "＠SUM(A1)",
+        ] {
+            let mut data = ResultSet::new(vec![ResultColumn {
+                name: "Value".into(),
+                kind: ColumnKind::Text,
+            }]);
+            data.push_row(
+                &[ColumnValues::String(SqlString::from_utf8_string(
+                    text.into(),
+                ))],
+                1024,
+            );
+            let error = data.write_csv(&mut Vec::new()).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(error.to_string().contains(".xlsx"));
+            assert_eq!(data.cell(0, 0).unwrap().text.as_deref(), Some(text));
+            data.columns[0].name = text.into();
+            let mut header_only = ResultSet::new(data.columns.clone());
+            assert!(header_only.write_csv(&mut Vec::new()).is_err());
+            // A clean header with no rows must still be a valid export.
+            header_only.columns[0].name = "Value".into();
+            assert!(header_only.write_csv(&mut Vec::new()).is_ok());
+        }
+    }
+
+    #[test]
+    fn csv_preserves_signed_numeric_literals_and_ordinary_text() {
+        for text in [
+            "-123",
+            "+123",
+            "-12.50",
+            "+1.2e-3",
+            "-.5",
+            "-1e999",
+            "text=1",
+            "a,b",
+            "a\"b",
+            "",
+            "line one\nline two",
+        ] {
+            let mut data = ResultSet::new(vec![ResultColumn {
+                name: "Value".into(),
+                kind: ColumnKind::Text,
+            }]);
+            data.push_row(
+                &[ColumnValues::String(SqlString::from_utf8_string(
+                    text.into(),
+                ))],
+                1024,
+            );
+            let mut out = Vec::new();
+            data.write_csv(&mut out).unwrap();
+            assert!(
+                String::from_utf8(out)
+                    .unwrap()
+                    .contains(&format!("\"{}\"", text.replace('"', "\"\"")))
+            );
+        }
     }
 
     #[test]

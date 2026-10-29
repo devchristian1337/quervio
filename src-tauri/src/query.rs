@@ -91,11 +91,14 @@ pub async fn result_export_file(
 }
 
 #[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SqlcmdPreview {
-    token: String,
-    script: String,
-    has_local_commands: bool,
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum SqlcmdPreview {
+    FileAccessRequired,
+    Ready {
+        token: String,
+        script: String,
+        has_local_commands: bool,
+    },
 }
 
 #[tauri::command]
@@ -105,13 +108,21 @@ pub async fn query_sqlcmd_prepare(
     script: String,
     file_path: Option<String>,
     base_line: u32,
+    allow_file_reads: Option<bool>,
 ) -> CommandResult<SqlcmdPreview> {
     state.session(&tab_id).await?;
-    let script = quervio_core::sqlcmd::prepare(
+    let script = match quervio_core::sqlcmd::prepare(
         &script,
         file_path.as_deref().map(std::path::Path::new),
         base_line,
-    )?;
+        allow_file_reads.unwrap_or(false),
+    ) {
+        Ok(script) => script,
+        Err(quervio_core::sqlcmd::PrepareError::FileAccessRequired) => {
+            return Ok(SqlcmdPreview::FileAccessRequired);
+        }
+        Err(error) => return Err(error.to_string()),
+    };
     let preview = script.preview();
     let has_local_commands = script.steps.iter().any(|s| {
         matches!(
@@ -126,7 +137,7 @@ pub async fn query_sqlcmd_prepare(
         return Err("Too many SQLCMD previews. Wait for earlier previews to expire.".into());
     }
     pending.insert(token.clone(), (tab_id, std::time::Instant::now(), script));
-    Ok(SqlcmdPreview {
+    Ok(SqlcmdPreview::Ready {
         token,
         script: preview,
         has_local_commands,
@@ -898,6 +909,20 @@ pub async fn query_end_transactions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sqlcmd_file_consent_response_cannot_be_used_as_an_execution_token() {
+        let consent = serde_json::to_value(SqlcmdPreview::FileAccessRequired).unwrap();
+        assert_eq!(consent, serde_json::json!({"kind": "fileAccessRequired"}));
+        let ready = serde_json::to_value(SqlcmdPreview::Ready {
+            token: "one-use-token".into(),
+            script: "SELECT 1".into(),
+            has_local_commands: false,
+        }).unwrap();
+        assert_eq!(ready, serde_json::json!({
+            "kind": "ready", "token": "one-use-token", "script": "SELECT 1", "hasLocalCommands": false,
+        }));
+    }
 
     #[test]
     fn production_sessions_refuse_unconfirmed_destructive_statements() {

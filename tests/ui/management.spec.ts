@@ -17,6 +17,30 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 
+test("SQLCMD include access is approved separately from script execution", async ({ page }) => {
+  await page.getByRole("button", { name: "New query", exact: true }).last().click();
+  // Monaco's EditContext exposes a zero-size accessibility textbox; click
+  // the visible editor surface before sending normal keyboard input.
+  await page.locator(".monaco-editor").click({ position: { x: 80, y: 12 } });
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.insertText(':r "include.sql"');
+  await page.getByRole("checkbox", { name: "SQLCMD", exact: true }).check();
+  await page.getByRole("button", { name: "Execute", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Allow SQLCMD include file access?", exact: true })).toBeVisible();
+  await expect(dialog).toContainText("using your Windows identity");
+  await expect(dialog.getByRole("button", { name: "Confirm and execute SQLCMD", exact: true })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  await page.getByRole("button", { name: "Execute", exact: true }).click();
+  await dialog.getByRole("button", { name: "Allow reading include files", exact: true }).click();
+  await expect(dialog.getByRole("heading", { name: "Review expanded SQLCMD script", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Confirm and execute SQLCMD", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).toBeHidden();
+});
+
 test("every management area opens without browser exceptions", async ({
   page,
 }) => {

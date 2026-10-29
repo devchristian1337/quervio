@@ -258,7 +258,12 @@ export const useQueries = create<QueriesState>((set, get) => {
       let sqlcmdToken: string | null = null;
       if (tab.sqlcmdMode) {
         try {
-          const preview = await api.sqlcmdPrepare(id, script.text, tab.filePath, script.baseLine);
+          let preview = await api.sqlcmdPrepare(id, script.text, tab.filePath, script.baseLine);
+          if (preview.kind === "fileAccessRequired") {
+            if (!await useSqlcmdConfirmation.getState().ask(script.text, false, "fileAccess")) return;
+            preview = await api.sqlcmdPrepare(id, script.text, tab.filePath, script.baseLine, true);
+          }
+          if (preview.kind !== "ready") throw new Error("SQLCMD file access was not authorized.");
           if (!await useSqlcmdConfirmation.getState().ask(preview.script, preview.hasLocalCommands)) return;
           sqlcmdToken = preview.token;
         } catch (error) {toast.error("SQLCMD preparation failed", {description: errorMessage(error)});return;}

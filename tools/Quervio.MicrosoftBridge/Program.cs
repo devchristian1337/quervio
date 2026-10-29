@@ -57,7 +57,7 @@ internal static class Program
             CultureInfo.DefaultThreadCurrentCulture = Invariant;
             CultureInfo.DefaultThreadCurrentUICulture = Invariant;
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            if (options.Contains("--self-test")) { SelfTest(); return 0; }
+            if (options.Contains("--self-test")) { await SelfTest(); return 0; }
             if (options.Contains("--result-export")) { ResultExport(); return 0; }
             if (options.Contains("--version")) { Emit(new { version = "1.0", runtime = Environment.Version.ToString() }); return 0; }
             if (options.Contains("--access-token")) { var token = await Token("https://database.windows.net/.default"); Emit(new { accessToken = token.Token, expiresOn = token.ExpiresOn.ToUnixTimeSeconds() }); return 0; }
@@ -105,7 +105,7 @@ internal static class Program
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
 
-    private static void SelfTest()
+    private static async Task SelfTest()
     {
         string directory = Path.Combine(Path.GetTempPath(), "quervio-test-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
         try
@@ -124,7 +124,50 @@ internal static class Program
             var excel = FileRows(workbook, out var excelHeaders).Single();
             if (excelHeaders.Length != expected.Length || !excel.Select(v => v?.ToString()).SequenceEqual(expected)) throw new Exception("Excel round-trip mismatch: " + string.Join(", ", excel.Select((v, i) => $"{i}: {JsonSerializer.Serialize(v)}")));
             if (ConvertCell(1e15, "decimal").ToString() != "1000000000000000" || !Equals(ConvertCell(new DateTime(1899, 12, 31, 12, 30, 0), "time"), new TimeSpan(12, 30, 0))) throw new Exception("Typed Excel values did not convert.");
-            Emit(new { type = "result", value = new { tests = 6, status = "passed" } });
+            string[] formulas = ["=1+1", "+SUM(A1)", "-1+2", "@SUM(A1)", " \t\r\n=1+1", "\uFEFF=1", "\u200B=1", "＝1+1", "＋SUM(A1)", "－1+2", "＠SUM(A1)"];
+            foreach (string formula in formulas)
+            {
+                foreach (bool escape in new[] { false, true })
+                {
+                    bool rejected = false;
+                    try { CsvField(formula, escape); } catch (InvalidDataException) { rejected = true; }
+                    if (!rejected) throw new Exception("CSV accepted formula-like text in a header or value.");
+                }
+            }
+            foreach (string number in new[] { "-123", "+123", "-12.50", "+1.2e-3", "-.5", "-1e999" })
+                if (Csv(number) != "\"" + number + "\"") throw new Exception("CSV changed a signed numeric literal.");
+
+            string formulaWorkbook = Path.Combine(directory, "formula-text.xlsx");
+            WriteWorkbook(formulaWorkbook, formulas, new[] { formulas });
+            if (!FileRows(formulaWorkbook, out var formulaHeaders).Single().Select(v => v?.ToString()).SequenceEqual(formulas) || !formulaHeaders.SequenceEqual(formulas))
+                throw new Exception("XLSX did not preserve formula-like headers and values as text.");
+            using (var document = SpreadsheetDocument.Open(formulaWorkbook, false))
+            {
+                var cells = document.WorkbookPart!.WorksheetParts.Single().Worksheet.Descendants<Cell>().ToArray();
+                if (cells.Any(cell => cell.CellFormula is not null || cell.DataType?.Value != CellValues.InlineString))
+                    throw new Exception("XLSX formula-like data is not an inert text cell.");
+            }
+
+            void PackageFixture(string file, string name)
+            {
+                using var model = new Microsoft.SqlServer.Dac.Model.TSqlModel(Microsoft.SqlServer.Dac.Model.SqlServerVersion.Sql160, new Microsoft.SqlServer.Dac.Model.TSqlModelOptions());
+                model.AddObjects($"CREATE TABLE [dbo].[{name}] ([Id] INT NOT NULL);");
+                DacPackageExtensions.BuildPackage(file, model, new PackageMetadata { Name = name, Version = "1.0.0" });
+            }
+            string dacpac = Path.Combine(directory, "selected.dacpac"), alternate = Path.Combine(directory, "alternate.dacpac");
+            PackageFixture(dacpac, "Approved"); PackageFixture(alternate, "Alternate");
+            using (var snapshot = await DacSnapshot.Load(dacpac))
+            {
+                string approvedHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(dacpac)));
+                File.Copy(alternate, dacpac, overwrite: true);
+                if (snapshot.Hash != approvedHash || snapshot.Package.Name != "Approved")
+                    throw new Exception("DACPAC snapshot changed after pathname replacement.");
+                bool rejected = false;
+                try { using var changed = await DacSnapshot.Load(dacpac, approvedHash); }
+                catch (InvalidOperationException) { rejected = true; }
+                if (!rejected) throw new Exception("DACPAC publish accepted bytes that differ from the approved hash.");
+            }
+            Emit(new { type = "result", value = new { tests = 9, status = "passed" } });
         }
         finally
         {
@@ -231,12 +274,39 @@ internal static class Program
         if (action == "extract") { Package(temp => service.Extract(temp, database, "Quervio", new Version(1, 0))); return new { path }; }
         if (action == "bacpacExport") { Package(temp => service.ExportBacpac(temp, database)); return new { path }; }
         if (action == "bacpacImport") { string target = S("targetDatabase") is { Length: > 0 } named ? named : database; using var bac = BacPackage.Load(path); service.ImportBacpac(bac, target); return new { database = target }; }
-        using var package = DacPackage.Load(path);
+        using var snapshot = await DacSnapshot.Load(path, action == "dacPreview" ? null : S("packageHash"));
+        var package = snapshot.Package;
         var options = new DacDeployOptions { BlockOnPossibleDataLoss = true, DropObjectsNotInSource = B("dropMissing"), CreateNewDatabase = false };
-        string hash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(path)));
-        if (action == "dacPreview") return new { script = service.GenerateDeployScript(package, database, options), report = service.GenerateDeployReport(package, database, options), packageHash = hash };
-        if (S("packageHash") != hash) throw new Exception("The package changed. Generate and approve a new preview.");
+        if (action == "dacPreview") return new { script = service.GenerateDeployScript(package, database, options), report = service.GenerateDeployReport(package, database, options), packageHash = snapshot.Hash };
         service.Deploy(package, database, true, options); return new { database };
+    }
+
+    // The digest and DacFx must consume one private, read-only byte snapshot.
+    // Never reopen the publisher-controlled pathname after checking approval.
+    private sealed class DacSnapshot : IDisposable
+    {
+        private readonly MemoryStream stream;
+        public DacPackage Package { get; }
+        public string Hash { get; }
+
+        private DacSnapshot(byte[] bytes, string? approvedHash)
+        {
+            Hash = Convert.ToHexString(SHA256.HashData(bytes));
+            if (approvedHash is not null && approvedHash != Hash)
+                throw new InvalidOperationException("The package changed. Generate and approve a new preview.");
+            stream = new MemoryStream(bytes, writable: false);
+            try { Package = DacPackage.Load(stream, DacSchemaModelStorageType.Memory, FileAccess.Read); }
+            catch { stream.Dispose(); throw; }
+        }
+
+        public static async Task<DacSnapshot> Load(string path, string? approvedHash = null) =>
+            new(await File.ReadAllBytesAsync(path), approvedHash);
+
+        public void Dispose()
+        {
+            try { Package.Dispose(); }
+            finally { stream.Dispose(); }
+        }
     }
 
     private sealed class SqlTokenProvider : IUniversalAuthProvider
@@ -516,7 +586,25 @@ internal static class Program
         object value = reader.GetValue(i);
         return value switch { byte[] b => "0x" + Convert.ToHexString(b), DateTime date => date.ToString("yyyy-MM-ddTHH:mm:ss.fffffff", Invariant), DateTimeOffset date => date.ToString("O", Invariant), TimeSpan time => time.ToString("c", Invariant), bool bit => bit ? "1" : "0", IFormattable f => f.ToString(null, Invariant), _ => value.ToString() };
     }
-    private static string Csv(string? text) { string value = text is null ? @"\N" : text.StartsWith((char)92) ? ((char)92) + text : text; return "\"" + value.Replace("\"", "\"\"") + "\""; }
+    private static bool IsSpreadsheetFormula(string text)
+    {
+        int first = 0;
+        while (first < text.Length && (char.IsWhiteSpace(text[first]) || char.IsControl(text[first]) || text[first] is '\uFEFF' or '\u200B')) first++;
+        string value = text[first..];
+        if (value.Length == 0) return false;
+        if (value[0] is '+' or '-' && value.All(c => char.IsAsciiDigit(c) || ".+-eE".Contains(c)) && double.TryParse(value, NumberStyles.Float, Invariant, out _)) return false;
+        return "=+-@＝＋－＠".Contains(value[0]);
+    }
+
+    private static string Csv(string? text) => CsvField(text, escapeBackslashes: true);
+
+    private static string CsvField(string? text, bool escapeBackslashes)
+    {
+        if (text is not null && IsSpreadsheetFormula(text))
+            throw new InvalidDataException("CSV contains formula-like text in a value or column name. Export as Excel (.xlsx) to preserve it safely as text.");
+        string value = text is null ? @"\N" : escapeBackslashes && text.StartsWith((char)92) ? ((char)92) + text : text;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
 
     private static async Task<object> Export()
     {
@@ -534,7 +622,7 @@ internal static class Program
             else
             {
                 await using var writer = new StreamWriter(temp, false, new UTF8Encoding(true));
-                await writer.WriteLineAsync(string.Join(",", Enumerable.Range(0, reader.FieldCount).Select(i => "\"" + reader.GetName(i).Replace("\"", "\"\"") + "\"")));
+                await writer.WriteLineAsync(string.Join(",", Enumerable.Range(0, reader.FieldCount).Select(i => CsvField(reader.GetName(i), escapeBackslashes: false))));
                 while (await reader.ReadAsync()) { await writer.WriteLineAsync(string.Join(",", Enumerable.Range(0, reader.FieldCount).Select(i => Csv(Exact(reader, i))))); rows++; if (rows % 2000 == 0) Progress("Exporting", rows); }
             }
             File.Move(temp, path, true); return new { path, rows, nullToken = @"\N", backslashEscaping = true };
