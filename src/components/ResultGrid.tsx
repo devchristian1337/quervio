@@ -1,11 +1,11 @@
 // One Result Set in a Glide Data Grid. Rows live in Rust (ADR 0001): the grid
-// fetches 200-row blocks as they scroll into view. It is mounted afresh for
-// every Execution (keyed by run), so nothing cached outlives its rows.
+// fetches 200-row blocks as they scroll into view. A new Execution reuses the
+// grid and resets it before drawing, so nothing cached outlives its rows.
 //
 // The look follows the app theme: quiet headers with a sort arrow, the sorted
 // column tinted, numbers right-aligned, horizontal rules only, and a footer
 // with the row count. Sorting happens in Rust over every row.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CompactSelection,
   DataEditor,
@@ -34,14 +34,13 @@ import {
 import { ValueViewer } from "@/components/ValueViewer";
 import { api, errorMessage, type CopyFormat, type SortDirection } from "@/lib/api";
 import { mix, withAlpha } from "@/lib/color";
-import { CellKind, decodeWindow, type Cell } from "@/lib/results";
+import { CellKind, decodeWindow, firstBlock, forgetFirstBlock, ROW_BLOCK as BLOCK, type Cell } from "@/lib/results";
 import { displayCellText, mergeColumnWidths, minimumColumnWidths, SORT_ZONE, type MeasureGridText } from "@/lib/result-column-widths";
 import type { Palette } from "@/lib/themes";
 import { useTheme } from "@/lib/use-theme";
 import type { ResultSetSummary } from "@/stores/queries";
 import { useSettings, type Density } from "@/stores/settings";
 
-const BLOCK = 200;
 // The app's bundled faces (src/index.css): Inter, or JetBrains Mono on request.
 const MONO = "'JetBrains Mono', 'Cascadia Code', Consolas, monospace";
 const SANS = "Inter, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif";
@@ -173,16 +172,25 @@ type Sort = { column: number; direction: SortDirection } | null;
 
 interface Props {
   tabId: string;
+  /** The Execution the Result Set belongs to (QueryTab.runId). */
+  runId: number;
   set: ResultSetSummary;
 }
 
-export default function ResultGrid({ tabId, set }: Props) {
+/** The blocks a grid starts a run with: the first one if it was read before the output was shown. */
+function startingBlocks(tabId: string, runId: number, index: number) {
+  const rows = firstBlock(tabId, runId, index);
+  return new Map<number, Cell[][]>(rows ? [[0, rows]] : []);
+}
+
+export default function ResultGrid({ tabId, runId, set }: Props) {
   const theme = useTheme();
   const { density, monospace } = useSettings((s) => s.settings.results);
   const p = theme.palette;
   const fontsReady = useFontsReady();
   const gridRef = useRef<DataEditorRef>(null);
-  const blocks = useRef(new Map<number, Cell[][]>());
+  const [initialBlocks] = useState(() => startingBlocks(tabId, runId, set.index));
+  const blocks = useRef(initialBlocks);
   const pending = useRef(new Set<number>());
   const [selection, setSelection] = useState<GridSelection>(emptySelection);
   const [widths, setWidths] = useState<Record<number, number>>({});
@@ -228,8 +236,25 @@ export default function ResultGrid({ tabId, set }: Props) {
     [measuredWidths, headerWidths],
   );
 
+  // A new Execution's rows, widths and sort replace the last run's before the
+  // frame is drawn: the grid stays, so nothing blinks out in between.
+  const shownRun = useRef(runId);
+  useLayoutEffect(() => {
+    if (shownRun.current === runId) return;
+    shownRun.current = runId;
+    blocks.current = startingBlocks(tabId, runId, set.index);
+    pending.current = new Set();
+    setSelection(emptySelection);
+    setWidths({});
+    setViewer(null);
+    setSort(null);
+    setOrder((value) => value + 1);
+    setMeasuredWidths(minimumColumnWidths(set.columns, set.kinds, [...blocks.current.values()].flat(), base.cellHorizontalPadding!, measure));
+    gridRef.current?.scrollTo(0, 0, "both", 0, 0, { hAlign: "start", vAlign: "start" });
+  }, [runId, tabId, set.index, set.columns, set.kinds, base.cellHorizontalPadding, measure]);
+
   // Density, typeface or finished font loading changes the text's real width.
-  useEffect(() => {
+  useLayoutEffect(() => {
     setMeasuredWidths(minimumColumnWidths(set.columns, set.kinds, [...blocks.current.values()].flat(), base.cellHorizontalPadding!, measure));
   }, [set.columns, set.kinds, base.cellHorizontalPadding, measure]);
 
@@ -250,12 +275,16 @@ export default function ResultGrid({ tabId, set }: Props) {
 
   const fetchBlock = useCallback(
     async (block: number) => {
-      if (pending.current.has(block)) return;
-      pending.current.add(block);
+      // A run or sort that starts meanwhile replaces both: the rows are then stale.
+      const target = blocks.current;
+      const inFlight = pending.current;
+      if (inFlight.has(block)) return;
+      inFlight.add(block);
       try {
         const buffer = await api.resultRows(tabId, set.index, block * BLOCK, BLOCK);
+        if (blocks.current !== target) return;
         const rows = decodeWindow(buffer);
-        blocks.current.set(block, rows);
+        target.set(block, rows);
         // Include every fetched row, even in later blocks. Manual resizing
         // can add room, but may never clip a header or a loaded cell's text.
         const required = minimumColumnWidths(set.columns, set.kinds, rows, base.cellHorizontalPadding!, measure);
@@ -268,7 +297,7 @@ export default function ResultGrid({ tabId, set }: Props) {
       } catch {
         // Tab closed or re-executed meanwhile; the next draw asks again.
       } finally {
-        pending.current.delete(block);
+        inFlight.delete(block);
       }
     },
     [tabId, set.index, set.columns, set.kinds, base.cellHorizontalPadding, measure],
@@ -316,7 +345,9 @@ export default function ResultGrid({ tabId, set }: Props) {
           : null;
     try {
       await api.resultSort(tabId, set.index, next?.column ?? null, next?.direction ?? "ascending");
-      blocks.current.clear();
+      forgetFirstBlock(tabId, set.index);
+      blocks.current = new Map();
+      pending.current = new Set();
       setSort(next);
       setOrder((value) => value + 1);
     } catch (error) {
@@ -502,7 +533,8 @@ export default function ResultGrid({ tabId, set }: Props) {
               className="rounded px-1.5 py-0.5 text-foreground hover:bg-accent"
               onClick={() => {
                 void api.resultSort(tabId, set.index, null, "ascending").then(() => {
-                  blocks.current.clear();
+                  blocks.current = new Map();
+                  pending.current = new Set();
                   setSort(null);
                   setOrder((value) => value + 1);
                 });

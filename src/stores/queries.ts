@@ -10,6 +10,7 @@ import { executeOptions, useSettings } from "@/stores/settings";
 import type { ColumnKind, ExecutionEvent, Outcome } from "@/lib/execution";
 import { useSqlcmdConfirmation } from "@/stores/sqlcmd";
 import {invalidateCatalog} from "@/lib/metadata-events";
+import { decodeWindow, forgetFirstBlocks, rememberFirstBlock, ROW_BLOCK } from "@/lib/results";
 
 export interface MessageLine {
   text: string;
@@ -144,6 +145,22 @@ async function endTransactions(tabs: QueryTab[], commit: boolean) {
 /** How long an Execution runs before the UI shows it running. */
 const LONG_RUN_MS = 300;
 
+/** Reads the first rows of each Result Set of a quick Execution for the run about to be shown. */
+async function readFirstBlocks(id: string, sets: ResultSetSummary[]) {
+  const tab = useQueries.getState().tabs.find((t) => t.id === id);
+  if (!tab) return;
+  await Promise.all(
+    sets.filter((set) => set.rows > 0).map(async (set) => {
+      try {
+        const rows = decodeWindow(await api.resultRows(id, set.index, 0, ROW_BLOCK));
+        rememberFirstBlock(id, tab.runId + 1, set.index, rows);
+      } catch {
+        // The grid reads them itself.
+      }
+    }),
+  );
+}
+
 export const useQueries = create<QueriesState>((set, get) => {
   const patch = (id: string, change: Partial<QueryTab> | ((tab: QueryTab) => Partial<QueryTab>)) =>
     set((s) => ({
@@ -219,6 +236,7 @@ export const useQueries = create<QueriesState>((set, get) => {
       const activeId =
         get().activeId === id ? (remaining[Math.min(index, remaining.length - 1)]?.id ?? null) : get().activeId;
       set({ tabs: remaining, activeId });
+      forgetFirstBlocks(id);
       await api.closeQuery(id);
     },
 
@@ -258,27 +276,36 @@ export const useQueries = create<QueriesState>((set, get) => {
           allowDestructive = true;
         }
       }
-      // A quick Execution goes straight from the last output to its own: that
-      // stays until this one sends something or runs past LONG_RUN_MS, and
-      // only then does the UI show it running. Executing blocks a second run
-      // from the start.
+      // A quick Execution replaces the last output in one step, with its
+      // grids' first rows already read: nothing in between is drawn. Past
+      // LONG_RUN_MS the UI shows it running and its output streams in.
+      // Executing blocks a second run from the start.
       const startedAt = Date.now();
-      let replaced = false;
-      const replaceOutput = () => {
-        if (replaced) return;
-        replaced = true;
+      // The output gathered while the last one stays on screen; null once shown.
+      let staged: Partial<QueryTab> | null = { messages: [], resultSets: [], plans: [] };
+      const output = (update: (t: QueryTab) => Partial<QueryTab>) => {
+        if (!staged) return patch(id, update);
+        const current = get().tabs.find((t) => t.id === id);
+        if (current) staged = { ...staged, ...update({ ...current, ...staged }) };
+      };
+      const show = () => {
+        if (!staged) return;
+        const shown = staged;
+        staged = null;
         // The outcome and time stay until this run's own replace them.
-        patch(id, (t) => ({ messages: [], resultSets: [], plans: [], runId: t.runId + 1, startedAt }));
+        patch(id, (t) => ({ ...shown, runId: t.runId + 1, startedAt }));
       };
       patch(id, { status: "executing", longRunning: false, error: null });
       const longRun = setTimeout(() => {
-        replaceOutput();
-        patch(id, (t) => (t.status === "executing" ? { longRunning: true, outcome: null, elapsedMs: null } : {}));
+        const finished = staged?.outcome != null;
+        show();
+        if (!finished) {
+          patch(id, (t) => (t.status === "executing" ? { longRunning: true, outcome: null, elapsedMs: null } : {}));
+        }
       }, LONG_RUN_MS);
 
       const channel = new Channel<ExecutionEvent>();
       channel.onmessage = (event) => {
-        if (event.type !== "batchStarted" && event.type !== "sessionChanged") replaceOutput();
         switch (event.type) {
           case "sessionClosed":
             patch(id,{status:"disconnected",error:event.reason,openTransactions:0});
@@ -287,13 +314,13 @@ export const useQueries = create<QueriesState>((set, get) => {
             patch(id, {server: event.server, database: event.server.database, environment: "production", metadataAvailable: !!event.connectionId, ...(event.connectionId ? {connectionId: event.connectionId} : {})});
             break;
           case "plan":
-            patch(id, (t) => ({ plans: [...(t.plans ?? []), event.xml], view: "plans" }));
+            output((t) => ({ plans: [...(t.plans ?? []), event.xml], view: "plans" }));
             break;
           case "message":
-            patch(id, (t) => ({ messages: [...t.messages, event] }));
+            output((t) => ({ messages: [...t.messages, event] }));
             break;
           case "rowsAffected":
-            patch(id, (t) => ({
+            output((t) => ({
               messages: [
                 ...t.messages,
                 { text: `(${event.count} row${event.count === 1 ? "" : "s"} affected)`, isError: false },
@@ -301,7 +328,7 @@ export const useQueries = create<QueriesState>((set, get) => {
             }));
             break;
           case "resultSetStarted":
-            patch(id, (t) => ({
+            output((t) => ({
               resultSets: [
                 ...t.resultSets,
                 {
@@ -318,14 +345,14 @@ export const useQueries = create<QueriesState>((set, get) => {
           case "resultSetRows":
           case "resultSetFinished": {
             const done = event.type === "resultSetFinished";
-            patch(id, (t) => ({
+            output((t) => ({
               resultSets: t.resultSets.map((r) => (r.index === event.index ? { ...r, rows: event.rows, done } : r)),
             }));
             break;
           }
           case "finished":
             if(event.outcome==="succeeded" && (tab.sqlcmdMode || /^\s*(CREATE|ALTER|DROP)\b/im.test(script.text))) invalidateCatalog();
-            patch(id, (t) => ({
+            output((t) => ({
               outcome: event.outcome,
               elapsedMs: event.elapsedMs,
               database: event.database,
@@ -342,13 +369,11 @@ export const useQueries = create<QueriesState>((set, get) => {
             break;
         }
       };
-
       try {
         if (sqlcmdToken) await api.sqlcmdExecute(id, sqlcmdToken, executeOptions(), channel);
         else await api.executeQuery(id, script.text, script.baseLine, { ...executeOptions(), planMode: tab.planMode ?? "none" }, allowDestructive, channel);
       } catch (error) {
-        replaceOutput();
-        patch(id, (t) => ({
+        output((t) => ({
           messages: [...t.messages, { text: errorMessage(error), isError: true }],
           outcome: "failed",
           elapsedMs: Date.now() - startedAt,
@@ -356,7 +381,8 @@ export const useQueries = create<QueriesState>((set, get) => {
         }));
       } finally {
         clearTimeout(longRun);
-        replaceOutput();
+        if (staged) await readFirstBlocks(id, staged.resultSets ?? []);
+        show();
         patch(id, (t) => ({ status: t.status === "executing" ? "ready" : t.status, longRunning: false }));
       }
     },
@@ -366,6 +392,8 @@ export const useQueries = create<QueriesState>((set, get) => {
     },
 
     useDatabase: async (id, database) => {
+      // Not while an Execution runs, even before it shows itself running.
+      if (get().tabs.find((t) => t.id === id)?.status !== "ready") return;
       try {
         const current = await api.useDatabase(id, database);
         patch(id, { database: current });

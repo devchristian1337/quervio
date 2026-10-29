@@ -15,10 +15,24 @@ vi.mock("@/lib/api", async (original) => ({
     closeQuery: vi.fn(async () => {}),
     checkScript: vi.fn(async () => ({ findings: [{ kind: "drop", target: "dbo.t", line: 1 }], uncertain: false })),
     executeQuery: vi.fn(async () => "succeeded"),
+    resultRows: vi.fn(async () => window1x1("a")),
   },
 }));
 
+// A row window as Rust encodes it (src/lib/results.ts): one row, one text cell.
+function window1x1(text: string) {
+  const bytes = new TextEncoder().encode(text);
+  const view = new DataView(new ArrayBuffer(13 + bytes.length));
+  view.setUint32(0, 1, true);
+  view.setUint32(4, 1, true);
+  view.setUint8(8, 0);
+  view.setUint32(9, bytes.length, true);
+  new Uint8Array(view.buffer).set(bytes, 13);
+  return view.buffer;
+}
+
 const { api } = await import("@/lib/api");
+const { firstBlock } = await import("@/lib/results");
 const { useConnections } = await import("@/stores/connections");
 const { useDialogs } = await import("@/stores/dialogs");
 const { useQueries } = await import("@/stores/queries");
@@ -109,7 +123,7 @@ describe("an Execution's running state", () => {
     useQueries.setState({ tabs: [], activeId: null });
   });
 
-  it("keeps the last output on screen until the new one arrives", async () => {
+  it("replaces the last output in one step when it finishes quickly", async () => {
     const id = await openTab(development);
     useQueries.setState((s) => ({ tabs: s.tabs.map((t) => ({ ...t, messages: [old] })) }));
     const run = pendingExecution();
@@ -117,10 +131,23 @@ describe("an Execution's running state", () => {
     expect(tab(id)).toMatchObject({ status: "executing", longRunning: false, messages: [old] });
 
     run.send({ type: "message", text: "new", isError: false });
-    expect(tab(id).messages).toEqual([{ type: "message", text: "new", isError: false }]);
+    run.send({ type: "resultSetStarted", index: 0, columns: [{ name: "c", kind: "text" }] });
+    run.send({ type: "resultSetFinished", index: 0, rows: 1 });
+    run.send({ type: "finished", outcome: "succeeded", elapsedMs: 5, database: "master", openTransactions: 0 });
+    expect(tab(id)).toMatchObject({ messages: [old], resultSets: [] });
+
     run.finish();
     await done;
-    expect(tab(id)).toMatchObject({ status: "ready", longRunning: false });
+    expect(tab(id)).toMatchObject({
+      status: "ready",
+      longRunning: false,
+      outcome: "succeeded",
+      messages: [{ type: "message", text: "new", isError: false }],
+      resultSets: [{ index: 0, rows: 1, done: true }],
+      view: "results",
+    });
+    // Its grid draws the first rows at once.
+    expect(firstBlock(id, tab(id).runId, 0)).toEqual([[{ kind: 0, text: "a" }]]);
   });
 
   it("shows itself running once it outlasts the threshold", async () => {

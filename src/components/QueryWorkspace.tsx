@@ -192,7 +192,9 @@ function DatabaseSelector({ tab }: { tab: QueryTab }) {
       value={current}
       onOpenChange={(open) => void load(open)}
       onValueChange={(database) => void useDatabase(tab.id, database)}
-      disabled={tab.status !== "ready" || tab.metadataAvailable === false}
+      // Disabled only once the Execution shows itself running, like the other
+      // controls: a quick one would make it blink. The store refuses a switch meanwhile.
+      disabled={tab.longRunning || (tab.status !== "ready" && tab.status !== "executing") || tab.metadataAvailable === false}
     >
       <Tip label="Current database (USE)" wrap>
         <SelectTrigger
@@ -268,6 +270,9 @@ function Toolbar({ tab }: { tab: QueryTab }) {
           // The screen's one coloured control: the brand's, never an Environment's.
           className="h-7 text-primary hover:text-primary"
           disabled={(tab.status !== "ready" && tab.status !== "executing") || executing}
+          // Keeps the focus in the editor: taking it would turn the selection
+          // to its unfocused colour for as long as the button is held.
+          onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             const script = currentScript();
             if (script) void execute(tab.id, script);
@@ -455,10 +460,11 @@ function Results({ tab }: { tab: QueryTab }) {
   return (
     <div className="flex h-full flex-col gap-1 overflow-auto p-1">
       {tab.resultSets.map((set) => (
-        <div key={`${tab.runId}:${set.index}`} className="min-h-44 flex-1 overflow-hidden rounded border">
+        // Keyed by index, not run: a new Execution reuses the grid (see ResultGrid).
+        <div key={set.index} className="min-h-44 flex-1 overflow-hidden rounded border">
           <ErrorBoundary label="The results grid">
             <Suspense fallback={<Centered>Loading grid…</Centered>}>
-              <ResultGrid tabId={tab.id} set={set} />
+              <ResultGrid tabId={tab.id} runId={tab.runId} set={set} />
             </Suspense>
           </ErrorBoundary>
         </div>
