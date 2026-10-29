@@ -65,6 +65,20 @@ function useCloseGuard() {
   }, []);
 }
 
+// The window starts hidden (tauri.conf.json), so WebView2's white page and
+// the unthemed first frame never show: it appears once the app has drawn.
+function useShowWindow() {
+  useEffect(() => {
+    // Absent in a plain browser and in the dev mock.
+    if (!(window as { __TAURI_INTERNALS__?: { metadata?: unknown } }).__TAURI_INTERNALS__?.metadata) return;
+    const appWindow = getCurrentWindow();
+    void appWindow
+      .show()
+      .then(() => appWindow.setFocus())
+      .catch(() => {});
+  }, []);
+}
+
 // Reopens last run's Query Tabs once the Saved Connections are known.
 function useRestoreTabs() {
   const loaded = useConnections((s) => s.loaded);
@@ -77,6 +91,7 @@ export default function App() {
   useAppTheme();
   useNoBrowserMenu();
   useCloseGuard();
+  useShowWindow();
   useRestoreTabs();
   useUpdateCheck();
 
