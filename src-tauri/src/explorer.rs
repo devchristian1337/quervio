@@ -39,6 +39,10 @@ impl ExplorerState {
                 if !c.server.eq_ignore_ascii_case(server) {
                     c.environment = quervio_core::connection::Environment::Production;
                     c.default_database = None;
+                    // The saved password belongs to the saved server. Without
+                    // the id, a later reconnect of the tab (an Azure database
+                    // switch) cannot send it to the server the script named.
+                    c.id.clear();
                 }
                 c
             })
@@ -373,4 +377,41 @@ pub fn tabs_save(state: State<'_, ExplorerState>, snapshot: String) -> CommandRe
     let temporary = state.tabs_path.with_extension("json.tmp");
     std::fs::write(&temporary, snapshot).map_err(message)?;
     std::fs::rename(&temporary, &state.tabs_path).map_err(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quervio_core::connection::{Encrypt, Environment};
+
+    #[test]
+    fn sqlcmd_connect_to_an_unsaved_server_cannot_reach_the_saved_password() {
+        let dir = std::env::temp_dir().join(format!("quervio-test-{}", uuid::Uuid::new_v4()));
+        let state = ExplorerState::open(&dir).unwrap();
+        let saved = state
+            .connections
+            .lock()
+            .unwrap()
+            .save(SavedConnection {
+                id: String::new(),
+                name: String::new(),
+                server: "srv01".into(),
+                authentication: Authentication::Sql {
+                    user_name: "support".into(),
+                },
+                default_database: Some("H2O".into()),
+                environment: Environment::Test,
+                encrypt: Encrypt::Mandatory,
+                trust_server_certificate: false,
+            })
+            .unwrap();
+
+        assert_eq!(state.connection_from_server("SRV01").unwrap().id, saved.id);
+        let other = state.connection_from_server("elsewhere").unwrap();
+        assert!(other.id.is_empty());
+        assert_eq!(other.environment, Environment::Production);
+        assert_eq!(state.password(&other.id, None).unwrap(), None);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
