@@ -1,12 +1,10 @@
-// Formats a script with Poor Man's T-SQL Formatter (docs/adr/0004).
+// Formats a script with sqruff, in Rust (docs/adr/0006).
 //
-// Each Batch is formatted on its own and the GO lines are kept as written:
-// the formatter would join `GO 5` to the line before, which breaks the
-// script. The result is accepted only if it splits into the same Batches
-// with the same tokens as the input, read the way SQL Server reads them, so
-// a formatter bug can change the layout but never the code.
-import "@/lib/node-global";
-import { formatSql, type FormatOptions } from "poor-mans-t-sql-formatter";
+// Each Batch is formatted on its own and the GO lines are kept as written.
+// The result is accepted only if it splits into the same Batches with the
+// same tokens as the input, read the way SQL Server reads them, so a
+// formatter bug can change the layout but never the code.
+import { api } from "@/lib/api";
 
 /** Settings > Editor > Formatting. */
 export interface FormatStyle {
@@ -16,13 +14,19 @@ export interface FormatStyle {
 
 const DEFAULT_STYLE: FormatStyle = { uppercaseKeywords: true, indent: "4" };
 
-function optionsOf(style: FormatStyle): FormatOptions {
-  return {
-    indent: style.indent === "tab" ? "	" : " ".repeat(Number(style.indent)),
-    uppercaseKeywords: style.uppercaseKeywords,
-    // Never rewrite keywords (PROC → PROCEDURE): layout and case only.
-    keywordStandardization: false,
-  };
+/** One Batch laid out, and the first line (1-based) the formatter could not parse. */
+export interface LaidOut {
+  text: string;
+  unparsedLine: number | null;
+}
+
+/** Lays out each Batch: the Rust command, or a stand-in in tests. */
+export type LayOut = (batches: string[], style: FormatStyle) => Promise<LaidOut[]>;
+
+/** A formatted script, and the first line of it that was left as written. */
+export interface Formatted {
+  text: string;
+  unparsedLine: number | null;
 }
 
 export class FormatError extends Error {}
@@ -30,52 +34,60 @@ export class FormatError extends Error {}
 const CHANGED_CODE = "Formatting would have changed the code, not just its layout; nothing was changed.";
 
 /** `script` formatted, with GO lines, Batch order and comments kept. */
-export function formatScript(script: string, style: FormatStyle = DEFAULT_STYLE): string {
-  const options = optionsOf(style);
+export async function formatScript(
+  script: string,
+  style: FormatStyle = DEFAULT_STYLE,
+  layOut: LayOut = api.formatSql,
+): Promise<Formatted> {
   const text = script.replace(/\r\n?/g, "\n");
-  // The formatter reads `//` as a line comment, which T-SQL has not: it
-  // would lay out what the Server reads as code, or the other way round.
-  if (codeTokens(text).some((token, i, all) => token.text === "/" && all[i + 1]?.text === "/" && all[i + 1].start === token.start + 1)) {
-    throw new FormatError("The script has `//`, which the formatter misreads as a comment; nothing was changed.");
-  }
   const pieces = splitOnGo(text);
-  const batches = pieces.filter((piece) => piece.kind === "batch").length;
-  let batchNumber = 0;
+  const batches = pieces.flatMap((piece) => (piece.kind === "batch" && piece.text.trim() !== "" ? [piece.text] : []));
+  const laidOut = batches.length > 0 ? await layOut(batches, style) : [];
+  let next = 0;
+  let line = 1;
+  let unparsedLine: number | null = null;
   let formatted = "";
   for (const piece of pieces) {
     if (piece.kind === "go") {
       formatted += (formatted ? "\n" : "") + piece.line;
+      line += 1;
       continue;
     }
-    batchNumber += 1;
+    const first = line;
+    line += piece.text.split("\n").length - 1;
     if (piece.text.trim() === "") continue;
-    const result = formatSql(piece.text, options);
-    if (result.errorFound) {
-      const where = batches > 1 ? `batch ${batchNumber}` : "the script";
-      throw new FormatError(`The formatter could not parse ${where}; nothing was changed.`);
-    }
+    const result = laidOut[next++];
+    if (result.unparsedLine !== null && unparsedLine === null) unparsedLine = first + result.unparsedLine - 1;
     // A blank line after each GO, as SSMS scripts usually have.
     formatted += (formatted ? "\n\n" : "") + result.text.replace(/\r\n?/g, "\n").trim();
   }
   if (text.endsWith("\n")) formatted += "\n";
 
   if (!sameScript(text, formatted)) throw new FormatError(CHANGED_CODE);
-  return formatted;
+  return { text: formatted, unparsedLine };
 }
 
 /**
  * The replacement for `document.slice(start, end)`, formatted. The
  * selection must start outside comments and strings, and the whole
- * document must still mean the same with the replacement in place.
+ * document must still mean the same with the replacement in place. The
+ * line left as written is counted in the document.
  */
-export function formatRange(document: string, start: number, end: number, style: FormatStyle = DEFAULT_STYLE): string {
+export async function formatRange(
+  document: string,
+  start: number,
+  end: number,
+  style: FormatStyle = DEFAULT_STYLE,
+  layOut: LayOut = api.formatSql,
+): Promise<Formatted> {
   const before = document.slice(0, start);
   if (stateAfter(before.replace(/\r\n?/g, "\n")).kind !== "code") {
     throw new FormatError("The selection starts inside a comment or string; format the whole document instead.");
   }
-  const formatted = formatScript(document.slice(start, end), style);
-  if (!sameScript(document, before + formatted + document.slice(end))) throw new FormatError(CHANGED_CODE);
-  return formatted;
+  const formatted = await formatScript(document.slice(start, end), style, layOut);
+  if (!sameScript(document, before + formatted.text + document.slice(end))) throw new FormatError(CHANGED_CODE);
+  const offset = before.split(/\r\n?|\n/).length - 1;
+  return { text: formatted.text, unparsedLine: formatted.unparsedLine === null ? null : formatted.unparsedLine + offset };
 }
 
 /** Whether two scripts have the same Batches, GO lines and tokens. */

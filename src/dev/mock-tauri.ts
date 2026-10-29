@@ -227,6 +227,9 @@ mockIPC(async (cmd, args) => {
     case "settings_save":
       localStorage.setItem("quervio.mock.settings", a.settings as string);
       return null;
+    // Batches come back as written: the browser has no sqruff.
+    case "format_sql":
+      return (a.batches as string[]).map((text) => ({ text, unparsedLine: null }));
     case "settings_data_dir":
       return String.raw`C:\Users\mock\AppData\Roaming\com.quervio.app`;
     case "update_check":

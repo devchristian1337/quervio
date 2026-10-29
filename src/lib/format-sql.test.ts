@@ -1,145 +1,115 @@
 import { describe, expect, it } from "vitest";
-import { FormatError, formatRange, formatScript, sameScript, sameTokens, splitOnGo } from "@/lib/format-sql";
+import { FormatError, formatRange, formatScript, sameScript, sameTokens, splitOnGo, type LayOut } from "@/lib/format-sql";
+
+// sqruff's own output is tested in crates/quervio-core/src/sql_format.rs;
+// these tests cover what the editor adds around it.
 
 const goLines = (script: string) => splitOnGo(script).filter((piece) => piece.kind === "go");
 
-/** The formatted script, or null when the formatter refuses it. */
-function formattedOrRefused(script: string): string | null {
-  try {
-    return formatScript(script);
-  } catch (error) {
-    if (error instanceof FormatError) return null;
-    throw error;
-  }
-}
+/** A stand-in for sqruff: one line per Batch, keywords in capitals. */
+const tidy: LayOut = async (batches) =>
+  batches.map((batch) => ({
+    text: batch.replace(/\s+/g, " ").trim().replace(/\b(select|from|where)\b/gi, (word) => word.toUpperCase()),
+    unparsedLine: null,
+  }));
+
+/** A stand-in that lays every Batch out as `text`. */
+const always =
+  (text: string): LayOut =>
+  async (batches) =>
+    batches.map(() => ({ text, unparsedLine: null }));
+
+const format = async (script: string, layOut: LayOut = tidy) => (await formatScript(script, undefined, layOut)).text;
 
 describe("formatScript", () => {
-  it("lays out a query in the SSMS style", () => {
-    expect(formatScript("select a.Id,b.Name from dbo.T a join dbo.U b on a.id=b.id where a.x>1 and b.y like '%a%'")).toBe(
-      [
-        "SELECT a.Id,",
-        "    b.Name",
-        "FROM dbo.T a",
-        "JOIN dbo.U b ON a.id = b.id",
-        "WHERE a.x > 1",
-        "    AND b.y LIKE '%a%'",
-      ].join("\n"),
+  it("lays out each Batch and keeps GO lines, with their count, on their own line", async () => {
+    expect(await format("create table t (x int)\ngo\nselect 1 -- one\nGO 5\nselect 2\n")).toBe(
+      "create table t (x int)\ngo\n\nSELECT 1 -- one\nGO 5\n\nSELECT 2\n",
     );
   });
 
-  it("indents procedural code", () => {
-    expect(formatScript("create procedure dbo.p @a int as begin set nocount on; select top (10) * from t with (nolock) where a=@a; end")).toBe(
-      [
-        "CREATE PROCEDURE dbo.p @a INT",
-        "AS",
-        "BEGIN",
-        "    SET NOCOUNT ON;",
-        "",
-        "    SELECT TOP (10) *",
-        "    FROM t WITH (NOLOCK)",
-        "    WHERE a = @a;",
-        "END",
-      ].join("\n"),
-    );
+  it("sends only the Batches with code, in order", async () => {
+    const seen: string[][] = [];
+    const spy: LayOut = async (batches, style) => {
+      seen.push(batches);
+      return tidy(batches, style);
+    };
+    await formatScript("select 1\ngo\n\ngo\nselect 2", undefined, spy);
+    expect(seen).toEqual([["select 1\n", "select 2"]]);
   });
 
-  it("keeps GO lines, with their count, on their own line", () => {
-    expect(formatScript("create table t (x int)\ngo\nselect 1 -- one\nGO 5\nselect 2\n")).toBe(
-      "CREATE TABLE t (x INT)\ngo\n\nSELECT 1 -- one\nGO 5\n\nSELECT 2\n",
-    );
-  });
-
-  it("does not split on GO inside strings and comments", () => {
+  it("does not split on GO inside strings and comments", async () => {
     const script = "select 'a\nGO\nb'\n/* x\ngo\n*/ select 1";
-    expect(splitOnGo(script).filter((piece) => piece.kind === "go")).toEqual([]);
-    expect(formatScript(script)).toContain("'a\nGO\nb'");
+    expect(goLines(script)).toEqual([]);
+    expect(await format(script, always(script))).toContain("'a\nGO\nb'");
   });
 
-  it("keeps strings, quoted identifiers and comments exactly", () => {
-    const script = "-- keep me   as is\nselect N'it''s  here' [Order  Name], \"x  y\" /* two  spaces */ from t";
-    const formatted = formatScript(script);
-    for (const part of ["-- keep me   as is", "N'it''s  here'", "[Order  Name]", '"x  y"', "/* two  spaces */"]) {
-      expect(formatted).toContain(part);
-    }
+  it("refuses a layout that changes the code", async () => {
+    await expect(format("select a from t where b>=1", always("SELECT a FROM t WHERE b> =1"))).rejects.toThrow(FormatError);
+    await expect(format("select 1", always("SELECT 2"))).rejects.toThrow(FormatError);
   });
 
-  it("handles T-SQL statements beyond SELECT", () => {
-    const script = [
-      "declare @t table(id int); insert @t values(1),(2);",
-      "update t set c=1 output inserted.c where id in (select id from @t);",
-      "IF OBJECT_ID('tempdb..#x') IS NOT NULL DROP TABLE #x;",
-      "WITH c AS (SELECT 1 n) MERGE INTO t USING c ON t.n=c.n WHEN MATCHED THEN UPDATE SET n=1 WHEN NOT MATCHED THEN INSERT (n) VALUES (c.n);",
-      "select $action, 0x1F, 1e3, cast(1 as decimal(10,2)), case when a>=1 then 'y' else 'n' end from t",
-    ].join("\n");
-    const formatted = formatScript(script);
-    expect(sameTokens(script, formatted)).toBe(true);
-    expect(formatted).toContain("DECLARE @t TABLE (id INT);");
-    expect(formatted).toContain("    DROP TABLE #x;");
+  it("refuses N split from its string, which would make N an alias", async () => {
+    await expect(format("select N'x'", always("SELECT N 'x'"))).rejects.toThrow(FormatError);
   });
 
-  it("is stable: formatting twice changes nothing", () => {
-    const once = formatScript("select a,b from t where x=1\nGO\nexec dbo.p @a=1, @b='x'");
-    expect(formatScript(once)).toBe(once);
+  it("never moves the end of a nested comment", async () => {
+    // As written the Server reads `2 / <comment> 1 AND 0=1`. sqruff lexes the
+    // nested comment differently and lays it out as below, where the WHERE
+    // turns into `2 / 1 OR 1=1`.
+    const script = "DELETE FROM dbo.t WHERE id = 2//* /* */\n*/1 AND 0=1 -- */ 1 OR 1=1\n";
+    const sqruff = "DELETE FROM dbo.t\nWHERE id = 2/* /* */\n*// 1 AND 0 = 1 -- */ 1 OR 1=1\n";
+    await expect(format(script, always(sqruff))).rejects.toThrow(FormatError);
   });
 
-  it("refuses a script it cannot parse and leaves it alone", () => {
-    expect(() => formatScript("select (1")).toThrow(FormatError);
-  });
-
-  it("follows the formatting settings", () => {
-    expect(formatScript("select a,b from t where x=1", { uppercaseKeywords: false, indent: "2" })).toBe(
-      ["select a,", "  b", "from t", "where x = 1"].join("\n"),
-    );
-    expect(formatScript("select a,b from t", { uppercaseKeywords: true, indent: "tab" })).toContain("\n\tb");
-  });
-
-  it("keeps CRLF input working", () => {
-    expect(formatScript("select 1\r\nGO\r\nselect 2\r\n")).toBe("SELECT 1\nGO\n\nSELECT 2\n");
-  });
-
-  it("never moves the end of a nested comment", () => {
-    // As written the Server reads `2 / <comment> 1 AND 0=1`; laid out by a
-    // formatter that sees `//` as a comment, `*/` would become `* /` and
-    // the WHERE would turn into `2 / 1 OR 1=1`.
-    expect(() => formatScript("DELETE FROM dbo.t WHERE id = 2//* /* */\n*/1 AND 0=1 -- */ 1 OR 1=1\n")).toThrow(FormatError);
-  });
-
-  it("refuses `//`, which the formatter misreads as a comment", () => {
-    expect(() => formatScript("select 4//2")).toThrow(/`\/\/`/);
-    expect(formatScript("select '//' -- a // b\n")).toContain("'//'");
-  });
-
-  it("never turns a line with more than GO into a separator", () => {
+  it("never turns a line with more than GO into a separator", async () => {
     const script = "CREATE PROCEDURE dbo.p AS SELECT 1 -- c\ngo DROP TABLE dbo.t\n";
     expect(goLines(script)).toEqual([]);
-    const formatted = formattedOrRefused(script);
-    if (formatted !== null) expect(goLines(formatted)).toEqual([]);
+    // What sqruff writes: the line keeps its other words.
+    expect(goLines(await format(script, always("CREATE PROCEDURE dbo.p AS SELECT 1 -- c\nGO DROP TABLE dbo.t")))).toEqual([]);
+    await expect(format(script, always("CREATE PROCEDURE dbo.p AS SELECT 1 -- c\nGO\nDROP TABLE dbo.t"))).rejects.toThrow(
+      FormatError,
+    );
   });
 
-  it("reads GO lines with Rust's whitespace and counts", () => {
-    // U+FEFF is not White_Space for batch.rs, so this is not a separator,
-    // and formatting must not trim it into one.
-    const bom = "CREATE PROCEDURE dbo.p AS SELECT 1\n﻿go\nDROP TABLE dbo.t\n";
-    expect(goLines(bom)).toEqual([]);
-    const formatted = formattedOrRefused(bom);
-    if (formatted !== null) expect(goLines(formatted)).toEqual([]);
-
+  it("reads GO lines with Rust's whitespace and counts", async () => {
+    // U+FEFF is not White_Space for batch.rs, so this is not a separator.
+    expect(goLines("CREATE PROCEDURE dbo.p AS SELECT 1\n﻿go\nDROP TABLE dbo.t\n")).toEqual([]);
     // Rust parses `+5` as a count, so this one is a separator, kept as written.
     expect(goLines("SELECT 1\ngo +5\nSELECT 2\n")).toEqual([{ kind: "go", line: "go +5" }]);
-    expect(formatScript("SELECT 1\ngo +5\nSELECT 2\n")).toBe("SELECT 1\ngo +5\n\nSELECT 2\n");
+    expect(await format("SELECT 1\ngo +5\nSELECT 2\n")).toBe("SELECT 1\ngo +5\n\nSELECT 2\n");
     expect(goLines("SELECT 1\ngo 99999999999\n")).toEqual([]);
+  });
+
+  it("keeps CRLF input working", async () => {
+    expect(await format("select 1\r\nGO\r\nselect 2\r\n")).toBe("SELECT 1\nGO\n\nSELECT 2\n");
+  });
+
+  it("names the script line that was left as written", async () => {
+    const partly: LayOut = async (batches) =>
+      batches.map((batch, i) => ({ text: batch, unparsedLine: i === 1 ? 2 : null }));
+    const formatted = await formatScript("select 1\nGO\nselect 2\nselect (3\n", undefined, partly);
+    expect(formatted.unparsedLine).toBe(4);
   });
 });
 
 describe("formatRange", () => {
-  it("formats a selection in place", () => {
+  it("formats a selection in place", async () => {
     const document = "select 1\nselect a,b from t\n";
-    expect(formatRange(document, 9, document.length)).toBe("SELECT a,\n    b\nFROM t\n");
+    expect((await formatRange(document, 9, document.length, undefined, tidy)).text).toBe("SELECT a,b FROM t\n");
   });
 
-  it("refuses a selection that starts inside a comment", () => {
+  it("counts the line left as written in the document", async () => {
+    const document = "select 1\nselect 2\nselect (3\n";
+    const partly: LayOut = async (batches) => batches.map((batch) => ({ text: batch, unparsedLine: 2 }));
+    expect((await formatRange(document, 9, document.length, undefined, partly)).unparsedLine).toBe(3);
+  });
+
+  it("refuses a selection that starts inside a comment", async () => {
     const document = "DELETE FROM dbo.t /*\nok */ WHERE id = 1 -- */\n";
-    expect(() => formatRange(document, document.indexOf("ok"), document.length)).toThrow(/inside a comment/);
+    await expect(formatRange(document, document.indexOf("ok"), document.length, undefined, tidy)).rejects.toThrow(
+      /inside a comment/,
+    );
   });
 });
 

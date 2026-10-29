@@ -24,6 +24,7 @@ import {
   selectAll,
 } from "@/lib/editor";
 import { errorMessage } from "@/lib/api";
+import { FormatError, formatRange } from "@/lib/format-sql";
 import { toast } from "@/components/ui/basic-toast";
 import { scheduleSave } from "@/lib/session-restore";
 import { useQueries } from "@/stores/queries";
@@ -45,17 +46,20 @@ void Promise.all([
   document.fonts.load('700 14px "JetBrains Mono"'),
 ]).then(() => monaco.editor.remeasureFonts());
 
-// Format Document (Shift+Alt+F) and Format Selection (Ctrl+K Ctrl+F). The
-// formatter is large, so it loads on first use. An edit is all or nothing,
-// and Ctrl+Z undoes it.
+// Format Document (Shift+Alt+F) and Format Selection (Ctrl+K Ctrl+F), laid
+// out by sqruff in Rust. An edit is all or nothing, and Ctrl+Z undoes it.
 async function formatEdits(model: monaco.editor.ITextModel, range: monaco.IRange): Promise<monaco.languages.TextEdit[]> {
-  const { formatRange, FormatError } = await import("@/lib/format-sql");
   try {
     // The whole document goes along, so a selection is checked in context.
     const start = model.getOffsetAt({ lineNumber: range.startLineNumber, column: range.startColumn });
     const end = model.getOffsetAt({ lineNumber: range.endLineNumber, column: range.endColumn });
-    const formatted = formatRange(model.getValue(), start, end, useSettings.getState().settings.formatting);
-    return formatted === model.getValueInRange(range) ? [] : [{ range, text: formatted }];
+    const formatted = await formatRange(model.getValue(), start, end, useSettings.getState().settings.formatting);
+    if (formatted.unparsedLine !== null) {
+      toast.info(`Line ${formatted.unparsedLine} was left as written`, {
+        description: "The formatter could not read the statement there; the rest is formatted.",
+      });
+    }
+    return formatted.text === model.getValueInRange(range) ? [] : [{ range, text: formatted.text }];
   } catch (error) {
     toast.error("Could not format", {
       description: error instanceof FormatError ? error.message : errorMessage(error),

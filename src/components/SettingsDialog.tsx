@@ -396,7 +396,7 @@ function EditorSection() {
       </Row>
 
       <h4 className="mt-8 mb-1 text-sm font-semibold">Formatting</h4>
-      <p className="mb-2 text-xs text-muted-foreground">Format Document and Format Selection (Poor Man's T-SQL Formatter).</p>
+      <p className="mb-2 text-xs text-muted-foreground">Format Document and Format Selection (sqruff).</p>
       <Row label="Uppercase keywords" help="SELECT, FROM, WHERE… in capitals.">
         <Switch
           checked={formatting.uppercaseKeywords}
@@ -698,7 +698,7 @@ const LICENSES: [string, string][] = [
   ["React", "MIT"],
   ["Monaco Editor", "MIT"],
   ["Glide Data Grid", "MIT"],
-  ["Poor Man's T-SQL Formatter", "AGPL-3.0"],
+  ["sqruff", "Apache-2.0"],
   ["Radix UI and shadcn/ui", "MIT"],
   ["Tailwind CSS", "MIT"],
   ["Motion", "MIT"],

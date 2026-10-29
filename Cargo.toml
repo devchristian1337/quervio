@@ -20,6 +20,8 @@ tempfile = "3"
 encoding_rs = "0.8"
 roxmltree = "0.21"
 base64 = "0.23"
+# Pinned exactly: 0.x API, see docs/adr/0006-formatter-sqruff.md
+sqruff-lib = "=0.43.0"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
