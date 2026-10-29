@@ -97,14 +97,18 @@ export function SettingsDialog() {
             </Button>
           </div>
         </nav>
-        <ScrollFade className="min-w-0 flex-1 px-8 py-6">
-          {section === "appearance" && <AppearanceSection />}
-          {section === "editor" && <EditorSection />}
-          {section === "results" && <ResultsSection />}
-          {section === "query" && <QuerySection />}
-          {section === "shortcuts" && <ShortcutsSection />}
-          {section === "about" && <AboutSection />}
-        </ScrollFade>
+        {section === "shortcuts" ? (
+          // Lays out its own scroll, under a keyboard that stays in view.
+          <ShortcutsSection />
+        ) : (
+          <ScrollFade className="min-w-0 flex-1 px-8 py-6">
+            {section === "appearance" && <AppearanceSection />}
+            {section === "editor" && <EditorSection />}
+            {section === "results" && <ResultsSection />}
+            {section === "query" && <QuerySection />}
+            {section === "about" && <AboutSection />}
+          </ScrollFade>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -182,7 +186,8 @@ function AppearanceSection() {
   return (
     <>
       <Heading title="Appearance" description="Colours of the whole app: panels, SQL editor and results grid." />
-      <div className="grid grid-cols-3 gap-3">
+      {/* A group, so the scroll fade shrinks and blurs card by card, not the whole grid. */}
+      <div role="group" aria-label="Themes" className="grid grid-cols-3 gap-3">
         <ThemeCard
           name="System"
           // Short enough for the narrowest card, like "Dark · Mica" beside it. Another
@@ -454,23 +459,24 @@ function ShortcutsSection() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const groups = [...new Set(COMMANDS.map((command) => command.group))];
   return (
-    <>
-      <div className="flex items-start justify-between gap-4">
-        <Heading
-          title="Shortcuts"
-          description="Click + to record a new key combination; Esc cancels. Editing keys such as Ctrl+K Ctrl+C stay as in SSMS."
-        />
-        <Button
-          variant="outline"
-          className="shrink-0"
-          disabled={Object.keys(shortcuts).length === 0}
-          onClick={() => resetShortcuts()}
-        >
-          <RotateCcw /> Reset all
-        </Button>
-      </div>
-      {/* Stays in view while the list scrolls, so every row can light it. */}
-      <div className="sticky -top-6 z-10 -mx-8 mb-4 bg-background px-8 pt-6 pb-3 -mt-6">
+    <div className="flex min-w-0 flex-1 flex-col">
+      {/* Outside the scroll, so every row can light it: a sticky keyboard in
+          the scroll would be faded and blurred as if it scrolled past the edge. */}
+      <div className="shrink-0 px-8 pt-6 pb-4">
+        <div className="flex items-start justify-between gap-4">
+          <Heading
+            title="Shortcuts"
+            description="Click + to record a new key combination; Esc cancels. Editing keys such as Ctrl+K Ctrl+C stay as in SSMS."
+          />
+          <Button
+            variant="outline"
+            className="shrink-0"
+            disabled={Object.keys(shortcuts).length === 0}
+            onClick={() => resetShortcuts()}
+          >
+            <RotateCcw /> Reset all
+          </Button>
+        </div>
         {/* Split on a "+" that has a key after it, so Ctrl++ (the + key) keeps its "+". */}
         <GlowingKeyboard highlight={preview?.shortcut.split(/\+(?=.)/) ?? []} />
         <p className="mt-2 h-5 text-xs text-muted-foreground">
@@ -485,17 +491,21 @@ function ShortcutsSection() {
         </p>
       </div>
       {/* The keys stay lit over the gaps between rows and groups, until the pointer leaves the list. */}
-      <div onMouseLeave={() => setPreview((current) => (current?.recording ? current : null))}>
-      {groups.map((group) => (
-        <div key={group} className="mb-6">
-          <h4 className="mb-1 text-xs font-medium text-muted-foreground">{group}</h4>
-          {COMMANDS.filter((command) => command.group === group).map((command) => (
-            <ShortcutRow key={command.id} command={command} onPreview={setPreview} />
-          ))}
-        </div>
-      ))}
-      </div>
-    </>
+      <ScrollFade
+        className="min-h-0 flex-1 px-8 pb-6"
+        onMouseLeave={() => setPreview((current) => (current?.recording ? current : null))}
+      >
+        {/* Groups, so the scroll fade shrinks and blurs row by row, not a whole group. */}
+        {groups.map((group) => (
+          <div key={group} role="group" aria-label={group} className="mb-6">
+            <h4 className="mb-1 text-xs font-medium text-muted-foreground">{group}</h4>
+            {COMMANDS.filter((command) => command.group === group).map((command) => (
+              <ShortcutRow key={command.id} command={command} onPreview={setPreview} />
+            ))}
+          </div>
+        ))}
+      </ScrollFade>
+    </div>
   );
 }
 
