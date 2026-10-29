@@ -85,6 +85,12 @@ impl SecretStore for DpapiSecretStore {
     }
 }
 
+/// Decrypts a DPAPI blob another app wrote for the current Windows user
+/// without entropy, such as a password SSMS saved.
+pub fn unprotect_for_current_user(encrypted: &[u8]) -> Result<Vec<u8>> {
+    dpapi::unprotect_with(encrypted, &[])
+}
+
 fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -157,15 +163,21 @@ mod dpapi {
     }
 
     pub fn unprotect(encrypted: &[u8]) -> Result<Vec<u8>> {
+        unprotect_with(encrypted, ENTROPY)
+    }
+
+    /// Decrypts a blob written with the given entropy; empty for none.
+    pub fn unprotect_with(encrypted: &[u8], entropy: &[u8]) -> Result<Vec<u8>> {
         let input = blob(encrypted);
-        let entropy = blob(ENTROPY);
+        let entropy_blob = blob(entropy);
+        let entropy = if entropy.is_empty() { ptr::null() } else { &raw const entropy_blob };
         let mut output = CRYPT_INTEGER_BLOB::default();
         // SAFETY: as in `protect`.
         let ok = unsafe {
             CryptUnprotectData(
                 &input,
                 ptr::null_mut(),
-                &entropy,
+                entropy,
                 ptr::null(),
                 ptr::null(),
                 CRYPTPROTECT_UI_FORBIDDEN,
@@ -191,6 +203,10 @@ mod dpapi {
     }
 
     pub fn unprotect(_: &[u8]) -> Result<Vec<u8>> {
+        Err(Error::Secrets("DPAPI needs Windows".into()))
+    }
+
+    pub fn unprotect_with(_: &[u8], _: &[u8]) -> Result<Vec<u8>> {
         Err(Error::Secrets("DPAPI needs Windows".into()))
     }
 }

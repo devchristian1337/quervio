@@ -7,6 +7,7 @@ import {
   Filter,
   Folder,
   FunctionSquare,
+  Import,
   KeyRound,
   ListTree,
   Loader2,
@@ -41,7 +42,7 @@ import { contextOf, isFilterable, serverKey, useExplorer, type TreeNode } from "
 import { useQueries } from "@/stores/queries";
 import { openQueryFromContext } from "@/lib/shortcuts";
 import { useShortcutLabel } from "@/lib/commands";
-import { useConnectDialog, useDialogs, useSettingsDialog } from "@/stores/dialogs";
+import { useConnectDialog, useDialogs, useSettingsDialog, useSsmsImportDialog } from "@/stores/dialogs";
 import { useWorkbench } from "@/stores/workbench";
 import { BUILTIN_TEMPLATES } from "@/stores/templates";
 
@@ -58,6 +59,7 @@ export function ObjectExplorer() {
   const settingsKey = useShortcutLabel("settings");
   const newQueryKey = useShortcutLabel("newQuery");
   const dialog = useConnectDialog();
+  const showImport = useSsmsImportDialog((s) => s.show);
   const treeRef = useRef<HTMLDivElement>(null);
   useScrollFade(treeRef);
 
@@ -183,6 +185,11 @@ export function ObjectExplorer() {
             <SquarePen />
           </Button>
         </Tip>
+        <Tip label="Import from SSMS">
+          <Button variant="ghost" size="icon" className="size-7" aria-label="Import from SSMS" onClick={() => showImport()}>
+            <Import />
+          </Button>
+        </Tip>
         <Tip label="New connection">
           <Button
             variant="ghost"
@@ -215,6 +222,9 @@ export function ObjectExplorer() {
             <p>No saved connections yet.</p>
             <Button size="sm" variant="outline" onClick={() => dialog.show()}>
               <Plus /> New connection
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => showImport()}>
+              <Import /> Import from SSMS
             </Button>
           </div>
         )}

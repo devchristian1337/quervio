@@ -2947,6 +2947,7 @@ dependencies = [
 name = "quervio-core"
 version = "0.1.13"
 dependencies = [
+ "base64 0.23.1",
  "encoding_rs",
  "mssql-tds",
  "roxmltree",

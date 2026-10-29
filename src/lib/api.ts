@@ -33,6 +33,25 @@ export interface SavedConnection {
   trustServerCertificate: boolean;
 }
 
+/** A connection SSMS knows (crates/quervio-core/src/ssms.rs), to import. */
+export interface SsmsConnection {
+  id: string;
+  /** The registered server's name; empty for a history entry. */
+  name: string;
+  /** The registered server's groups, outermost first. */
+  groups: string[];
+  server: string;
+  authentication: Authentication;
+  defaultDatabase: string | null;
+  encrypt: Encrypt;
+  trustServerCertificate: boolean;
+  /** Milliseconds since the Unix epoch. */
+  lastUsed: number | null;
+  source: "registered" | "history";
+  ssmsVersion: string | null;
+  hasPassword: boolean;
+}
+
 export interface ServerInfo {
   serverName: string;
   version: string;
@@ -60,6 +79,10 @@ export const api = {
   saveConnection: (connection: SavedConnection, password: string | null) =>
     invoke<SavedConnection>("save_connection", { connection, password }),
   deleteConnection: (id: string) => invoke<void>("delete_connection", { id }),
+  /** What SSMS knows on this PC, or the registered servers of an exported .regsrvr file. */
+  ssmsConnections: (file: string | null) => invoke<SsmsConnection[]>("ssms_connections", { file }),
+  ssmsImport: (file: string | null, picks: { id: string; environment: Environment }[]) =>
+    invoke<SavedConnection[]>("ssms_import", { file, picks }),
   testConnection: (connection: SavedConnection, password: string | null) =>
     invoke<ServerInfo>("test_connection", { connection, password }),
   connectionDatabases: (connection: SavedConnection, password: string | null) =>
