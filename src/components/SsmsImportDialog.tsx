@@ -19,39 +19,18 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/interfaces-select";
 import { ScrollFade } from "@/components/ui/scroll-fade";
-import { api, errorMessage, type Authentication, type Environment, type SavedConnection, type SsmsConnection } from "@/lib/api";
+import { api, errorMessage, type Authentication, type Environment, type SsmsConnection } from "@/lib/api";
+import { matchSaved, type ImportStatus } from "@/lib/ssms-import";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
 import { useSsmsImportDialog } from "@/stores/dialogs";
-
-/** The same server and login: SSMS and Quervio describe it alike. */
-function loginKey(server: string, authentication: Authentication) {
-  const login = authentication.kind === "sql" ? `sql:${authentication.userName.toLowerCase()}` : authentication.kind;
-  return `${server.trim().toLowerCase()}|${login}`;
-}
 
 function loginLabel(authentication: Authentication) {
   return authentication.kind === "sql" ? authentication.userName || "SQL login" : authentication.kind === "windows" ? "Windows" : "Entra ID";
 }
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
-
-/**
- * What importing does with an SSMS connection: create it, move the Saved
- * Connection Quervio already has for it into its SSMS group (and name), or
- * nothing, when that one is already in place.
- */
-type Status = { kind: "new" } | { kind: "move"; existing: SavedConnection; group: string | null } | { kind: "saved" };
-
-function statusOf(connection: SsmsConnection, saved: Map<string, SavedConnection>): Status {
-  const existing = saved.get(loginKey(connection.server, connection.authentication));
-  if (!existing) return { kind: "new" };
-  const group = connection.groups.join(" / ") || null;
-  const name = connection.name.toLowerCase() === connection.server.toLowerCase() ? "" : connection.name;
-  const placed = existing.group === group && existing.name === name;
-  return connection.source === "registered" && !placed ? { kind: "move", existing, group } : { kind: "saved" };
-}
 
 interface Section {
   label: string;
@@ -86,8 +65,9 @@ export function SsmsImportDialog() {
   const [environment, setEnvironment] = useState<Environment>("production");
   const [importing, setImporting] = useState(false);
 
-  const saved = useMemo(() => new Map(connections.map((c) => [loginKey(c.server, c.authentication), c])), [connections]);
-  const isSaved = (connection: SsmsConnection) => statusOf(connection, saved).kind === "saved";
+  const statuses = useMemo(() => matchSaved(found ?? [], connections), [found, connections]);
+  const statusOf = (connection: SsmsConnection): ImportStatus => statuses.get(connection.id) ?? { kind: "new", environment: null };
+  const isSaved = (connection: SsmsConnection) => statusOf(connection).kind === "saved";
 
   async function read(path: string | null) {
     setFile(path);
@@ -97,7 +77,8 @@ export function SsmsImportDialog() {
       const list = await api.ssmsConnections(path);
       setFound(list);
       // Everything not in Quervio yet, as a first import usually wants.
-      setPicked(new Set(list.filter((c) => statusOf(c, saved).kind !== "saved").map((c) => c.id)));
+      const listed = matchSaved(list, connections);
+      setPicked(new Set(list.filter((c) => listed.get(c.id)?.kind !== "saved").map((c) => c.id)));
     } catch (failure) {
       setFound([]);
       setError(errorMessage(failure));
@@ -134,8 +115,12 @@ export function SsmsImportDialog() {
     const picks = (found ?? [])
       .filter((c) => picked.has(c.id))
       .map((c) => {
-        const status = statusOf(c, saved);
-        return { id: c.id, environment, existing: status.kind === "move" ? status.existing.id : null };
+        const status = statusOf(c);
+        // A new one takes the Environment its name says, or the one chosen here;
+        // one already in Quervio changes Environment only when its name says so.
+        return status.kind === "move"
+          ? { id: c.id, environment: status.environment, existing: status.existing.id }
+          : { id: c.id, environment: (status.kind === "new" && status.environment) || environment, existing: null };
       });
     setImporting(true);
     try {
@@ -145,7 +130,7 @@ export function SsmsImportDialog() {
       const created = picks.length - moved;
       const plural = (n: number) => `${n} ${n === 1 ? "connection" : "connections"}`;
       toast.success(
-        [created > 0 && `Imported ${plural(created)} from SSMS`, moved > 0 && `${created > 0 ? "moved" : "Moved"} ${plural(moved)} into their groups`]
+        [created > 0 && `Imported ${plural(created)} from SSMS`, moved > 0 && `${created > 0 ? "updated" : "Updated"} ${plural(moved)}`]
           .filter(Boolean)
           .join(", "),
       );
@@ -210,7 +195,7 @@ export function SsmsImportDialog() {
                     <Row
                       key={connection.id}
                       connection={connection}
-                      status={statusOf(connection, saved)}
+                      status={statusOf(connection)}
                       picked={picked.has(connection.id)}
                       onPick={(on) => toggle([connection.id], on)}
                     />
@@ -223,7 +208,7 @@ export function SsmsImportDialog() {
 
         <DialogFooter className="items-center sm:justify-between">
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Environment</span>
+            <span className="text-muted-foreground">Environment when the name says none</span>
             <Select value={environment} onValueChange={(value) => setEnvironment(value as Environment)}>
               <SelectTrigger size="sm" className="w-40">
                 <SelectValue />
@@ -260,7 +245,7 @@ function Row({
   onPick,
 }: {
   connection: SsmsConnection;
-  status: Status;
+  status: ImportStatus;
   picked: boolean;
   onPick: (on: boolean) => void;
 }) {
@@ -282,14 +267,29 @@ function Row({
         <span className="shrink-0 text-xs text-muted-foreground">Already in Quervio</span>
       ) : status.kind === "move" ? (
         <span className="shrink-0 text-xs text-muted-foreground">
-          In Quervio · {status.group ? `moves to ${status.group}` : "takes this name"}
+          In Quervio ·{" "}
+          {[
+            status.existing.group !== status.group
+              ? status.group
+                ? `moves to ${status.group}`
+                : "moves out of its group"
+              : status.existing.name !== status.name && `renamed from ${status.existing.name || status.existing.server}`,
+            status.environment && `becomes ${ENVIRONMENTS[status.environment].label}`,
+          ]
+            .filter(Boolean)
+            .join(", ")}
         </span>
       ) : (
-        connection.hasPassword && (
-          <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-            <KeyRound className="size-3.5" /> Password
+        (status.kind === "new" && status.environment) || connection.hasPassword ? (
+          <span className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+            {status.kind === "new" && status.environment && <span>{ENVIRONMENTS[status.environment].label}</span>}
+            {connection.hasPassword && (
+              <span className="flex items-center gap-1">
+                <KeyRound className="size-3.5" /> Password
+              </span>
+            )}
           </span>
-        )
+        ) : null
       )}
     </label>
   );
