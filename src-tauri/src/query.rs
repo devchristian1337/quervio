@@ -34,6 +34,8 @@ pub struct QueryState {
 /// Characters of each cell sent to the grid; the value viewer fetches the rest.
 const PREVIEW_CHARS: usize = 500;
 
+const GONE: &str = "that result set no longer exists";
+
 /// Result data stays in Rust; only the local output path crosses the webview.
 #[tauri::command]
 pub async fn result_export_file(
@@ -485,8 +487,27 @@ impl QueryState {
     ) -> CommandResult<T> {
         let results = self.results(tab_id);
         let sets = results.read().unwrap();
-        let set = sets.get(set).ok_or("that result set no longer exists")?;
+        let set = sets.get(set).ok_or(GONE)?;
         Ok(read(set))
+    }
+
+    /// `with_set` on a blocking thread, for reads that walk a whole Result
+    /// Set (a copy, an export), so they hold up neither the window nor the
+    /// async runtime.
+    async fn read_set<T: Send + 'static>(
+        &self,
+        tab_id: &str,
+        set: usize,
+        read: impl FnOnce(&quervio_core::results::ResultSet) -> T + Send + 'static,
+    ) -> CommandResult<T> {
+        let results = self.results(tab_id);
+        tokio::task::spawn_blocking(move || {
+            let sets = results.read().unwrap();
+            let set = sets.get(set).ok_or(GONE)?;
+            Ok(read(set))
+        })
+        .await
+        .map_err(message)?
     }
 }
 
@@ -724,9 +745,12 @@ pub fn query_cancel(state: State<'_, QueryState>, tab_id: String) {
     }
 }
 
+// The result commands are async because Tauri runs a sync command on the
+// main thread, where a long one freezes the window.
+
 /// A window of rows in the binary layout of `ResultSet::window`.
 #[tauri::command]
-pub fn result_rows(
+pub async fn result_rows(
     state: State<'_, QueryState>,
     tab_id: String,
     set: usize,
@@ -741,7 +765,7 @@ pub fn result_rows(
 /// Sorts a Result Set by one column, or restores the Server's order with
 /// `None`. The grid then reads its rows again.
 #[tauri::command]
-pub fn result_sort(
+pub async fn result_sort(
     state: State<'_, QueryState>,
     tab_id: String,
     set: usize,
@@ -749,17 +773,28 @@ pub fn result_sort(
     direction: SortDirection,
 ) -> CommandResult<()> {
     let results = state.results(&tab_id);
-    let mut sets = results.write().unwrap();
-    let set = sets
-        .get_mut(set)
-        .ok_or("that result set no longer exists")?;
-    set.sort(column.map(|column| (column, direction)));
-    Ok(())
+    tokio::task::spawn_blocking(move || -> CommandResult<()> {
+        // Computed under the read lock, so a later Result Set of the same
+        // Execution can still stream in; only installing it needs the write lock.
+        let order = {
+            let sets = results.read().unwrap();
+            sets.get(set)
+                .ok_or(GONE)?
+                .sorted(column.map(|column| (column, direction)))
+        };
+        let mut sets = results.write().unwrap();
+        match sets.get_mut(set).is_some_and(|set| set.apply(order)) {
+            true => Ok(()),
+            false => Err("The results changed while sorting; sort again.".into()),
+        }
+    })
+    .await
+    .map_err(message)?
 }
 
 /// The full text of one cell, for the value viewer.
 #[tauri::command]
-pub fn result_cell(
+pub async fn result_cell(
     state: State<'_, QueryState>,
     tab_id: String,
     set: usize,
@@ -790,7 +825,7 @@ pub struct CopySummary {
 /// Puts a block of cells on the Windows clipboard. Written from Rust so large
 /// copies never cross into the webview and do not depend on its focus.
 #[tauri::command]
-pub fn result_copy(
+pub async fn result_copy(
     app: tauri::AppHandle,
     state: State<'_, QueryState>,
     tab_id: String,
@@ -800,7 +835,7 @@ pub fn result_copy(
     format: CopyFormat,
 ) -> CommandResult<CopySummary> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
-    let (text, summary) = state.with_set(&tab_id, set, |set| {
+    let (text, summary) = state.read_set(&tab_id, set, move |set| {
         let rows = rows.0.min(set.row_count())..rows.1.min(set.row_count());
         let columns = columns.0.min(set.columns().len())..columns.1.min(set.columns().len());
         let summary = CopySummary {
@@ -813,27 +848,29 @@ pub fn result_copy(
             CopyFormat::Markdown => set.markdown(rows, columns),
         };
         (text, summary)
-    })?;
+    })
+    .await?;
     app.clipboard().write_text(text).map_err(message)?;
     Ok(summary)
 }
 
 /// Writes a whole Result Set to `path` as a Markdown table.
 #[tauri::command]
-pub fn result_export_markdown(
+pub async fn result_export_markdown(
     state: State<'_, QueryState>,
     tab_id: String,
     set: usize,
     path: std::path::PathBuf,
 ) -> CommandResult<()> {
-    use std::io::Write;
-    let file = std::fs::File::create(&path).map_err(message)?;
-    let mut writer = std::io::BufWriter::new(file);
     state
-        .with_set(&tab_id, set, |set| {
-            set.write_markdown(&mut writer, 0..usize::MAX, 0..usize::MAX)
-        })?
-        .and_then(|()| writer.flush())
+        .read_set(&tab_id, set, move |set| {
+            use std::io::Write;
+            let file = std::fs::File::create(&path)?;
+            let mut writer = std::io::BufWriter::new(file);
+            set.write_markdown(&mut writer, 0..usize::MAX, 0..usize::MAX)?;
+            writer.flush()
+        })
+        .await?
         .map_err(message)
 }
 

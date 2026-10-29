@@ -4,6 +4,7 @@
 use mssql_tds::datatypes::column_values::{
     ColumnValues, SqlDateTime, SqlDateTime2, SqlDateTimeOffset, SqlSmallDateTime, SqlTime,
 };
+use mssql_tds::datatypes::sql_string::EncodingType;
 
 /// `SqlTime::time_nanoseconds` actually holds 100 ns ticks, whatever the
 /// column scale (see the driver decoder's `scale_time_value`).
@@ -59,12 +60,13 @@ pub fn write_value(value: &ColumnValues, out: &mut String) -> Option<()> {
             write_time(v, out);
             Ok(())
         }
-        ColumnValues::Uuid(v) => write!(out, "{}", v.hyphenated().to_string().to_uppercase()),
+        ColumnValues::Uuid(v) => {
+            let mut buffer = [0; 36];
+            out.push_str(v.hyphenated().encode_upper(&mut buffer));
+            Ok(())
+        }
         ColumnValues::Bytes(bytes) => {
-            out.push_str("0x");
-            for byte in bytes {
-                let _ = write!(out, "{byte:02X}");
-            }
+            write_hex(bytes, out);
             Ok(())
         }
         ColumnValues::Xml(v) => write!(out, "{}", v.as_string()),
@@ -75,6 +77,39 @@ pub fn write_value(value: &ColumnValues, out: &mut String) -> Option<()> {
         },
     }
     .ok()
+}
+
+/// Binary as SSMS shows it: `0x` and two uppercase hex digits per byte.
+pub(crate) fn write_hex(bytes: &[u8], out: &mut String) {
+    const DIGITS: &[u8; 16] = b"0123456789ABCDEF";
+    out.reserve(2 + bytes.len() * 2);
+    out.push_str("0x");
+    for &byte in bytes {
+        out.push(DIGITS[usize::from(byte >> 4)] as char);
+        out.push(DIGITS[usize::from(byte & 0xF)] as char);
+    }
+}
+
+/// Decodes a character value in its wire encoding straight onto `out`,
+/// without the `String` per cell that `SqlString::to_utf8_string` makes.
+/// Malformed input becomes U+FFFD instead of panicking.
+pub(crate) fn write_text(bytes: &[u8], encoding: EncodingType, out: &mut String) {
+    let Some(resolved) = encoding.resolved_encoding() else {
+        out.push_str(&String::from_utf8_lossy(bytes));
+        return;
+    };
+    match resolved.as_encoding_rs() {
+        Some(encoding) => {
+            // An encoding_rs decoder lives on the stack; ResolvedDecoder boxes one.
+            let mut decoder = encoding.new_decoder_without_bom_handling();
+            if let Some(needed) = decoder.max_utf8_buffer_length(bytes.len()) {
+                out.reserve(needed);
+            }
+            let _ = decoder.decode_to_string(bytes, out, true);
+        }
+        // The OEM code pages (CP437, CP850) have no encoding_rs codec.
+        None => out.push_str(&resolved.decode_without_bom_handling(bytes).0),
+    }
 }
 
 /// `money` and `smallmoney` are integers scaled by 10⁴; SSMS shows 4 decimals.
