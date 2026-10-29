@@ -376,16 +376,29 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
 
   const drawHeader = useCallback<DrawHeaderCallback>(
     (args, drawContent) => {
-      drawContent();
-      const { ctx, rect, columnIndex, isHovered, isSelected } = args;
+      const { ctx, rect, column, columnIndex, isHovered, isSelected, theme: headerTheme } = args;
+      // A number column's title ends where its right-aligned figures end, so
+      // its sort arrow takes the left edge instead.
+      const numeric = set.kinds[columnIndex] === "number";
+      if (numeric) {
+        ctx.save();
+        ctx.font = `${headerTheme.headerFontStyle} ${headerTheme.fontFamily}`;
+        ctx.fillStyle = isSelected ? headerTheme.textHeaderSelected : headerTheme.textHeader;
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        ctx.fillText(column.title, rect.x + rect.width - headerTheme.cellHorizontalPadding, rect.y + rect.height / 2);
+        ctx.restore();
+      } else {
+        drawContent();
+      }
       const active = sort?.column === columnIndex;
       if (!active && !isHovered) return;
-      const x = rect.x + rect.width - SORT_ZONE + (SORT_ZONE - 14) / 2;
+      const x = (numeric ? rect.x : rect.x + rect.width - SORT_ZONE) + (SORT_ZONE - 14) / 2;
       const y = rect.y + (rect.height - 14) / 2;
       const color = isSelected ? p.accentFg : active ? p.accent : withAlpha(p.muted, 0.45);
       drawArrow(ctx, x, y, color, active && sort?.direction === "descending");
     },
-    [sort, p.accent, p.accentFg, p.muted],
+    [sort, p.accent, p.accentFg, p.muted, set.kinds],
   );
 
   const block = selectedBlock(selection, set.rows, set.columns.length);
@@ -475,7 +488,11 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
               onCellActivated={([column, row]) => setViewer({ row, column })}
               onHeaderClicked={(column, event) => {
                 // The arrow sorts; the rest of the header selects the column, as in SSMS.
-                if (event.localEventX >= event.bounds.width - SORT_ZONE) {
+                const onArrow =
+                  set.kinds[column] === "number"
+                    ? event.localEventX <= SORT_ZONE
+                    : event.localEventX >= event.bounds.width - SORT_ZONE;
+                if (onArrow) {
                   event.preventDefault();
                   void sortBy(column);
                 }
@@ -572,7 +589,7 @@ function Count({ value, className }: { value: number | string; className?: strin
           initial={reduced ? { opacity: 0 } : { opacity: 0, y: "0.4em", filter: "blur(2px)" }}
           animate={{ opacity: 1, y: "0em", filter: "blur(0px)" }}
           exit={reduced ? { opacity: 0 } : { opacity: 0, y: "-0.4em", filter: "blur(2px)" }}
-          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.15, ease: "easeInOut" }}
         >
           {text}
         </motion.span>

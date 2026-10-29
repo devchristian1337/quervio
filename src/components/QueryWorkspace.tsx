@@ -53,7 +53,8 @@ export function QueryWorkspace() {
 
   return (
     <section className="flex h-full flex-col bg-background/70">
-      <TabBar />
+      {/* No strip of empty tab bar over the start screen. */}
+      {tabs.length > 0 && <TabBar />}
       {active ? (
         <>
           <Toolbar tab={active} />

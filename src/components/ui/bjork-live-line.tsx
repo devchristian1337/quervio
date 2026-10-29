@@ -287,8 +287,8 @@ function upperBound(samples: LivePoint[], value: number): number {
   return lo;
 }
 
-// Grid values at "nice" steps (1, 2, 2.5 or 5 x 10^k), strictly inside lo..hi. Prefers 4 lines.
-function gridValues(lo: number, hi: number): number[] {
+// Grid values at "nice" steps (1, 2, 2.5 or 5 x 10^k), strictly inside lo..hi. Prefers `max` lines.
+function gridValues(lo: number, hi: number, max = 4): number[] {
   const range = hi - lo;
   if (!(range > 0)) return [];
   const base = Math.floor(Math.log10(range)) - 1;
@@ -299,11 +299,11 @@ function gridValues(lo: number, hi: number): number[] {
       const first = Math.floor(lo / step) + 1;
       const last = Math.ceil(hi / step) - 1;
       const count = last - first + 1;
-      if (count < 2 || count > 4) continue;
+      if (count < 2 || count > max) continue;
       const values: number[] = [];
       for (let n = first; n <= last; n++) values.push(Number((n * step).toFixed(10)));
-      if (count === 4) return values;
-      if (fallback.length < 3) fallback = values;
+      if (count === max) return values;
+      if (fallback.length < max - 1) fallback = values;
     }
   }
   return fallback;
@@ -615,7 +615,8 @@ export function LiveLine({
     ctx.clearRect(0, 0, w, h);
 
     // Grid
-    const grid = gridValues(rLo, rHi);
+    // A short plot keeps its labels apart with one line fewer.
+    const grid = gridValues(rLo, rHi, h - PAD_TOP - PAD_BOTTOM < 72 ? 3 : 4);
     ctx.lineWidth = 1;
     ctx.strokeStyle = p.hair;
     ctx.beginPath();

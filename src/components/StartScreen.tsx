@@ -39,18 +39,26 @@ export function StartScreen() {
                 : `${connections.length} saved ${connections.length === 1 ? "connection" : "connections"}. Open a query on one.`}
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={() => showImport()}>
-            <Import /> Import from SSMS
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => showConnect()}>
-            <Plus /> New connection
-          </Button>
         </header>
 
         <section aria-labelledby="start-connections">
-          <h2 id="start-connections" className="mb-2 text-sm font-medium">
-            Connections
-          </h2>
+          {/* The actions sit on the list they add to; with no list yet, the empty
+              box below carries them, so they show once either way. */}
+          <div className="mb-2 flex items-center justify-between gap-4">
+            <h2 id="start-connections" className="text-sm font-medium">
+              Connections
+            </h2>
+            {connections.length > 0 && (
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => showImport()}>
+                  <Import /> Import from SSMS
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => showConnect()}>
+                  <Plus /> New connection
+                </Button>
+              </div>
+            )}
+          </div>
           {loaded && connections.length === 0 ? (
             <div className="flex items-center justify-between gap-4 rounded-md border border-dashed px-4 py-3">
               <span className="text-muted-foreground">No saved connections yet.</span>

@@ -55,14 +55,14 @@ export function CopyButton({ text, label, children, variant = "ghost", size, cla
         <span className="grid size-4 place-items-center" aria-hidden="true">
           <Check
             className={cn(
-              "col-start-1 row-start-1 size-4 text-primary transition-all",
-              copied ? "scale-100 opacity-100" : "scale-0 opacity-0",
+              "col-start-1 row-start-1 size-4 text-primary transition-[opacity,transform,filter] duration-250 ease-[ease-in-out] motion-reduce:transition-none",
+              copied ? "scale-100 opacity-100" : "scale-0 opacity-0 blur-[2px]",
             )}
           />
           <Copy
             className={cn(
-              "col-start-1 row-start-1 size-4 transition-all",
-              copied ? "scale-0 opacity-0" : "scale-100 opacity-100",
+              "col-start-1 row-start-1 size-4 transition-[opacity,transform,filter] duration-250 ease-[ease-in-out] motion-reduce:transition-none",
+              copied ? "scale-0 opacity-0 blur-[2px]" : "scale-100 opacity-100",
             )}
           />
         </span>

@@ -173,7 +173,8 @@ export const GlowingKeyboard = memo(({ highlight, keySize = 34, className }: Glo
         <div key={rowIndex} className="flex gap-1.5">
           {row.map((key, index) => {
             // Keys light up row by row when the keyboard first shows.
-            const delay = index * 0.03 + rowIndex * 0.06;
+            // Under 300ms in all, so the last key is not late.
+            const delay = index * 0.01 + rowIndex * 0.04;
             if (key === "arrows") return <ArrowKeys key="arrows" lit={lit} size={keySize} delay={delay} still={still} />;
             const def = key.code ? { ...key, id: nameOf(key.code, layout), label: labelOf(key.code, layout) } : key;
             return <Key key={index} def={def} lit={lit.has(def.id)} size={keySize} delay={delay} still={still} />;

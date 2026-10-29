@@ -173,8 +173,8 @@ test("inactive monitoring stops polling and preserves the selected view", async 
     };
   });
   await openTool(page, "activity");
-  await page.getByRole("combobox", { name: "Refresh", exact: true }).click();
-  await page.getByRole("option", { name: "1 second", exact: true }).click();
+  await page.getByRole("combobox", { name: "Refresh interval", exact: true }).click();
+  await page.getByRole("option", { name: "Every second", exact: true }).click();
   await expect(
     page.getByText("SELECT Id, Name FROM dbo.Customer", { exact: true }),
   ).toBeVisible();
