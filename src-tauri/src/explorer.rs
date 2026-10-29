@@ -165,6 +165,9 @@ pub fn ssms_connections(file: Option<String>) -> CommandResult<Vec<SsmsConnectio
 pub struct SsmsPick {
     id: String,
     environment: Environment,
+    /// A Saved Connection already for this server and login: it moves into
+    /// the SSMS group and takes its name, keeping the rest.
+    existing: Option<String>,
 }
 
 /// Saves the picked SSMS connections, with the passwords SSMS saved for this
@@ -181,6 +184,15 @@ pub fn ssms_import(
         let Some(connection) = found.iter().find(|c| c.id == pick.id) else {
             continue;
         };
+        if let Some(id) = pick.existing {
+            let mut store = state.connections.lock().unwrap();
+            let mut existing = store.get(&id).map_err(message)?.clone();
+            let from_ssms = connection.to_saved(existing.environment);
+            existing.group = from_ssms.group;
+            existing.name = from_ssms.name;
+            saved.push(store.save(existing).map_err(message)?);
+            continue;
+        }
         let created = state
             .connections
             .lock()
@@ -193,6 +205,17 @@ pub fn ssms_import(
         saved.push(created);
     }
     Ok(saved)
+}
+
+/// Moves connections into a group, or out of any with None. Unlike saving,
+/// it leaves their Sessions open.
+#[tauri::command]
+pub fn group_connections(
+    state: State<'_, ExplorerState>,
+    ids: Vec<String>,
+    group: Option<String>,
+) -> CommandResult<Vec<SavedConnection>> {
+    state.connections.lock().unwrap().set_group(&ids, group.as_deref()).map_err(message)
 }
 
 #[tauri::command]
@@ -442,6 +465,7 @@ mod tests {
             .save(SavedConnection {
                 id: String::new(),
                 name: String::new(),
+                group: None,
                 server: "srv01".into(),
                 authentication: Authentication::Sql {
                     user_name: "support".into(),

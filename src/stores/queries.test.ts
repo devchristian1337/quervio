@@ -40,6 +40,7 @@ const { useQueries } = await import("@/stores/queries");
 const production: SavedConnection = {
   id: "c1",
   name: "Prod",
+  group: null,
   server: "prod1",
   authentication: { kind: "sql", userName: "u" },
   defaultDatabase: null,

@@ -60,16 +60,14 @@ pub struct SsmsConnection {
 }
 
 impl SsmsConnection {
-    /// The Saved Connection to create, named after its groups and name.
+    /// The Saved Connection to create: the registered server's name, in a
+    /// group named after its SSMS groups (nested ones joined with " / ").
     pub fn to_saved(&self, environment: Environment) -> SavedConnection {
-        let name = if self.name.is_empty() || (self.name.eq_ignore_ascii_case(&self.server) && self.groups.is_empty()) {
-            String::new()
-        } else {
-            [self.groups.as_slice(), std::slice::from_ref(&self.name)].concat().join(" / ")
-        };
+        let name = if self.name.eq_ignore_ascii_case(&self.server) { String::new() } else { self.name.clone() };
         SavedConnection {
             id: String::new(),
             name,
+            group: self.group(),
             server: self.server.clone(),
             authentication: self.authentication.clone(),
             default_database: self.default_database.clone(),
@@ -77,6 +75,11 @@ impl SsmsConnection {
             encrypt: self.encrypt,
             trust_server_certificate: self.trust_server_certificate,
         }
+    }
+
+    /// The Quervio group it belongs in, if SSMS has it in one.
+    pub fn group(&self) -> Option<String> {
+        Some(self.groups.join(" / ")).filter(|group| !group.is_empty())
     }
 
     /// The saved password, decrypted for the current Windows user; None when
@@ -454,7 +457,10 @@ mod tests {
         assert_eq!(server.default_database.as_deref(), Some("H2O_BASE"));
         assert_eq!((server.encrypt, server.trust_server_certificate, server.has_password), (Encrypt::Optional, true, true));
         let saved = server.to_saved(Environment::Production);
-        assert_eq!((saved.name.as_str(), saved.server.as_str()), ("Aurelia / Aurelia [Ambulatorio]", "10.0.0.5"));
+        assert_eq!(
+            (saved.group.as_deref(), saved.name.as_str(), saved.server.as_str()),
+            (Some("Aurelia"), "Aurelia [Ambulatorio]", "10.0.0.5")
+        );
     }
 
     #[test]
@@ -470,7 +476,9 @@ mod tests {
             [("".into(), "10.0.0.9", Encrypt::Optional, false), ("Roma/Test".into(), "db1,1433", Encrypt::Strict, false)]
         );
         assert_eq!(found[0].authentication, Authentication::Windows);
-        assert_eq!(found[0].to_saved(Environment::Test).name, "Nightly");
+        let top = found[0].to_saved(Environment::Test);
+        assert_eq!((top.group, top.name.as_str()), (None, "Nightly"));
+        assert_eq!(found[1].to_saved(Environment::Test).group.as_deref(), Some("Roma / Test"));
     }
 
     #[test]

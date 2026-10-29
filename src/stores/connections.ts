@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api, type SavedConnection } from "@/lib/api";
+import { api, displayName, type SavedConnection } from "@/lib/api";
 
 interface ConnectionsState {
   connections: SavedConnection[];
@@ -7,6 +7,8 @@ interface ConnectionsState {
   load: () => Promise<void>;
   save: (connection: SavedConnection, password: string | null) => Promise<SavedConnection>;
   remove: (id: string) => Promise<void>;
+  /** Moves connections into a group, or out of any with null. */
+  setGroup: (ids: string[], group: string | null) => Promise<void>;
 }
 
 export const useConnections = create<ConnectionsState>((set, get) => ({
@@ -28,12 +30,44 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
     await api.deleteConnection(id);
     set({ connections: get().connections.filter((c) => c.id !== id) });
   },
+  setGroup: async (ids, group) => {
+    const moved = new Map((await api.groupConnections(ids, group)).map((c) => [c.id, c]));
+    set({ connections: get().connections.map((c) => moved.get(c.id) ?? c) });
+  },
 }));
+
+const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+
+export interface ConnectionGroup {
+  /** Null for the connections in no group. */
+  group: string | null;
+  connections: SavedConnection[];
+}
+
+/**
+ * Saved Connections as the Object Explorer and the start screen list them:
+ * the groups by name, then the connections in none, each by name, as in SSMS.
+ */
+export function byGroup(connections: SavedConnection[]): ConnectionGroup[] {
+  const sorted = [...connections].sort((a, b) => byName(displayName(a), displayName(b)));
+  const groups = [...new Set(sorted.flatMap((c) => (c.group ? [c.group] : [])))].sort(byName);
+  const loose = sorted.filter((c) => !c.group);
+  return [
+    ...groups.map((group) => ({ group, connections: sorted.filter((c) => c.group === group) })),
+    ...(loose.length > 0 ? [{ group: null, connections: loose }] : []),
+  ];
+}
+
+/** The names of the connection groups, sorted. */
+export function groupNames(connections: SavedConnection[]): string[] {
+  return byGroup(connections).flatMap((g) => (g.group ? [g.group] : []));
+}
 
 export function newConnection(): SavedConnection {
   return {
     id: "",
     name: "",
+    group: null,
     server: "",
     authentication: { kind: "sql", userName: "" },
     defaultDatabase: null,

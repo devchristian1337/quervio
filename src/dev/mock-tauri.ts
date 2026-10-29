@@ -8,6 +8,7 @@ import type { ExecutionEvent } from "@/lib/execution";
 const connection: SavedConnection = {
   id: "mock",
   name: "Mock server",
+  group: null,
   server: "localhost,14333",
   authentication: { kind: "sql", userName: "sa" },
   defaultDatabase: null,
@@ -27,7 +28,11 @@ const ssms: SsmsConnection[] = [
   { id: "history:localhost,14333|sql:sa", name: "", groups: [], server: "localhost,14333", authentication: { kind: "sql", userName: "sa" }, defaultDatabase: null, encrypt: "optional", trustServerCertificate: true, lastUsed: Date.now() - 86_400_000, source: "history", ssmsVersion: "21.0", hasPassword: false },
   { id: "history:10.0.3.7|sql:app", name: "", groups: [], server: "10.0.3.7", authentication: { kind: "sql", userName: "app" }, defaultDatabase: null, encrypt: "optional", trustServerCertificate: true, lastUsed: Date.now() - 40 * 86_400_000, source: "history", ssmsVersion: "20.0", hasPassword: false },
 ];
-const imported: SavedConnection[] = [];
+// One connection as Quervio 0.1.14 imported it, before groups: the import moves it into Aurelia.
+const saved: SavedConnection[] = [
+  connection,
+  { ...connection, id: "legacy", name: "Aurelia / Aurelia [Ambulatorio]", server: "10.0.1.5", environment: "test", defaultDatabase: "H2O_BASE", encrypt: "optional" },
+];
 
 const item = (name: string, extra: Partial<CatalogItem> = {}): CatalogItem => ({
   name,
@@ -137,17 +142,26 @@ mockIPC(async (cmd, args) => {
     }
     case "query_sqlcmd_prepare":return {token: "mock-sqlcmd", script: a.script, hasLocalCommands: /!!|:out|:error/i.test(String(a.script))};
     case "language_request":return {result: null};
+    // Copies, as IPC hands over: the page must not share the mock's objects.
     case "list_connections":
-      return [connection, ...imported];
+      return structuredClone(saved);
+    case "group_connections": {
+      const moved = saved.filter((c) => (a.ids as string[]).includes(c.id));
+      for (const c of moved) c.group = (a.group as string | null)?.trim() || null;
+      return structuredClone(moved);
+    }
     case "ssms_connections":
       return ssms;
     case "ssms_import":
-      for (const pick of a.picks as { id: string; environment: SavedConnection["environment"] }[]) {
+      for (const pick of a.picks as { id: string; environment: SavedConnection["environment"]; existing: string | null }[]) {
         const found = ssms.find((c) => c.id === pick.id);
         if (!found) continue;
-        imported.push({ id: crypto.randomUUID(), name: [...found.groups, found.name].filter(Boolean).join(" / "), server: found.server, authentication: found.authentication, defaultDatabase: found.defaultDatabase, environment: pick.environment, encrypt: found.encrypt, trustServerCertificate: found.trustServerCertificate });
+        const group = found.groups.join(" / ") || null;
+        const existing = saved.find((c) => c.id === pick.existing);
+        if (existing) Object.assign(existing, { group, name: found.name });
+        else saved.push({ id: crypto.randomUUID(), name: found.name, group, server: found.server, authentication: found.authentication, defaultDatabase: found.defaultDatabase, environment: pick.environment, encrypt: found.encrypt, trustServerCertificate: found.trustServerCertificate });
       }
-      return imported;
+      return structuredClone(saved);
     case "explorer_connect":
     case "test_connection":
       return server;

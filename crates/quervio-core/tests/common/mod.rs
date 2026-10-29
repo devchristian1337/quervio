@@ -46,6 +46,7 @@ pub fn saved_connection() -> SavedConnection {
     SavedConnection {
         id: "test".into(),
         name: "Docker".into(),
+        group: None,
         server: setting("QUERVIO_TEST_SERVER"),
         authentication: Authentication::Sql {
             user_name: setting("QUERVIO_TEST_USER"),

@@ -14,6 +14,10 @@ pub struct SavedConnection {
     pub id: String,
     /// Label shown in the Object Explorer; the server address when empty.
     pub name: String,
+    /// The Object Explorer folder it sits in; none at the top level. Saved
+    /// before groups existed, a connection reads as ungrouped.
+    #[serde(default)]
+    pub group: Option<String>,
     /// Address as SSMS accepts it: `host`, `host\instance`, `host,port`, `tcp:host,port`.
     pub server: String,
     pub authentication: Authentication,
@@ -103,6 +107,18 @@ impl ConnectionStore {
         Ok(connection)
     }
 
+    /// Moves connections into a group, or out of any with None, in one write.
+    pub fn set_group(&mut self, ids: &[String], group: Option<&str>) -> Result<Vec<SavedConnection>> {
+        let group = group.map(str::trim).filter(|name| !name.is_empty()).map(str::to_string);
+        let mut moved = Vec::new();
+        for connection in self.connections.iter_mut().filter(|c| ids.contains(&c.id)) {
+            connection.group = group.clone();
+            moved.push(connection.clone());
+        }
+        self.write()?;
+        Ok(moved)
+    }
+
     pub fn remove(&mut self, id: &str) -> Result<()> {
         self.connections.retain(|connection| connection.id != id);
         self.write()
@@ -134,6 +150,7 @@ mod tests {
         SavedConnection {
             id: String::new(),
             name: "Cliente Rossi".into(),
+            group: Some("Rossi".into()),
             server: r"srv01\SQL2022".into(),
             authentication: Authentication::Sql {
                 user_name: "support".into(),
@@ -186,6 +203,22 @@ mod tests {
     }
 
     #[test]
+    fn set_group_moves_connections_and_reads_old_files_as_ungrouped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.json");
+        fs::write(&path, r#"[{"id":"a","name":"","server":"s","authentication":{"kind":"windows"},"defaultDatabase":null,"environment":"test","encrypt":"mandatory","trustServerCertificate":false}]"#).unwrap();
+        let mut store = ConnectionStore::open(&path).unwrap();
+        assert_eq!(store.get("a").unwrap().group, None);
+        let other = store.save(sample()).unwrap();
+
+        let moved = store.set_group(&["a".into()], Some(" Aurelia ")).unwrap();
+        assert_eq!(moved.len(), 1);
+        assert_eq!(ConnectionStore::open(&path).unwrap().get("a").unwrap().group.as_deref(), Some("Aurelia"));
+        store.set_group(&["a".into(), other.id.clone()], Some("")).unwrap();
+        assert!(store.list().iter().all(|c| c.group.is_none()));
+    }
+
+    #[test]
     fn json_shape_is_stable_for_the_frontend() {
         let json = serde_json::to_value(SavedConnection {
             id: "1".into(),
@@ -197,6 +230,7 @@ mod tests {
             serde_json::json!({
                 "id": "1",
                 "name": "Cliente Rossi",
+                "group": "Rossi",
                 "server": r"srv01\SQL2022",
                 "authentication": { "kind": "sql", "userName": "support" },
                 "defaultDatabase": "H2O",

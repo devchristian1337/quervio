@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/flexnative-tooltip";
@@ -9,9 +10,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import type { ScriptCheck } from "@/lib/api";
 import { revealLine } from "@/lib/editor";
-import { useDialogs } from "@/stores/dialogs";
+import { useDialogs, useNamePrompt } from "@/stores/dialogs";
 
 const KIND_LABELS: Record<ScriptCheck["findings"][number]["kind"], string> = {
   updateWithoutWhere: "UPDATE without WHERE",
@@ -141,6 +143,43 @@ export function SafetyDialogs() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <NamePrompt />
     </>
+  );
+}
+
+/** A name to type, such as a connection group's (useNamePrompt). */
+function NamePrompt() {
+  const request = useNamePrompt((s) => s.request);
+  const [name, setName] = useState("");
+  useEffect(() => setName(request?.value ?? ""), [request]);
+  const trimmed = name.trim();
+  return (
+    <Dialog open={!!request} onOpenChange={(open) => !open && request?.resolve(null)}>
+      <DialogContent className="sm:max-w-md">
+        <form
+          className="contents"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (trimmed) request?.resolve(trimmed);
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{request?.title}</DialogTitle>
+            <DialogDescription>{request?.description}</DialogDescription>
+          </DialogHeader>
+          <Input autoFocus aria-label="Name" value={name} onChange={(event) => setName(event.target.value)} />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => request?.resolve(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!trimmed}>
+              {request?.confirm}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

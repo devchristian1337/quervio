@@ -118,13 +118,45 @@ export const useSettingsDialog = create<{
 export const useConnectDialog = create<{
   open: boolean;
   editing: SavedConnection | null;
-  show: (editing?: SavedConnection | null) => void;
+  /** What a new connection starts with, such as the group it was created from. */
+  preset: Partial<SavedConnection>;
+  show: (editing?: SavedConnection | null, preset?: Partial<SavedConnection>) => void;
   setOpen: (open: boolean) => void;
 }>()((set) => ({
   open: false,
   editing: null,
-  show: (editing = null) => set({ open: true, editing }),
+  preset: {},
+  show: (editing = null, preset = {}) => set({ open: true, editing, preset }),
   setOpen: (open) => set({ open }),
+}));
+
+export interface NameRequest {
+  title: string;
+  description: string;
+  value: string;
+  confirm: string;
+}
+
+/** Asks for a name, such as a new connection group's; null when cancelled. */
+export const useNamePrompt = create<{
+  request: (NameRequest & { resolve: (name: string | null) => void }) | null;
+  ask: (request: NameRequest) => Promise<string | null>;
+}>()((set, get) => ({
+  request: null,
+  ask: (request) => {
+    if (get().request) return Promise.resolve(null);
+    return new Promise((resolve) =>
+      set({
+        request: {
+          ...request,
+          resolve: (name) => {
+            set({ request: null });
+            resolve(name);
+          },
+        },
+      }),
+    );
+  },
 }));
 
 /** The Import from SSMS dialog, opened from the start screen and the Object Explorer. */

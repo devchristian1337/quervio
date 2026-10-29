@@ -25,6 +25,8 @@ export type Authentication =
 export interface SavedConnection {
   id: string;
   name: string;
+  /** The Object Explorer folder it sits in; null at the top level. */
+  group: string | null;
   server: string;
   authentication: Authentication;
   defaultDatabase: string | null;
@@ -81,8 +83,12 @@ export const api = {
   deleteConnection: (id: string) => invoke<void>("delete_connection", { id }),
   /** What SSMS knows on this PC, or the registered servers of an exported .regsrvr file. */
   ssmsConnections: (file: string | null) => invoke<SsmsConnection[]>("ssms_connections", { file }),
-  ssmsImport: (file: string | null, picks: { id: string; environment: Environment }[]) =>
+  /** Creates the picked connections; one with `existing` moves that Saved Connection into its SSMS group instead. */
+  ssmsImport: (file: string | null, picks: { id: string; environment: Environment; existing: string | null }[]) =>
     invoke<SavedConnection[]>("ssms_import", { file, picks }),
+  /** Moves connections into a group, or out of any with null, leaving their Sessions open. */
+  groupConnections: (ids: string[], group: string | null) =>
+    invoke<SavedConnection[]>("group_connections", { ids, group }),
   testConnection: (connection: SavedConnection, password: string | null) =>
     invoke<ServerInfo>("test_connection", { connection, password }),
   connectionDatabases: (connection: SavedConnection, password: string | null) =>

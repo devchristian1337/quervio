@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/interfaces-select";
 import { ScrollFade } from "@/components/ui/scroll-fade";
-import { api, errorMessage, type Authentication, type Environment, type SsmsConnection } from "@/lib/api";
+import { api, errorMessage, type Authentication, type Environment, type SavedConnection, type SsmsConnection } from "@/lib/api";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
@@ -36,6 +36,22 @@ function loginLabel(authentication: Authentication) {
 }
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+
+/**
+ * What importing does with an SSMS connection: create it, move the Saved
+ * Connection Quervio already has for it into its SSMS group (and name), or
+ * nothing, when that one is already in place.
+ */
+type Status = { kind: "new" } | { kind: "move"; existing: SavedConnection; group: string | null } | { kind: "saved" };
+
+function statusOf(connection: SsmsConnection, saved: Map<string, SavedConnection>): Status {
+  const existing = saved.get(loginKey(connection.server, connection.authentication));
+  if (!existing) return { kind: "new" };
+  const group = connection.groups.join(" / ") || null;
+  const name = connection.name.toLowerCase() === connection.server.toLowerCase() ? "" : connection.name;
+  const placed = existing.group === group && existing.name === name;
+  return connection.source === "registered" && !placed ? { kind: "move", existing, group } : { kind: "saved" };
+}
 
 interface Section {
   label: string;
@@ -70,8 +86,8 @@ export function SsmsImportDialog() {
   const [environment, setEnvironment] = useState<Environment>("production");
   const [importing, setImporting] = useState(false);
 
-  const saved = useMemo(() => new Set(connections.map((c) => loginKey(c.server, c.authentication))), [connections]);
-  const isSaved = (connection: SsmsConnection) => saved.has(loginKey(connection.server, connection.authentication));
+  const saved = useMemo(() => new Map(connections.map((c) => [loginKey(c.server, c.authentication), c])), [connections]);
+  const isSaved = (connection: SsmsConnection) => statusOf(connection, saved).kind === "saved";
 
   async function read(path: string | null) {
     setFile(path);
@@ -81,7 +97,7 @@ export function SsmsImportDialog() {
       const list = await api.ssmsConnections(path);
       setFound(list);
       // Everything not in Quervio yet, as a first import usually wants.
-      setPicked(new Set(list.filter((c) => !saved.has(loginKey(c.server, c.authentication))).map((c) => c.id)));
+      setPicked(new Set(list.filter((c) => statusOf(c, saved).kind !== "saved").map((c) => c.id)));
     } catch (failure) {
       setFound([]);
       setError(errorMessage(failure));
@@ -115,12 +131,24 @@ export function SsmsImportDialog() {
   }
 
   async function importPicked() {
-    const picks = (found ?? []).filter((c) => picked.has(c.id)).map((c) => ({ id: c.id, environment }));
+    const picks = (found ?? [])
+      .filter((c) => picked.has(c.id))
+      .map((c) => {
+        const status = statusOf(c, saved);
+        return { id: c.id, environment, existing: status.kind === "move" ? status.existing.id : null };
+      });
     setImporting(true);
     try {
-      const imported = await api.ssmsImport(file, picks);
+      await api.ssmsImport(file, picks);
       await reload();
-      toast.success(`Imported ${imported.length} ${imported.length === 1 ? "connection" : "connections"} from SSMS`);
+      const moved = picks.filter((pick) => pick.existing).length;
+      const created = picks.length - moved;
+      const plural = (n: number) => `${n} ${n === 1 ? "connection" : "connections"}`;
+      toast.success(
+        [created > 0 && `Imported ${plural(created)} from SSMS`, moved > 0 && `${created > 0 ? "moved" : "Moved"} ${plural(moved)} into their groups`]
+          .filter(Boolean)
+          .join(", "),
+      );
       setOpen(false);
     } catch (failure) {
       toast.error("Import failed", { description: errorMessage(failure) });
@@ -182,7 +210,7 @@ export function SsmsImportDialog() {
                     <Row
                       key={connection.id}
                       connection={connection}
-                      saved={isSaved(connection)}
+                      status={statusOf(connection, saved)}
                       picked={picked.has(connection.id)}
                       onPick={(on) => toggle([connection.id], on)}
                     />
@@ -227,15 +255,16 @@ export function SsmsImportDialog() {
 
 function Row({
   connection,
-  saved,
+  status,
   picked,
   onPick,
 }: {
   connection: SsmsConnection;
-  saved: boolean;
+  status: Status;
   picked: boolean;
   onPick: (on: boolean) => void;
 }) {
+  const saved = status.kind === "saved";
   const details = [
     connection.name && connection.server,
     loginLabel(connection.authentication),
@@ -251,6 +280,10 @@ function Row({
       </div>
       {saved ? (
         <span className="shrink-0 text-xs text-muted-foreground">Already in Quervio</span>
+      ) : status.kind === "move" ? (
+        <span className="shrink-0 text-xs text-muted-foreground">
+          In Quervio · {status.group ? `moves to ${status.group}` : "takes this name"}
+        </span>
       ) : (
         connection.hasPassword && (
           <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
