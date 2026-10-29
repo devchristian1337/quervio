@@ -452,7 +452,7 @@ export default function ResultGrid({ tabId, set }: Props) {
             />
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-72">
+        <ContextMenuContent className="min-w-72">
           <ContextMenuItem onSelect={() => void copy("text")}>
             Copy <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
           </ContextMenuItem>

@@ -417,7 +417,7 @@ function Messages({ tab }: { tab: QueryTab }) {
           )}
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
+      <ContextMenuContent className="min-w-48">
         <ContextMenuItem disabled={!selection} onSelect={() => void copy(selection, "selection")}>
           Copy <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
         </ContextMenuItem>

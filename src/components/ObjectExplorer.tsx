@@ -353,7 +353,7 @@ export function ObjectExplorer() {
                 </div>
               </ContextMenuTrigger>
               </Tip>
-              <ContextMenuContent className="w-48">
+              <ContextMenuContent className="min-w-48">
                 <ManagementItems node={node} />
                 <ScriptItems node={node} />
                 {contextOf(node.kind) && (
@@ -444,14 +444,15 @@ function ManagementItems({node}: {node: TreeNode}) {
   const kind = node.kind, context = contextOf(kind);
   if (!context) return null;
   const open = (tool: Parameters<ReturnType<typeof useWorkbench.getState>["open"]>[0]) => () => useWorkbench.getState().open(tool, context, {objectId: "objectId" in kind ? kind.objectId ?? undefined : undefined, schema: node.objectSchema, name: node.objectName});
-  if (kind.type === "tool") return <ContextMenuItem onSelect={open(kind.tool)}>Open</ContextMenuItem>;
+  if (kind.type === "tool") return <><ContextMenuItem onSelect={open(kind.tool)}>Open</ContextMenuItem><ContextMenuSeparator /></>;
   if (kind.type === "server") return <><ContextMenuItem onSelect={open("properties")}>Database administration…</ContextMenuItem><ContextMenuItem onSelect={open("security")}>Server security…</ContextMenuItem><ContextMenuSeparator /></>;
-  if (kind.type === "securityFolder" || kind.type === "securityList" || kind.type === "securityObject") return <><ContextMenuItem onSelect={open("security")}>Manage security…</ContextMenuItem>{kind.type === "securityObject" && kind.definition && <ContextMenuItem onSelect={() => void useQueries.getState().open(context.connectionId, context.database, {text: kind.definition, dirty: true})}>Open trigger definition</ContextMenuItem>}</>;
+  if (kind.type === "securityFolder" || kind.type === "securityList" || kind.type === "securityObject") return <><ContextMenuItem onSelect={open("security")}>Manage security…</ContextMenuItem>{kind.type === "securityObject" && kind.definition && <ContextMenuItem onSelect={() => void useQueries.getState().open(context.connectionId, context.database, {text: kind.definition, dirty: true})}>Open trigger definition</ContextMenuItem>}<ContextMenuSeparator /></>;
   if (kind.type === "database") return <><ContextMenuItem onSelect={open("properties")}>Properties…</ContextMenuItem><ContextMenuItem onSelect={open("table")}>New table…</ContextMenuItem><ContextMenuItem onSelect={open("view")}>New view…</ContextMenuItem><ContextMenuItem onSelect={open("security")}>Security…</ContextMenuItem><ContextMenuSeparator /></>;
   if (kind.type === "object") return <><ContextMenuItem onSelect={open(kind.folder === "tables" ? "table" : kind.folder === "views" ? "view" : "properties")}>{kind.folder === "tables" || kind.folder === "views" ? "Design…" : "Properties…"}</ContextMenuItem>{kind.folder === "tables" && <ContextMenuItem onSelect={open("diagram")}>Relationships…</ContextMenuItem>}<ContextMenuSeparator /></>;
   if (kind.type === "objectFolder") {
     const template = BUILTIN_TEMPLATES.find(t => t.id === ({storedProcedures: "procedure", functions: "function", databaseTriggers: "server-trigger"} as Record<string, string>)[kind.folder]);
-    return kind.folder === "tables" || kind.folder === "views" ? <ContextMenuItem onSelect={open(kind.folder === "tables" ? "table" : "view")}>New {kind.folder === "tables" ? "table" : "view"}…</ContextMenuItem> : template ? <ContextMenuItem onSelect={() => void useQueries.getState().open(context.connectionId, context.database, {text: template.body.replace(/\$\{\d+:([^}]*)\}/g, "$1"), dirty: true})}>New object script…</ContextMenuItem> : null;
+    const item = kind.folder === "tables" || kind.folder === "views" ? <ContextMenuItem onSelect={open(kind.folder === "tables" ? "table" : "view")}>New {kind.folder === "tables" ? "table" : "view"}…</ContextMenuItem> : template ? <ContextMenuItem onSelect={() => void useQueries.getState().open(context.connectionId, context.database, {text: template.body.replace(/\$\{\d+:([^}]*)\}/g, "$1"), dirty: true})}>New object script…</ContextMenuItem> : null;
+    return item && <>{item}<ContextMenuSeparator /></>;
   }
   return null;
 }

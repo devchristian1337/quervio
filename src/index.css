@@ -229,3 +229,19 @@
   border-color: currentColor !important;
   box-shadow: 0 0 14px color-mix(in oklch, currentColor 55%, transparent);
 }
+
+/* Context menus end each group of items with a separator, whatever follows.
+   One with no item before or after it, or right after another, would show
+   as a stray line, so it is hidden. */
+[data-slot="context-menu-content"] > [data-slot="context-menu-separator"]:not(:not([data-slot="context-menu-separator"]) ~ *),
+[data-slot="context-menu-content"] > [data-slot="context-menu-separator"]:not(:has(~ :not([data-slot="context-menu-separator"]))),
+[data-slot="context-menu-content"] > [data-slot="context-menu-separator"] + [data-slot="context-menu-separator"] {
+  display: none;
+}
+
+/* When some items of a menu have an icon, the others keep its room, so every
+   label starts in the same place: the item's px-2, a size-4 icon and gap-2. */
+[data-slot="context-menu-content"]:has(> [data-slot="context-menu-item"] > svg)
+  > [data-slot="context-menu-item"]:not(:has(> svg)) {
+  padding-left: 2rem;
+}
