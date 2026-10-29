@@ -90,8 +90,12 @@ export function SettingsDialog() {
               size="sm"
               className="w-full justify-start gap-2 px-2 font-normal text-muted-foreground has-[>svg]:px-2"
               onClick={() => {
+                // Nothing asks first: the toast's Undo puts every setting back.
+                const before = useSettings.getState().settings;
                 reset();
-                toast.success("Settings reset to their defaults");
+                toast.success("Settings reset to their defaults", {
+                  action: { label: "Undo", onClick: () => useSettings.getState().restore(before) },
+                });
               }}
             >
               <RotateCcw /> Reset all settings
@@ -518,11 +522,18 @@ function ShortcutsSection() {
             title="Shortcuts"
             description="Click + to record a new key combination; Esc cancels. Editing keys such as Ctrl+K Ctrl+C stay as in SSMS."
           />
+          {/* Kept clear of the dialog's close button in the corner. */}
           <Button
             variant="outline"
-            className="shrink-0"
+            className="mr-4 shrink-0"
             disabled={Object.keys(shortcuts).length === 0}
-            onClick={() => resetShortcuts()}
+            onClick={() => {
+              const before = useSettings.getState().settings;
+              resetShortcuts();
+              toast.success("Shortcuts reset to their defaults", {
+                action: { label: "Undo", onClick: () => useSettings.getState().restore(before) },
+              });
+            }}
           >
             <RotateCcw /> Reset all
           </Button>

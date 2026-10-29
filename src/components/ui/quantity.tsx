@@ -1,6 +1,6 @@
 // A stepper: minus and plus buttons that spring under the pointer, around a
 // value that slides in as it changes (after the Quantity component). Built on
-// the app's Button; the value animation is skipped under reduced motion.
+// the app's Button; nothing moves under reduced motion.
 import * as React from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { MinusIcon, PlusIcon } from "lucide-react"
@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button"
 
 const MotionButton = motion.create(Button)
 
-const buttonSpring = { type: "spring", stiffness: 400, damping: 17 } as const
+// Critically damped: the press is direct, with no bounce.
+const buttonSpring = { type: "spring", stiffness: 400, damping: 40 } as const
 
 type StepButtonProps = Omit<React.ComponentProps<typeof MotionButton>, "value">
 
@@ -26,6 +27,7 @@ export function QuantityIncrease({
   disabled,
   ...props
 }: QuantityIncreaseProps) {
+  const still = useReducedMotion() ?? false
   const isDisabled = disabled || (max !== undefined && value !== undefined && value >= max)
   return (
     <MotionButton
@@ -35,8 +37,8 @@ export function QuantityIncrease({
       aria-label="Increase"
       className={cn("cursor-pointer disabled:cursor-not-allowed disabled:opacity-50", className)}
       disabled={isDisabled}
-      whileHover={isDisabled ? undefined : { scale: 1.05 }}
-      whileTap={isDisabled ? undefined : { scale: 0.95 }}
+      whileHover={isDisabled || still ? undefined : { scale: 1.05 }}
+      whileTap={isDisabled || still ? undefined : { scale: 0.95 }}
       transition={buttonSpring}
       {...props}
     >
@@ -58,6 +60,7 @@ export function QuantityDecrease({
   disabled,
   ...props
 }: QuantityDecreaseProps) {
+  const still = useReducedMotion() ?? false
   const isDisabled = disabled || (value !== undefined && value <= min)
   return (
     <MotionButton
@@ -67,8 +70,8 @@ export function QuantityDecrease({
       aria-label="Decrease"
       className={cn("cursor-pointer disabled:cursor-not-allowed disabled:opacity-50", className)}
       disabled={isDisabled}
-      whileHover={isDisabled ? undefined : { scale: 1.05 }}
-      whileTap={isDisabled ? undefined : { scale: 0.95 }}
+      whileHover={isDisabled || still ? undefined : { scale: 1.05 }}
+      whileTap={isDisabled || still ? undefined : { scale: 0.95 }}
       transition={buttonSpring}
       {...props}
     >
@@ -87,10 +90,10 @@ export function QuantityValue({ className, children, ...props }: React.Component
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={String(children)}
-          initial={still ? false : { y: 6, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={still ? undefined : { y: -6, opacity: 0 }}
-          transition={{ duration: 0.15, ease: "easeOut" }}
+          initial={still ? false : { y: 4, opacity: 0, filter: "blur(2px)" }}
+          animate={{ y: 0, opacity: 1, filter: "blur(0px)" }}
+          exit={still ? undefined : { y: -4, opacity: 0, filter: "blur(2px)" }}
+          transition={{ duration: 0.15, ease: "easeInOut" }}
         >
           {children}
         </motion.span>

@@ -19,8 +19,14 @@ export const toaster = createToaster({
 
 type ToastType = "success" | "error" | "warning" | "info";
 
-const show = (type: ToastType) => (title: string, options: { description?: ReactNode } = {}) =>
-  toaster.create({ title, description: options.description, type });
+interface ToastOptions {
+  description?: ReactNode;
+  /** One button in the toast, such as Undo after a reset. */
+  action?: { label: string; onClick: () => void };
+}
+
+const show = (type: ToastType) => (title: string, options: ToastOptions = {}) =>
+  toaster.create({ title, description: options.description, action: options.action, type });
 
 /** Shows a notification: toast.success, toast.error, toast.warning or toast.info. */
 export const toast = {
@@ -45,7 +51,7 @@ export function Toaster() {
         {(toast) => {
           const { icon: Icon, className } = ICONS[(toast.type as ToastType) ?? "info"] ?? ICONS.info;
           return (
-            <Toast.Root className="relative h-(--height) w-96 max-w-[calc(100vw-2rem)] translate-x-(--x) translate-y-(--y) scale-(--scale) rounded-lg border bg-popover p-4 pr-10 text-popover-foreground opacity-(--opacity) shadow-lg transition-all duration-300 will-change-transform wrap-anywhere z-(--z-index) motion-reduce:transition-none">
+            <Toast.Root className="relative h-(--height) w-96 max-w-[calc(100vw-2rem)] translate-x-(--x) translate-y-(--y) scale-(--scale) rounded-lg border bg-popover p-4 pr-10 text-popover-foreground opacity-(--opacity) shadow-lg transition-all duration-350 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform wrap-anywhere z-(--z-index) motion-reduce:transition-none">
               <div className="flex items-start gap-3">
                 <Icon className={`mt-0.5 size-4 shrink-0 ${className}`} />
                 <div className="min-w-0 flex-1">
@@ -54,6 +60,11 @@ export function Toaster() {
                     <Toast.Description className="mt-1 text-sm text-muted-foreground select-text">
                       {toast.description}
                     </Toast.Description>
+                  )}
+                  {toast.action && (
+                    <Toast.ActionTrigger className="mt-2 -ml-1.5 rounded px-1.5 py-0.5 text-sm font-medium text-foreground transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+                      {toast.action.label}
+                    </Toast.ActionTrigger>
                   )}
                 </div>
               </div>

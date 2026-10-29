@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { Checkbox as CheckboxPrimitive } from 'radix-ui';
-import { motion } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
 
 import { cn } from '@/lib/utils';
 
@@ -21,6 +21,7 @@ const Checkbox = React.forwardRef<
   const [isChecked, setIsChecked] = React.useState(
     props?.checked ?? props?.defaultChecked ?? false,
   );
+  const still = useReducedMotion() ?? false;
 
   React.useEffect(() => {
     setIsChecked(props?.checked ?? props?.defaultChecked ?? false);
@@ -38,12 +39,12 @@ const Checkbox = React.forwardRef<
     >
       <motion.button
         className={cn(
-          'peer size-5 flex items-center justify-center shrink-0 rounded-sm border border-input bg-muted transition-colors duration-500 outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground data-[state=checked]:focus-visible:ring-primary-foreground/70',
+          'peer size-5 flex items-center justify-center shrink-0 rounded-sm border border-input bg-muted transition-colors duration-250 outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground data-[state=checked]:focus-visible:ring-primary-foreground/70',
           className,
         )}
         ref={ref}
-        whileTap={{ scale: 0.95 }}
-        whileHover={{ scale: 1.05 }}
+        whileTap={still ? undefined : { scale: 0.95 }}
+        whileHover={still ? undefined : { scale: 1.05 }}
       >
         <CheckboxPrimitive.Indicator forceMount asChild>
           <motion.svg
@@ -64,15 +65,15 @@ const Checkbox = React.forwardRef<
                 checked: {
                   pathLength: 1,
                   opacity: 1,
-                  transition: {
+                  transition: still ? { duration: 0 } : {
                     duration: 0.2,
-                    delay: 0.2,
+                    delay: 0.08,
                   },
                 },
                 unchecked: {
                   pathLength: 0,
                   opacity: 0,
-                  transition: {
+                  transition: still ? { duration: 0 } : {
                     duration: 0.2,
                   },
                 },

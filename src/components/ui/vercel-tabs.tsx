@@ -89,11 +89,11 @@ const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
           {/* Hover Highlight */}
           <div
             className={cn(
-              "absolute top-1 h-7 rounded-md bg-accent ease-out",
-              placed && "transition-all duration-300",
+              "absolute top-1 left-0 h-7 rounded-md bg-accent ease-[cubic-bezier(0.22,1,0.36,1)]",
+              placed && "transition-[transform,width,opacity] duration-250 motion-reduce:transition-none",
             )}
             style={{
-              left: hoverBox?.left ?? 0,
+              transform: `translateX(${hoverBox?.left ?? 0}px)`,
               width: hoverBox?.width ?? 0,
               opacity: hoveredIndex !== null ? 1 : 0,
             }}
@@ -102,10 +102,10 @@ const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
           {/* Active Indicator */}
           <div
             className={cn(
-              "absolute -bottom-px h-0.5 bg-primary ease-out",
-              placed && "transition-all duration-300",
+              "absolute -bottom-px left-0 h-0.5 bg-primary ease-[cubic-bezier(0.22,1,0.36,1)]",
+              placed && "transition-[transform,width] duration-250 motion-reduce:transition-none",
             )}
-            style={{ left: activeBox?.left ?? 0, width: activeBox?.width ?? 0 }}
+            style={{ transform: `translateX(${activeBox?.left ?? 0}px)`, width: activeBox?.width ?? 0 }}
           />
 
           {/* Tabs */}

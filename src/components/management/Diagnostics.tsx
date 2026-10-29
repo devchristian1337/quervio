@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import {
   Choice,
   DataGrid,
+  Dropdown,
   Notice,
   Operation,
   Text,
@@ -42,6 +43,14 @@ import {
   ViewTabs,
 } from "./shared";
 import { PlanViewer } from "./PlanViewer";
+
+// What the figures of a view cover, now that the tab names are short.
+const SCOPE: Record<string, string> = {
+  waits: "Since the wait statistics were last reset",
+  io: "Cumulative since the server started",
+  cpu: "SQL Server process, recent samples",
+  expensiveQueries: "Totals for the plans in the cache",
+};
 
 export function ActivityMonitor({ context }: { context: Context }) {
   const [view, setView] = useState("activity"),
@@ -69,53 +78,63 @@ export function ActivityMonitor({ context }: { context: Context }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
       <ServerHealth context={context} refreshSeconds={Number(interval)} />
-      <ViewTabs
-        label="Activity"
-        value={view}
-        onChange={setView}
-        options={[
-          ["activity", "Processes and blocking"],
-          ["waits", "Wait statistics (since last reset)"],
-          ["io", "File I/O (cumulative)"],
-          ["cpu", "SQL process CPU samples"],
-          ["expensiveQueries", "Cached query totals"],
-          ["live", "Live query statistics"],
-        ]}
-      />
-      <div className="flex flex-wrap items-end gap-3">
-        <Choice
-          label="Refresh"
-          value={interval}
-          onChange={setInterval}
+      {/* The tabs and the refresh share one row, so the first rows of the
+          processes show on the first screen; it wraps in a narrow window. */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <ViewTabs
+          label="Activity"
+          value={view}
+          onChange={setView}
           options={[
-            ["0", "Manual"],
-            ["1", "1 second"],
-            ["5", "5 seconds"],
-            ["15", "15 seconds"],
-            ["30", "30 seconds"],
+            ["activity", "Processes and blocking"],
+            ["waits", "Waits"],
+            ["io", "File I/O"],
+            ["cpu", "CPU samples"],
+            ["expensiveQueries", "Cached queries"],
+            ["live", "Live query"],
           ]}
         />
-        {view === "live" && (
+        <div className="flex items-center gap-2">
+          {SCOPE[view] && <span className="text-xs text-muted-foreground">{SCOPE[view]} ·</span>}
+          {data.updated && (
+            <span className="text-xs text-muted-foreground tabular-nums">
+              Updated {data.updated.toLocaleTimeString()}
+            </span>
+          )}
+          <Dropdown
+            aria-label="Refresh interval"
+            size="sm"
+            className="w-40"
+            value={interval}
+            onChange={setInterval}
+            options={[
+              ["0", "Manual"],
+              ["1", "Every second"],
+              ["5", "Every 5 seconds"],
+              ["15", "Every 15 seconds"],
+              ["30", "Every 30 seconds"],
+            ]}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={data.refresh}
+            disabled={data.loading}
+          >
+            {data.loading ? "Loading…" : "Refresh"}
+          </Button>
+        </div>
+      </div>
+      {view === "live" && (
+        <div className="flex">
           <Text
             label="SQL session ID"
             value={session}
             onChange={setSession}
             type="number"
           />
-        )}
-        <Button
-          variant="outline"
-          onClick={data.refresh}
-          disabled={data.loading}
-        >
-          {data.loading ? "Loading…" : "Refresh"}
-        </Button>
-        {data.updated && (
-          <span className="flex h-9 items-center text-xs text-muted-foreground">
-            Updated {data.updated.toLocaleTimeString()}
-          </span>
-        )}
-      </div>
+        </div>
+      )}
       {data.error && <Notice error>{data.error}</Notice>}
       {liveXml ? (
         <PlanViewer xml={liveXml} />
@@ -135,7 +154,7 @@ export function ActivityMonitor({ context }: { context: Context }) {
 
 // Each card rises in turn when the monitor opens, once.
 const ENTER =
-  "animate-in fade-in slide-in-from-bottom-2 duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] fill-mode-both motion-reduce:animate-none";
+  "animate-in fade-in slide-in-from-bottom-2 blur-in-[2px] duration-400 ease-[cubic-bezier(0.22,1,0.36,1)] fill-mode-both motion-reduce:animate-none";
 
 /**
  * The server and the database as they are now: CPU, memory and disk, the
@@ -250,7 +269,7 @@ function ServerHealth({
         </div>
       </ServerCard>
 
-      <ServerCard className={ENTER} style={{ animationDelay: "60ms" }}>
+      <ServerCard className={ENTER} style={{ animationDelay: "80ms" }}>
         <ServerCardHeader>
           <ServerCardTitle
             region={
@@ -290,7 +309,7 @@ function ServerHealth({
         </div>
       </ServerCard>
 
-      <ServerCard className={ENTER} style={{ animationDelay: "120ms" }}>
+      <ServerCard className={ENTER} style={{ animationDelay: "160ms" }}>
         <ServerCardHeader>
           <ServerCardTitle
             region={
@@ -320,7 +339,7 @@ function ServerHealth({
       </ServerCard>
       <ServerCard
         className={cn(ENTER, "md:col-span-2 xl:col-span-3")}
-        style={{ animationDelay: "180ms" }}
+        style={{ animationDelay: "240ms" }}
       >
         <ServerCardHeader>
           <ServerCardTitle
@@ -336,7 +355,8 @@ function ServerHealth({
         <LiveLine
           series={usage}
           window={HISTORY_WINDOW}
-          height={128}
+          // As tall as the Workload chart: the meters above carry the current values, this is their trend.
+          height={96}
           yDomain={[0, 100]}
           threshold={{ value: 90, label: "90%" }}
           formatValue={formatPercent}

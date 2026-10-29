@@ -77,6 +77,8 @@ interface SettingsState {
   setShortcut: (command: string, keys: string[] | null) => void;
   resetShortcuts: () => void;
   reset: () => void;
+  /** Puts back settings taken before a reset, for its Undo. */
+  restore: (settings: Settings) => void;
 }
 
 /**
@@ -130,6 +132,7 @@ export const useSettings = create<SettingsState>()((set, get) => {
     },
     resetShortcuts: () => commit({ ...get().settings, shortcuts: {} }),
     reset: () => commit(structuredClone(DEFAULT_SETTINGS)),
+    restore: commit,
   };
 });
 

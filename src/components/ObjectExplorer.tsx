@@ -244,15 +244,9 @@ export function ObjectExplorer() {
         )}
       >
         {loaded && connections.length === 0 && (
-          <div className="flex flex-col items-start gap-2 p-3 text-muted-foreground">
-            <p>No saved connections yet.</p>
-            <Button size="sm" variant="outline" onClick={() => dialog.show()}>
-              <Plus /> New connection
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => showImport()}>
-              <Import /> Import from SSMS
-            </Button>
-          </div>
+          // The start screen and this header's + and import buttons offer the
+          // first connection, so the tree only says why it is empty.
+          <p className="p-3 text-muted-foreground">No saved connections yet.</p>
         )}
 
         {rows.map((row) => {
@@ -355,7 +349,7 @@ export function ObjectExplorer() {
                     className={cn("grid size-4 shrink-0 place-items-center", !node.expandable && "invisible")}
                     onClick={() => void explorer.toggle(node)}
                   >
-                    <ChevronRight className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
+                    <ChevronRight className={cn("size-3.5 transition-transform motion-reduce:transition-none", expanded && "rotate-90")} />
                   </button>
                   {connection ? (
                     <span className="grid size-3.5 shrink-0 place-items-center">
