@@ -147,8 +147,8 @@ tests alone are not a compatibility certification.
 
 ### Verification — 2026-10-30
 
-The TypeScript check, the production build, 99 frontend unit tests, eight browser
-tests, the 75 tests of the Rust workspace suite, the 28 SQL integration tests and
+The TypeScript check, the production build, 96 frontend unit tests, eight browser
+tests, the 84 tests of the Rust workspace suite, the 28 SQL integration tests and
 the Microsoft helper's nine self-tests pass. The SQL integration tests run against
 the SQL Server 2022 container from `docker-compose.yml`, started with
 `MSSQL_AGENT_ENABLED=true` for the Agent checks.
