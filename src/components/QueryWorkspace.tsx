@@ -138,7 +138,7 @@ function TabBar() {
               selected ? "border-t-primary bg-background" : "border-t-transparent text-muted-foreground hover:bg-accent/40",
             )}
           >
-            {tab.status === "executing" ? (
+            {tab.longRunning ? (
               <Loader2 className="size-3 shrink-0 animate-spin" />
             ) : tab.openTransactions > 0 ? (
               // The brand's second colour, as for activity: amber is the Test Environment's.
@@ -238,7 +238,9 @@ function Toolbar({ tab }: { tab: QueryTab }) {
     cancel: useShortcutLabel("cancel"),
   };
   const { execute, cancel } = useQueries();
-  const executing = tab.status === "executing";
+  // Shown running only past the store's threshold; the store still refuses
+  // a second Execution before that.
+  const executing = tab.longRunning;
   const environment = useConnections((s) => tabEnvironment(tab, s.connections));
   return (
     <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-1 border-b px-2 py-1">
@@ -265,7 +267,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
           variant="ghost"
           // The screen's one coloured control: the brand's, never an Environment's.
           className="h-7 text-primary hover:text-primary"
-          disabled={tab.status !== "ready"}
+          disabled={(tab.status !== "ready" && tab.status !== "executing") || executing}
           onClick={() => {
             const script = currentScript();
             if (script) void execute(tab.id, script);
@@ -392,7 +394,7 @@ function Messages({ tab }: { tab: QueryTab }) {
     if (list.current) window.getSelection()?.selectAllChildren(list.current);
   };
 
-  if (tab.status === "executing" && tab.messages.length === 0) return <Running />;
+  if (tab.longRunning && tab.messages.length === 0) return <Running />;
   return (
     <ContextMenu onOpenChange={(open) => open && setSelection(window.getSelection()?.toString() ?? "")}>
       <ContextMenuTrigger asChild>
@@ -447,7 +449,8 @@ function Running() {
 
 function Results({ tab }: { tab: QueryTab }) {
   if (tab.resultSets.length === 0) {
-    return tab.status === "executing" ? <Running /> : <Centered>No result sets.</Centered>;
+    if (tab.longRunning) return <Running />;
+    return tab.status === "executing" ? null : <Centered>No result sets.</Centered>;
   }
   return (
     <div className="flex h-full flex-col gap-1 overflow-auto p-1">
@@ -467,11 +470,11 @@ function Results({ tab }: { tab: QueryTab }) {
 function useElapsed(tab: QueryTab) {
   const [, tick] = useState(0);
   useEffect(() => {
-    if (tab.status !== "executing") return;
+    if (!tab.longRunning) return;
     const timer = window.setInterval(() => tick((n) => n + 1), 250);
     return () => window.clearInterval(timer);
-  }, [tab.status]);
-  if (tab.status === "executing" && tab.startedAt !== null) return Date.now() - tab.startedAt;
+  }, [tab.longRunning]);
+  if (tab.longRunning && tab.startedAt !== null) return Date.now() - tab.startedAt;
   return tab.elapsedMs;
 }
 
@@ -488,7 +491,7 @@ function StatusBar({ tab }: { tab: QueryTab }) {
   const rows = tab.resultSets.reduce((sum, set) => sum + set.rows, 0);
 
   let status: React.ReactNode;
-  if (tab.status === "executing") {
+  if (tab.longRunning) {
     status = (
       <>
         <Loader2 className="size-3 animate-spin" /> Executing query…
