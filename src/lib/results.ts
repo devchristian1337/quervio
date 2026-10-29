@@ -33,3 +33,29 @@ export function decodeWindow(buffer: ArrayBuffer): Cell[][] {
   }
   return rows;
 }
+
+/** Rows a grid reads from Rust at a time. */
+export const ROW_BLOCK = 200;
+
+// The first block of each Result Set of a quick Execution, read before its
+// output is shown so the grid draws rows in its first frame. Keyed by tab and
+// Result Set, for one run: a later run, a sort or the tab's close drops it.
+const firstBlocks = new Map<string, { run: number; rows: Cell[][] }>();
+const key = (tabId: string, index: number) => `${tabId}\u0000${index}`;
+
+export function rememberFirstBlock(tabId: string, run: number, index: number, rows: Cell[][]) {
+  firstBlocks.set(key(tabId, index), { run, rows });
+}
+
+export function firstBlock(tabId: string, run: number, index: number): Cell[][] | undefined {
+  const entry = firstBlocks.get(key(tabId, index));
+  return entry?.run === run ? entry.rows : undefined;
+}
+
+export function forgetFirstBlock(tabId: string, index: number) {
+  firstBlocks.delete(key(tabId, index));
+}
+
+export function forgetFirstBlocks(tabId: string) {
+  for (const k of firstBlocks.keys()) if (k.startsWith(`${tabId}\u0000`)) firstBlocks.delete(k);
+}
