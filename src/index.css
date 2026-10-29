@@ -230,6 +230,11 @@
   border-width: 2px;
   background-color: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
 }
+/* A scroll area that reaches the rounded edges of its panel keeps its
+   scrollbar off them, instead of running into the corners. */
+.scrollbar-inset::-webkit-scrollbar-track:vertical {
+  margin-block: 12px;
+}
 
 /* A key of the Settings › Shortcuts keyboard (components/ui/glowing-keyboard.tsx),
    and a lit one: its border and glow take the theme's primary, like its text.

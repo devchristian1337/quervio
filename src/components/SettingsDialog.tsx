@@ -102,7 +102,7 @@ export function SettingsDialog() {
           // Lays out its own scroll, under a keyboard that stays in view.
           <ShortcutsSection />
         ) : (
-          <ScrollFade className="min-w-0 flex-1 px-8 py-6">
+          <ScrollFade className="scrollbar-inset min-w-0 flex-1 px-8 py-6">
             {section === "appearance" && <AppearanceSection />}
             {section === "editor" && <EditorSection />}
             {section === "results" && <ResultsSection />}
@@ -542,7 +542,7 @@ function ShortcutsSection() {
       </div>
       {/* The keys stay lit over the gaps between rows and groups, until the pointer leaves the list. */}
       <ScrollFade
-        className="min-h-0 flex-1 px-8 pb-6"
+        className="scrollbar-inset min-h-0 flex-1 px-8 pb-6"
         onMouseLeave={() => setPreview((current) => (current?.recording ? current : null))}
       >
         {/* Groups, so the scroll fade shrinks and blurs row by row, not a whole group. */}
