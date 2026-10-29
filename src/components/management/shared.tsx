@@ -295,12 +295,12 @@ export function DataGrid({
   data: DataTable;
   onRow?: (row: Record<string, string | null>) => void;
   selected?: (row: Record<string, string | null>) => boolean;
-  /** Take the tool's remaining height instead of stopping at 384px. */
+  /** Take the tool's remaining height, never less than 288px, instead of stopping at 384px. */
   fill?: boolean;
 }) {
   const numeric=useMemo(()=>data.columns.map((_,index)=>data.rows.some(row=>row[index]!==null) && data.rows.every(row=>row[index]===null || /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(row[index]??""))),[data]);
   return (
-    <div className={cn("overflow-auto rounded-md border", fill ? "min-h-0 flex-1" : "max-h-96 shrink-0")}>
+    <div className={cn("overflow-auto rounded-md border", fill ? "min-h-72 flex-1" : "max-h-96 shrink-0")}>
       <table className="w-full border-collapse text-[13px]">
         <thead className="sticky top-0 bg-panel">
           <tr>
