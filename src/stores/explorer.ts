@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 
 export type NodeKind =
+  | { type: "group"; name: string }
   | { type: "tool"; connectionId: string; database: string | null; tool: ToolKind }
   | { type: "securityFolder"; connectionId: string; database: string | null; server: boolean }
   | { type: "securityList"; connectionId: string; database: string | null; server: boolean; section: "principals" | "roles" | "serverTriggers" }
@@ -85,6 +86,10 @@ export function serverKey(connectionId: string) {
   return `s:${connectionId}`;
 }
 
+export function groupKey(name: string) {
+  return `g:${name}`;
+}
+
 function qualified(item: CatalogItem) {
   return item.schema ? `${item.schema}.${item.name}` : item.name;
 }
@@ -101,6 +106,9 @@ function databaseNode(parentKey: string, connectionId: string, item: CatalogItem
 async function loadChildren(node: TreeNode, cache: Record<string, Children>): Promise<TreeNode[]> {
   const { kind, key } = node;
   switch (kind.type) {
+    case "group":
+      // Its connections come from the Saved Connections (ObjectExplorer.tsx).
+      return [];
     case "server":
       return [
         {
@@ -276,6 +284,7 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     expand: async (node) => {
       if (!node.expandable) return;
       set((s) => ({ expanded: { ...s.expanded, [node.key]: true } }));
+      if (node.kind.type === "group") return;
       const cached = get().children[node.key];
       if (!cached || cached.status === "error") await load(node);
     },
@@ -284,7 +293,7 @@ export const useExplorer = create<ExplorerState>((set, get) => {
 
     refresh: async (node) => {
       invalidateCatalog();
-      if (!node.expandable) return;
+      if (!node.expandable || node.kind.type === "group") return;
       set((s) => ({
         children: prune(s.children, node.key, true),
         expanded: { ...prune(s.expanded, node.key, false), [node.key]: true },

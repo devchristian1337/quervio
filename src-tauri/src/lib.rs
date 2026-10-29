@@ -45,6 +45,7 @@ pub fn run() {
             explorer::list_connections,
             explorer::ssms_connections,
             explorer::ssms_import,
+            explorer::group_connections,
             explorer::save_connection,
             explorer::delete_connection,
             explorer::test_connection,

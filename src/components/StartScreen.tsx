@@ -7,7 +7,7 @@ import { useShortcutLabel, type CommandId } from "@/lib/commands";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { openFile } from "@/lib/files";
 import { cn } from "@/lib/utils";
-import { useConnections } from "@/stores/connections";
+import { byGroup, useConnections } from "@/stores/connections";
 import { useConnectDialog, useSsmsImportDialog } from "@/stores/dialogs";
 import { useQueries } from "@/stores/queries";
 
@@ -64,11 +64,17 @@ export function StartScreen() {
               </div>
             </div>
           ) : (
-            <ul className="border-t">
-              {connections.map((connection) => (
-                <ConnectionRow key={connection.id} connection={connection} />
-              ))}
-            </ul>
+            byGroup(connections).map(({ group, connections: inGroup }) => (
+              // A group, so the scroll fade shrinks and blurs row by row, not the whole list.
+              <ul key={group ?? ""} role="group" aria-label={group ?? "Ungrouped"} className="border-t">
+                {group !== null && (
+                  <li className="flex h-8 items-end px-1 pb-1 text-xs font-medium text-muted-foreground">{group}</li>
+                )}
+                {inGroup.map((connection) => (
+                  <ConnectionRow key={connection.id} connection={connection} />
+                ))}
+              </ul>
+            ))
           )}
         </section>
 

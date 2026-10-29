@@ -29,6 +29,9 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { ConnectDialog } from "@/components/ConnectDialog";
@@ -37,12 +40,12 @@ import { api, displayName, errorMessage, type SavedConnection, type ScriptKind }
 import { toast } from "@/components/ui/basic-toast";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { cn } from "@/lib/utils";
-import { useConnections } from "@/stores/connections";
-import { contextOf, isFilterable, serverKey, useExplorer, type TreeNode } from "@/stores/explorer";
+import { byGroup, groupNames, useConnections } from "@/stores/connections";
+import { contextOf, groupKey, isFilterable, serverKey, useExplorer, type TreeNode } from "@/stores/explorer";
 import { useQueries } from "@/stores/queries";
 import { openQueryFromContext } from "@/lib/shortcuts";
 import { useShortcutLabel } from "@/lib/commands";
-import { useConnectDialog, useDialogs, useSettingsDialog, useSsmsImportDialog } from "@/stores/dialogs";
+import { useConnectDialog, useDialogs, useNamePrompt, useSettingsDialog, useSsmsImportDialog } from "@/stores/dialogs";
 import { useWorkbench } from "@/stores/workbench";
 import { BUILTIN_TEMPLATES } from "@/stores/templates";
 
@@ -67,22 +70,30 @@ export function ObjectExplorer() {
     if (!loaded) void load();
   }, [loaded, load]);
 
-  const roots = useMemo<TreeNode[]>(
-    () =>
-      connections.map((c) => ({
-        key: serverKey(c.id),
-        label: displayName(c),
-        kind: { type: "server", connectionId: c.id },
-        expandable: true,
-      })),
-    [connections],
-  );
+  // Groups first, then the connections in none, each by name, as in SSMS.
+  const { roots, members } = useMemo(() => {
+    const members = new Map<string, TreeNode[]>();
+    const roots: TreeNode[] = [];
+    for (const { group, connections: inGroup } of byGroup(connections)) {
+      const nodes = inGroup.map((c): TreeNode => ({ key: serverKey(c.id), label: displayName(c), kind: { type: "server", connectionId: c.id }, expandable: true }));
+      if (group === null) roots.push(...nodes);
+      else {
+        roots.push({ ...groupNode(group), detail: String(nodes.length) });
+        members.set(groupKey(group), nodes);
+      }
+    }
+    return { roots, members };
+  }, [connections]);
 
   const rows = useMemo(() => {
     const out: Row[] = [];
     const visit = (node: TreeNode, depth: number, parent: string | null) => {
       out.push({ type: "node", node, depth, parent });
       if (!explorer.expanded[node.key]) return;
+      if (node.kind.type === "group") {
+        for (const child of members.get(node.key) ?? []) visit(child, depth + 1, node.key);
+        return;
+      }
       const state = explorer.children[node.key];
       if (!state || state.status === "loading") {
         out.push({ type: "status", key: `${node.key}#loading`, depth: depth + 1, text: "Loading…", tone: "loading" });
@@ -109,7 +120,7 @@ export function ObjectExplorer() {
     };
     for (const root of roots) visit(root, 0, null);
     return out;
-  }, [roots, explorer.expanded, explorer.children, explorer.filters]);
+  }, [roots, members, explorer.expanded, explorer.children, explorer.filters]);
 
   const nodeRows = rows.filter((r): r is Extract<Row, { type: "node" }> => r.type === "node");
   const selectedIndex = nodeRows.findIndex((r) => r.node.key === explorer.selected);
@@ -160,6 +171,21 @@ export function ObjectExplorer() {
         return;
     }
     event.preventDefault();
+  }
+
+  /** Moves connections into a group (null: out of any) and shows where they went. */
+  async function moveToGroup(ids: string[], group: string | null) {
+    await useConnections.getState().setGroup(ids, group);
+    if (group) void explorer.expand(groupNode(group));
+  }
+
+  async function askGroupName(title: string, value: string, confirm: string) {
+    return useNamePrompt.getState().ask({
+      title,
+      description: "Connections in a group sit together in a folder of the Object Explorer.",
+      value,
+      confirm,
+    });
   }
 
   async function removeConnection(connection: SavedConnection) {
@@ -381,7 +407,19 @@ export function ObjectExplorer() {
                     <ContextMenuSeparator />
                   </>
                 )}
-                {node.expandable && (
+                {node.kind.type === "group" && (
+                  <GroupItems
+                    name={node.kind.name}
+                    ids={(members.get(node.key) ?? []).flatMap((n) => (n.kind.type === "server" ? [n.kind.connectionId] : []))}
+                    onNewConnection={(group) => dialog.show(null, { group })}
+                    onRename={async (name, ids) => {
+                      const renamed = await askGroupName(`Rename ${name}`, name, "Rename");
+                      if (renamed && renamed !== name) await moveToGroup(ids, renamed);
+                    }}
+                    onUngroup={(ids) => void moveToGroup(ids, null)}
+                  />
+                )}
+                {node.expandable && node.kind.type !== "group" && (
                   <ContextMenuItem onSelect={() => void explorer.refresh(node)}>
                     Refresh <ContextMenuShortcut>F5</ContextMenuShortcut>
                   </ContextMenuItem>
@@ -402,6 +440,32 @@ export function ObjectExplorer() {
                     <ContextMenuItem onSelect={() => dialog.show(connection)}>
                       Edit connection…
                     </ContextMenuItem>
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger>Move to group</ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="max-h-80 min-w-48 overflow-y-auto">
+                        {groupNames(connections)
+                          .filter((name) => name !== connection.group)
+                          .map((name) => (
+                            <ContextMenuItem key={name} onSelect={() => void moveToGroup([connection.id], name)}>
+                              {name}
+                            </ContextMenuItem>
+                          ))}
+                        <ContextMenuSeparator />
+                        <ContextMenuItem
+                          onSelect={async () => {
+                            const name = await askGroupName("New group", "", "Create and move");
+                            if (name) await moveToGroup([connection.id], name);
+                          }}
+                        >
+                          New group…
+                        </ContextMenuItem>
+                        {connection.group && (
+                          <ContextMenuItem onSelect={() => void moveToGroup([connection.id], null)}>
+                            Remove from {connection.group}
+                          </ContextMenuItem>
+                        )}
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
                     <ContextMenuItem disabled={!info} onSelect={() => void explorer.disconnect(connection.id)}>
                       Disconnect
                     </ContextMenuItem>
@@ -420,6 +484,7 @@ export function ObjectExplorer() {
       <ConnectDialog
         open={dialog.open}
         editing={dialog.editing}
+        preset={dialog.preset}
         onOpenChange={dialog.setOpen}
         onSaved={(saved) => {
           const node: TreeNode = {
@@ -429,6 +494,7 @@ export function ObjectExplorer() {
             expandable: true,
           };
           // Settings may have changed: start over from a fresh connection.
+          if (saved.group) void explorer.expand(groupNode(saved.group));
           void explorer.disconnect(saved.id).then(() => {
             explorer.select(node.key);
             if (!dialog.editing) void explorer.expand(node);
@@ -448,6 +514,34 @@ export function ObjectExplorer() {
         </Tip>
       </footer>
     </section>
+  );
+}
+
+function groupNode(name: string): TreeNode {
+  return { key: groupKey(name), label: name, kind: { type: "group", name }, expandable: true };
+}
+
+/** A connection group's menu: a connection in it, a new name, or none. */
+function GroupItems({
+  name,
+  ids,
+  onNewConnection,
+  onRename,
+  onUngroup,
+}: {
+  name: string;
+  ids: string[];
+  onNewConnection: (group: string) => void;
+  onRename: (name: string, ids: string[]) => Promise<void>;
+  onUngroup: (ids: string[]) => void;
+}) {
+  return (
+    <>
+      <ContextMenuItem onSelect={() => onNewConnection(name)}>New connection in {name}…</ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={() => void onRename(name, ids)}>Rename group…</ContextMenuItem>
+      <ContextMenuItem onSelect={() => onUngroup(ids)}>Ungroup</ContextMenuItem>
+    </>
   );
 }
 

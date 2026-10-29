@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/interfaces-select";
 import { api, errorMessage, type Encrypt, type Environment, type SavedConnection } from "@/lib/api";
 import { ENVIRONMENTS } from "@/lib/environment";
-import { newConnection, transportWarning, useConnections } from "@/stores/connections";
+import { groupNames, newConnection, transportWarning, useConnections } from "@/stores/connections";
 
 type TestState =
   | { status: "idle" }
@@ -33,13 +33,17 @@ type TestState =
 interface Props {
   /** The connection to edit, or null for a new one. */
   editing: SavedConnection | null;
+  /** What a new connection starts with, such as its group. */
+  preset?: Partial<SavedConnection>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (connection: SavedConnection) => void;
 }
 
-export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
+export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: Props) {
   const save = useConnections((s) => s.save);
+  const connections = useConnections((s) => s.connections);
+  const groups = groupNames(connections);
   const [draft, setDraft] = useState<SavedConnection>(newConnection);
   const [password, setPassword] = useState("");
   const [test, setTest] = useState<TestState>({ status: "idle" });
@@ -48,10 +52,11 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    setDraft(editing ?? newConnection());
+    setDraft(editing ?? { ...newConnection(), ...preset });
     setPassword("");
     setTest({ status: "idle" });
     setError(null);
+    // The preset belongs to this opening only.
   }, [open, editing]);
 
   const update = (patch: Partial<SavedConnection>) => setDraft((d) => ({ ...d, ...patch }));
@@ -75,6 +80,7 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
     ...draft,
     server: draft.server.trim(),
     name: draft.name.trim(),
+    group: draft.group?.trim() || null,
     defaultDatabase: draft.defaultDatabase?.trim() || null,
   });
 
@@ -188,6 +194,21 @@ export function ConnectDialog({ editing, open, onOpenChange, onSaved }: Props) {
               />
             </Field>
           </div>
+
+          <Field label="Group" htmlFor="group">
+            <Input
+              id="group"
+              list="connection-groups"
+              placeholder="None: at the top of the Object Explorer"
+              value={draft.group ?? ""}
+              onChange={(e) => update({ group: e.target.value })}
+            />
+            <datalist id="connection-groups">
+              {groups.map((group) => (
+                <option key={group} value={group} />
+              ))}
+            </datalist>
+          </Field>
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Environment">
