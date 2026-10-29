@@ -2,15 +2,26 @@
 //! every cell's display text in one buffer, so a million rows stay compact,
 //! and the grid only ever asks for the window it shows.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::io::{self, Write};
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, RwLock};
 
-use mssql_tds::datatypes::column_values::ColumnValues;
+use mssql_tds::datatypes::column_values::{
+    ColumnValues, SqlDate, SqlDateTime, SqlDateTime2, SqlDateTimeOffset, SqlMoney,
+    SqlSmallDateTime, SqlSmallMoney, SqlTime, SqlXml,
+};
+use mssql_tds::datatypes::decoder::DecimalParts;
+use mssql_tds::datatypes::row_writer::RowWriter;
+use mssql_tds::datatypes::sql_json::SqlJson;
+use mssql_tds::datatypes::sql_string::EncodingType;
+use mssql_tds::datatypes::sql_vector::SqlVector;
 use serde::Serialize;
+use uuid::Uuid;
 
-use crate::format::write_value;
+use crate::format::{write_hex, write_text, write_value};
 
 /// The Result Sets of a Query Tab's latest Execution, shared between the
 /// Execution writing them and the grid reading them.
@@ -70,6 +81,9 @@ pub struct CellValue {
 
 #[derive(Debug)]
 pub struct ResultSet {
+    /// Unique per set, so a sort computed outside the lock is applied only to
+    /// the set it was computed on.
+    id: u64,
     columns: Vec<ResultColumn>,
     text: String,
     /// End offset in `text` of each cell, row-major.
@@ -132,7 +146,9 @@ impl ResultSet {
         Ok(())
     }
     pub fn new(columns: Vec<ResultColumn>) -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
         Self {
+            id: NEXT_ID.fetch_add(1, AtomicOrdering::Relaxed),
             columns,
             text: String::new(),
             ends: Vec::new(),
@@ -154,11 +170,32 @@ impl ResultSet {
     /// Orders the rows by one column, NULLs last in both directions, or back
     /// to the order the Server sent with `None`. Ties keep the Server's order.
     pub fn sort(&mut self, by: Option<(usize, SortDirection)>) {
-        let Some((column, direction)) = by.filter(|(column, _)| *column < self.columns.len())
-        else {
-            self.order = None;
-            return;
-        };
+        let order = self.sorted(by);
+        self.apply(order);
+    }
+
+    /// The order `sort` would give, computed without changing the set, so the
+    /// caller needs only a read lock while it runs; `apply` installs it.
+    pub fn sorted(&self, by: Option<(usize, SortDirection)>) -> SortOrder {
+        SortOrder {
+            set: self.id,
+            order: by
+                .filter(|(column, _)| *column < self.columns.len())
+                .map(|(column, direction)| self.order_by(column, direction)),
+        }
+    }
+
+    /// Installs an order from `sorted`. False when it was computed on another
+    /// set: the Result Sets were replaced meanwhile.
+    pub fn apply(&mut self, order: SortOrder) -> bool {
+        if order.set != self.id {
+            return false;
+        }
+        self.order = order.order;
+        true
+    }
+
+    fn order_by(&self, column: usize, direction: SortDirection) -> Vec<u32> {
         let rows = self.row_count();
         let kind = self.columns[column].kind;
         // Numbers are compared as numbers; parse each one once.
@@ -173,7 +210,21 @@ impl ResultSet {
         } else {
             Vec::new()
         };
+        // Text is compared case-insensitively; fold each value once, not at
+        // every comparison.
+        let folded: Vec<Cow<str>> = if kind == ColumnKind::Text {
+            (0..rows)
+                .map(|row| {
+                    self.cell_text(row, column)
+                        .map_or(Cow::Borrowed(""), fold_case)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let mut order: Vec<u32> = (0..rows as u32).collect();
+        // Stable: ties keep the Server's order. A merge sort also makes fewer
+        // comparisons than an unstable one here.
         order.sort_by(|&a, &b| {
             let (a, b) = (a as usize, b as usize);
             let ordering = match (self.cell_text(a, column), self.cell_text(b, column)) {
@@ -185,7 +236,12 @@ impl ResultSet {
                         .partial_cmp(&numbers[b])
                         .unwrap_or_else(|| left.cmp(right)),
                     ColumnKind::Date | ColumnKind::Binary => left.cmp(right),
-                    ColumnKind::Text => compare_text(left, right),
+                    // UTF-8 byte order is code point order, so comparing the
+                    // folded bytes is comparing the lowercased characters.
+                    ColumnKind::Text => folded[a]
+                        .as_bytes()
+                        .cmp(folded[b].as_bytes())
+                        .then_with(|| left.cmp(right)),
                 },
             };
             match direction {
@@ -193,7 +249,7 @@ impl ResultSet {
                 SortDirection::Descending => ordering.reverse(),
             }
         });
-        self.order = Some(order);
+        order
     }
 
     pub fn columns(&self) -> &[ResultColumn] {
@@ -223,6 +279,25 @@ impl ResultSet {
             }
             self.ends.push(self.text.len() as u64);
         }
+    }
+
+    /// Adds the complete rows of `chunk` and empties it, keeping its buffers
+    /// for the next rows.
+    pub fn append(&mut self, chunk: &mut RowChunk) {
+        debug_assert_eq!(chunk.width, self.columns.len());
+        let (text, cells, nulls, clipped) = chunk.complete;
+        let base_text = self.text.len() as u64;
+        let base_cell = self.ends.len();
+        self.text.push_str(&chunk.text[..text]);
+        self.ends
+            .extend(chunk.ends[..cells].iter().map(|end| end + base_text));
+        for &cell in &chunk.nulls[..nulls] {
+            self.nulls.set(base_cell + cell as usize);
+        }
+        for &cell in &chunk.clipped[..clipped] {
+            self.clipped.set(base_cell + cell as usize);
+        }
+        chunk.clear();
     }
 
     fn cell_text(&self, row: usize, column: usize) -> Option<&str> {
@@ -367,13 +442,217 @@ fn is_spreadsheet_formula(text: &str) -> bool {
     text.starts_with(['=', '+', '-', '@', '＝', '＋', '－', '＠'])
 }
 
-/// Case-insensitive, like the default SQL Server collations; ties fall back
-/// to exact order so the result is stable.
-fn compare_text(left: &str, right: &str) -> Ordering {
-    left.chars()
-        .flat_map(char::to_lowercase)
-        .cmp(right.chars().flat_map(char::to_lowercase))
-        .then_with(|| left.cmp(right))
+/// The text a sort compares, case-insensitive like the default SQL Server
+/// collations: each character lowercased on its own (`char::to_lowercase`,
+/// with no word-final sigma rule). Ties then fall back to exact order, so the
+/// result is stable. Text with nothing to lowercase is borrowed.
+fn fold_case(text: &str) -> Cow<'_, str> {
+    if text.is_ascii() {
+        return match text.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            true => Cow::Owned(text.to_ascii_lowercase()),
+            false => Cow::Borrowed(text),
+        };
+    }
+    let unchanged = text.chars().all(|c| {
+        let mut lower = c.to_lowercase();
+        lower.next() == Some(c) && lower.next().is_none()
+    });
+    match unchanged {
+        true => Cow::Borrowed(text),
+        false => Cow::Owned(text.chars().flat_map(char::to_lowercase).collect()),
+    }
+}
+
+/// A display order from `ResultSet::sorted`, for `ResultSet::apply`.
+#[derive(Debug)]
+pub struct SortOrder {
+    set: u64,
+    order: Option<Vec<u32>>,
+}
+
+/// Rows decoded straight from the wire into display text, with no
+/// `ColumnValues` row or `String` per cell, then added to a `ResultSet` a
+/// batch at a time with `ResultSet::append`, under one lock.
+#[derive(Debug)]
+pub struct RowChunk {
+    width: usize,
+    max_cell_bytes: usize,
+    text: String,
+    /// End offset in `text` of each cell, row-major, as in `ResultSet`.
+    ends: Vec<u64>,
+    /// Indexes of the NULL and the clipped cells in this chunk.
+    nulls: Vec<u32>,
+    clipped: Vec<u32>,
+    /// Cells of the row being decoded.
+    row_cells: usize,
+    rows: usize,
+    /// Lengths of `text`, `ends`, `nulls` and `clipped` at the last complete row.
+    complete: (usize, usize, usize, usize),
+}
+
+impl RowChunk {
+    pub fn new(width: usize, max_cell_bytes: usize) -> Self {
+        Self {
+            width,
+            max_cell_bytes,
+            text: String::new(),
+            ends: Vec::new(),
+            nulls: Vec::new(),
+            clipped: Vec::new(),
+            row_cells: 0,
+            rows: 0,
+            complete: (0, 0, 0, 0),
+        }
+    }
+
+    /// Complete rows waiting to be appended.
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+
+    /// Drops the cells of a row the driver did not finish (an error or a
+    /// cancel mid-row), so only complete rows are appended.
+    pub fn discard_partial_row(&mut self) {
+        let (text, cells, nulls, clipped) = self.complete;
+        self.text.truncate(text);
+        self.ends.truncate(cells);
+        self.nulls.truncate(nulls);
+        self.clipped.truncate(clipped);
+        self.row_cells = 0;
+    }
+
+    fn clear(&mut self) {
+        self.text.clear();
+        self.ends.clear();
+        self.nulls.clear();
+        self.clipped.clear();
+        self.row_cells = 0;
+        self.rows = 0;
+        self.complete = (0, 0, 0, 0);
+    }
+
+    /// Writes one cell's text with `write`, clipped as `ResultSet::push_row`
+    /// clips it. Values past the column count are ignored, as there.
+    fn cell(&mut self, write: impl FnOnce(&mut String)) {
+        if self.row_cells >= self.width {
+            return;
+        }
+        let index = self.ends.len() as u32;
+        let start = self.text.len();
+        write(&mut self.text);
+        if self.text.len() - start > self.max_cell_bytes {
+            let mut cut = start + self.max_cell_bytes;
+            while !self.text.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            self.text.truncate(cut);
+            self.clipped.push(index);
+        }
+        self.ends.push(self.text.len() as u64);
+        self.row_cells += 1;
+    }
+
+    /// Fixed-size and rarer values go through `write_value`, so each type is
+    /// formatted in one place.
+    fn value(&mut self, value: ColumnValues) {
+        self.cell(|out| {
+            let _ = write_value(&value, out);
+        });
+    }
+}
+
+impl RowWriter for RowChunk {
+    fn write_null(&mut self, _col: usize) {
+        if self.row_cells >= self.width {
+            return;
+        }
+        self.nulls.push(self.ends.len() as u32);
+        self.ends.push(self.text.len() as u64);
+        self.row_cells += 1;
+    }
+    fn write_bool(&mut self, _col: usize, val: bool) {
+        self.value(ColumnValues::Bit(val));
+    }
+    fn write_u8(&mut self, _col: usize, val: u8) {
+        self.value(ColumnValues::TinyInt(val));
+    }
+    fn write_i16(&mut self, _col: usize, val: i16) {
+        self.value(ColumnValues::SmallInt(val));
+    }
+    fn write_i32(&mut self, _col: usize, val: i32) {
+        self.value(ColumnValues::Int(val));
+    }
+    fn write_i64(&mut self, _col: usize, val: i64) {
+        self.value(ColumnValues::BigInt(val));
+    }
+    fn write_f32(&mut self, _col: usize, val: f32) {
+        self.value(ColumnValues::Real(val));
+    }
+    fn write_f64(&mut self, _col: usize, val: f64) {
+        self.value(ColumnValues::Float(val));
+    }
+    fn write_string(&mut self, _col: usize, bytes: Cow<'_, [u8]>, encoding_type: EncodingType) {
+        self.cell(|out| write_text(&bytes, encoding_type, out));
+    }
+    fn write_bytes(&mut self, _col: usize, bytes: Cow<'_, [u8]>) {
+        self.cell(|out| write_hex(&bytes, out));
+    }
+    fn write_decimal(&mut self, _col: usize, val: DecimalParts) {
+        self.value(ColumnValues::Decimal(val));
+    }
+    fn write_numeric(&mut self, _col: usize, val: DecimalParts) {
+        self.value(ColumnValues::Numeric(val));
+    }
+    fn write_date(&mut self, _col: usize, val: SqlDate) {
+        self.value(ColumnValues::Date(val));
+    }
+    fn write_time(&mut self, _col: usize, val: SqlTime) {
+        self.value(ColumnValues::Time(val));
+    }
+    fn write_datetime(&mut self, _col: usize, val: SqlDateTime) {
+        self.value(ColumnValues::DateTime(val));
+    }
+    fn write_smalldatetime(&mut self, _col: usize, val: SqlSmallDateTime) {
+        self.value(ColumnValues::SmallDateTime(val));
+    }
+    fn write_datetime2(&mut self, _col: usize, val: SqlDateTime2) {
+        self.value(ColumnValues::DateTime2(val));
+    }
+    fn write_datetimeoffset(&mut self, _col: usize, val: SqlDateTimeOffset) {
+        self.value(ColumnValues::DateTimeOffset(val));
+    }
+    fn write_money(&mut self, _col: usize, val: SqlMoney) {
+        self.value(ColumnValues::Money(val));
+    }
+    fn write_smallmoney(&mut self, _col: usize, val: SqlSmallMoney) {
+        self.value(ColumnValues::SmallMoney(val));
+    }
+    fn write_uuid(&mut self, _col: usize, val: Uuid) {
+        self.value(ColumnValues::Uuid(val));
+    }
+    fn write_xml(&mut self, _col: usize, val: SqlXml) {
+        self.value(ColumnValues::Xml(val));
+    }
+    fn write_json(&mut self, _col: usize, val: SqlJson) {
+        self.value(ColumnValues::Json(val));
+    }
+    fn write_vector(&mut self, _col: usize, val: SqlVector) {
+        self.value(ColumnValues::Vector(val));
+    }
+    fn end_row(&mut self) {
+        // A row the driver sent short still fills every column.
+        while self.row_cells < self.width {
+            self.write_null(self.row_cells);
+        }
+        self.row_cells = 0;
+        self.rows += 1;
+        self.complete = (
+            self.text.len(),
+            self.ends.len(),
+            self.nulls.len(),
+            self.clipped.len(),
+        );
+    }
 }
 
 fn markdown_cell(text: &str) -> String {
@@ -642,5 +921,43 @@ mod tests {
         // None goes back to the Server's order.
         set.sort(None);
         assert_eq!(set.cell(0, 1).unwrap().text.as_deref(), Some("Rossi"));
+    }
+
+    #[test]
+    fn row_chunks_append_complete_rows_with_their_nulls_and_clips() {
+        let mut data = set();
+        let mut chunk = RowChunk::new(2, 4);
+        chunk.write_i32(0, 4);
+        chunk.write_string(1, Cow::Borrowed(b"Verdi"), EncodingType::Utf8);
+        chunk.end_row();
+        // A short row is padded with NULL; a value past the columns is ignored.
+        chunk.write_i32(0, 5);
+        chunk.end_row();
+        chunk.write_i32(0, 6);
+        chunk.write_string(1, Cow::Borrowed(&[b'B', 0, 0xE8, 0]), EncodingType::Utf16);
+        chunk.write_i32(2, 99);
+        chunk.end_row();
+        // A row the driver did not finish is dropped.
+        chunk.write_i32(0, 7);
+        chunk.discard_partial_row();
+        data.append(&mut chunk);
+
+        assert_eq!(chunk.rows(), 0);
+        assert_eq!(data.row_count(), 6);
+        let text = |row, column| data.cell(row, column).unwrap().text;
+        assert_eq!(text(1, 1), None, "rows already there are untouched");
+        assert_eq!(text(2, 1).as_deref(), Some("Bianchi, \"Gino\""));
+        assert_eq!(text(3, 0).as_deref(), Some("4"));
+        assert_eq!(
+            data.cell(3, 1),
+            Some(CellValue {
+                text: Some("Verd".into()),
+                clipped: true
+            })
+        );
+        assert_eq!(text(4, 1), None);
+        assert_eq!(text(5, 0).as_deref(), Some("6"));
+        assert_eq!(text(5, 1).as_deref(), Some("Bè"));
+        assert!(!data.cell(5, 1).unwrap().clipped);
     }
 }

@@ -177,6 +177,16 @@ interface Props {
   set: ResultSetSummary;
 }
 
+/** Blocks kept per grid (64 × 200 rows): scrolling through a million rows must not copy them all into the page. */
+const MAX_BLOCKS = 64;
+
+/** Keeps `blocks` at MAX_BLOCKS by dropping the ones farthest from `near`, the block just read: those are off screen. */
+function evictFarBlocks(blocks: Map<number, Cell[][]>, near: number) {
+  if (blocks.size <= MAX_BLOCKS) return;
+  const far = [...blocks.keys()].sort((a, b) => Math.abs(b - near) - Math.abs(a - near));
+  for (const block of far.slice(0, blocks.size - MAX_BLOCKS)) blocks.delete(block);
+}
+
 /** The blocks a grid starts a run with: the first one if it was read before the output was shown. */
 function startingBlocks(tabId: string, runId: number, index: number) {
   const rows = firstBlock(tabId, runId, index);
@@ -285,6 +295,8 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
         if (blocks.current !== target) return;
         const rows = decodeWindow(buffer);
         target.set(block, rows);
+        // A dropped block is read again when it scrolls back; widths stay as measured.
+        evictFarBlocks(target, block);
         // Include every fetched row, even in later blocks. Manual resizing
         // can add room, but may never clip a header or a loaded cell's text.
         const required = minimumColumnWidths(set.columns, set.kinds, rows, base.cellHorizontalPadding!, measure);

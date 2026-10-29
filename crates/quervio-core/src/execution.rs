@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use crate::batch;
 use crate::results::{
-    ColumnKind, ResultColumn, ResultLimits, ResultSet as StoredResultSet, SharedResults,
+    ColumnKind, ResultColumn, ResultLimits, ResultSet as StoredResultSet, RowChunk, SharedResults,
 };
 use crate::session::{Session, int};
 
@@ -125,6 +125,9 @@ const TIMED_OUT: &str =
 /// How often streaming Result Sets report their row count.
 const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// Rows decoded before they are added to the Result Set under one lock.
+const CHUNK_ROWS: usize = 256;
+
 impl Session {
     /// Runs `script`, whose first line is line `base_line` (zero-based) of the
     /// editor: the whole text, or the selection. Every Batch runs even when
@@ -231,6 +234,7 @@ impl Session {
                                     kind: column_kind(column.data_type),
                                 })
                                 .collect();
+                            let mut chunk = RowChunk::new(columns.len(), limits.max_cell_bytes);
                             results
                                 .write()
                                 .unwrap()
@@ -243,18 +247,24 @@ impl Session {
                             let mut limited = false;
                             let mut last_progress = Instant::now();
                             let read = loop {
-                                match self.client.next_row().await {
-                                    Ok(Some(row)) => {
-                                        results.write().unwrap()[result_sets]
-                                            .push_row(&row, limits.max_cell_bytes);
+                                // Decodes straight into display text: no row of
+                                // ColumnValues, no String per cell.
+                                match self.client.next_row_into(&mut chunk).await {
+                                    Ok(true) => {
                                         rows += 1;
                                         if rows as usize >= limits.max_rows {
                                             limited = true;
                                             break Ok(());
                                         }
-                                        if rows.is_multiple_of(1024)
-                                            && last_progress.elapsed() >= PROGRESS_EVERY
-                                        {
+                                        let progress = rows.is_multiple_of(1024)
+                                            && last_progress.elapsed() >= PROGRESS_EVERY;
+                                        // The grid may read up to the reported count,
+                                        // so the rows go in before it is reported.
+                                        if progress || chunk.rows() >= CHUNK_ROWS {
+                                            results.write().unwrap()[result_sets]
+                                                .append(&mut chunk);
+                                        }
+                                        if progress {
                                             last_progress = Instant::now();
                                             emit(ExecutionEvent::ResultSetRows {
                                                 index: result_sets,
@@ -262,10 +272,12 @@ impl Session {
                                             });
                                         }
                                     }
-                                    Ok(None) => break Ok(()),
+                                    Ok(false) => break Ok(()),
                                     Err(error) => break Err(error),
                                 }
                             };
+                            chunk.discard_partial_row();
+                            results.write().unwrap()[result_sets].append(&mut chunk);
                             if limited {
                                 // Stop the Server too: reading on would only be thrown away.
                                 let _ = self.client.cancel_query(0).await;
