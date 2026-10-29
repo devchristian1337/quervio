@@ -240,6 +240,14 @@ pub struct Dependency {
     help: String,
 }
 
+/// The source tree, where `pnpm tauri dev` finds the components. Only debug
+/// builds look there: a release build would carry the build machine's path,
+/// and whoever can create that folder on a user's PC could plant a program
+/// that Quervio runs and hands the connection passwords.
+pub(crate) fn source_dir() -> Option<PathBuf> {
+    cfg!(debug_assertions).then(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
 pub(crate) fn bridge_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     if let Some(path) = selected_component(app, "bridge") {
         return Some(path);
@@ -251,14 +259,15 @@ pub(crate) fn bridge_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     if let Ok(resource) = app.path().resource_dir() {
         paths.push(resource.join("microsoft/Quervio.MicrosoftBridge.exe"));
     }
-    paths.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/microsoft/Quervio.MicrosoftBridge.exe"),
-    );
+    if let Some(source) = source_dir() {
+        paths.push(source.join("resources/microsoft/Quervio.MicrosoftBridge.exe"));
+    }
     if let Ok(data) = app.path().app_data_dir() {
         paths.push(data.join("components/microsoft/Quervio.MicrosoftBridge.exe"));
     }
-    paths.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tools/Quervio.MicrosoftBridge/bin/Release/net10.0/win-x64/publish/Quervio.MicrosoftBridge.exe"));
+    if let Some(source) = source_dir() {
+        paths.push(source.join("../tools/Quervio.MicrosoftBridge/bin/Release/net10.0/win-x64/publish/Quervio.MicrosoftBridge.exe"));
+    }
     paths.into_iter().find(|p| p.is_file())
 }
 
@@ -400,14 +409,11 @@ pub async fn management_install_language(
         .resource_dir()
         .map_err(message)?
         .join("install-sqltools.ps1");
-    let script = if resource.is_file() {
-        resource
-    } else {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../scripts/install-sqltools.ps1")
-    };
-    if !script.is_file() {
-        return Err("SQL Tools Service installer script is missing.".into());
-    }
+    let script = Some(resource)
+        .filter(|p| p.is_file())
+        .or_else(|| source_dir().map(|source| source.join("../scripts/install-sqltools.ps1")))
+        .filter(|p| p.is_file())
+        .ok_or("SQL Tools Service installer script is missing.")?;
     let root = app
         .path()
         .app_data_dir()

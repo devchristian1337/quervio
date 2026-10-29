@@ -63,10 +63,9 @@ pub async fn access_token(data_dir: &std::path::Path) -> CommandResult<(String, 
             paths.push(dir.join("microsoft/Quervio.MicrosoftBridge.exe"));
         }
     }
-    paths.push(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/microsoft/Quervio.MicrosoftBridge.exe"),
-    );
+    if let Some(source) = crate::management::source_dir() {
+        paths.push(source.join("resources/microsoft/Quervio.MicrosoftBridge.exe"));
+    }
     let path=paths.into_iter().find(|p|p.is_file()).ok_or("Microsoft Entra authentication requires the Microsoft bridge. Open Tools > Microsoft Components.")?;
     let mut command = Command::new(path);
     command
