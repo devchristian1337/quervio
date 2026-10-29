@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SavedConnection } from "@/lib/api";
+import type { SavedConnection, SqlcmdPreview } from "@/lib/api";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -15,6 +15,8 @@ vi.mock("@/lib/api", async (original) => ({
     closeQuery: vi.fn(async () => {}),
     checkScript: vi.fn(async () => ({ findings: [{ kind: "drop", target: "dbo.t", line: 1 }], uncertain: false })),
     executeQuery: vi.fn(async () => "succeeded"),
+    sqlcmdPrepare: vi.fn<(...args: Parameters<typeof import("@/lib/api").api.sqlcmdPrepare>) => Promise<SqlcmdPreview>>(),
+    sqlcmdExecute: vi.fn(async () => "succeeded"),
     resultRows: vi.fn(async () => window1x1("a")),
   },
 }));
@@ -36,6 +38,7 @@ const { firstBlock } = await import("@/lib/results");
 const { useConnections } = await import("@/stores/connections");
 const { useDialogs } = await import("@/stores/dialogs");
 const { useQueries } = await import("@/stores/queries");
+const { useSqlcmdConfirmation } = await import("@/stores/sqlcmd");
 
 const production: SavedConnection = {
   id: "c1",
@@ -59,6 +62,62 @@ async function openTab(connection: SavedConnection) {
 }
 
 const drop = { text: "DROP TABLE dbo.t", baseLine: 0 };
+
+describe("SQLCMD include consent", () => {
+  const ask = vi.fn(async () => false);
+  const input = { text: ':r "include.sql"', baseLine: 0 };
+  const preview: SqlcmdPreview = { kind: "ready", token: "approved-script", script: "SELECT 1;", hasLocalCommands: false };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.sqlcmdPrepare).mockReset();
+    ask.mockReset().mockResolvedValue(false);
+    useQueries.setState({ tabs: [], activeId: null });
+    useSqlcmdConfirmation.setState({ ask, pending: null });
+  });
+
+  async function sqlcmdTab() {
+    const id = await openTab(production);
+    useQueries.getState().setSqlcmdMode(id, true);
+    return id;
+  }
+
+  it("does not retry with file access or execute when include consent is denied", async () => {
+    const id = await sqlcmdTab();
+    vi.mocked(api.sqlcmdPrepare).mockResolvedValueOnce({ kind: "fileAccessRequired" });
+    await useQueries.getState().execute(id, input);
+    expect(ask).toHaveBeenCalledWith(input.text, false, "fileAccess");
+    expect(api.sqlcmdPrepare).toHaveBeenCalledExactlyOnceWith(id, input.text, null, 0);
+    expect(api.sqlcmdExecute).not.toHaveBeenCalled();
+  });
+
+  it("requires separate execution approval after reading authorized includes", async () => {
+    const id = await sqlcmdTab();
+    vi.mocked(api.sqlcmdPrepare).mockResolvedValueOnce({ kind: "fileAccessRequired" }).mockResolvedValueOnce(preview);
+    ask.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await useQueries.getState().execute(id, input);
+    expect(api.sqlcmdPrepare).toHaveBeenNthCalledWith(2, id, input.text, null, 0, true);
+    expect(ask).toHaveBeenNthCalledWith(2, preview.script, false);
+    expect(api.sqlcmdExecute).not.toHaveBeenCalled();
+  });
+
+  it("executes only the prepared token after both approvals", async () => {
+    const id = await sqlcmdTab();
+    vi.mocked(api.sqlcmdPrepare).mockResolvedValueOnce({ kind: "fileAccessRequired" }).mockResolvedValueOnce(preview);
+    ask.mockResolvedValue(true);
+    await useQueries.getState().execute(id, input);
+    expect(api.sqlcmdExecute).toHaveBeenCalledWith(id, preview.token, expect.anything(), expect.anything());
+    expect(api.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it("keeps a single execution approval for scripts without includes", async () => {
+    const id = await sqlcmdTab();
+    vi.mocked(api.sqlcmdPrepare).mockResolvedValueOnce(preview);
+    await useQueries.getState().execute(id, { text: "SELECT 1;", baseLine: 0 });
+    expect(ask).toHaveBeenCalledExactlyOnceWith(preview.script, false);
+    expect(api.sqlcmdPrepare).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("the Production guard of a Query Tab", () => {
   beforeEach(() => {

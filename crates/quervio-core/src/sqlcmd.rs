@@ -1,5 +1,5 @@
-//! SQLCMD editor preprocessing. Includes are snapshotted before confirmation.
-//! Parsing has no side effects apart from reading explicitly included files.
+//! SQLCMD editor preprocessing. File access requires separate consent before
+//! includes are snapshotted; executing the expanded script needs final approval.
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -39,6 +39,26 @@ pub enum Step {
 #[derive(Clone)]
 pub struct Script {
     pub steps: Vec<Step>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PrepareError {
+    #[error("Allow SQLCMD include file access before preparing this script.")]
+    FileAccessRequired,
+    #[error("{0}")]
+    Invalid(String),
+}
+
+impl From<String> for PrepareError {
+    fn from(message: String) -> Self {
+        Self::Invalid(message)
+    }
+}
+
+impl From<&str> for PrepareError {
+    fn from(message: &str) -> Self {
+        Self::Invalid(message.into())
+    }
 }
 #[derive(Default)]
 struct Lexer {
@@ -131,6 +151,7 @@ struct Parser {
     lexer: Lexer,
     stack: Vec<PathBuf>,
     bytes: usize,
+    allow_file_reads: bool,
 }
 impl Parser {
     fn flush(&mut self, repeat: u32) {
@@ -165,7 +186,12 @@ impl Parser {
         output.push_str(rest);
         Ok(output)
     }
-    fn parse(&mut self, text: &str, file: Option<&Path>, base_line: u32) -> Result<(), String> {
+    fn parse(
+        &mut self,
+        text: &str,
+        file: Option<&Path>,
+        base_line: u32,
+    ) -> Result<(), PrepareError> {
         self.bytes += text.len();
         if self.bytes > 8 * 1024 * 1024 {
             return Err("Expanded SQLCMD script exceeds 8 MB.".into());
@@ -209,6 +235,11 @@ impl Parser {
                     continue;
                 }
                 if head == ":r" {
+                    // Even resolving a UNC path or a local junction may contact a
+                    // remote host using the Windows user's identity.
+                    if !self.allow_file_reads {
+                        return Err(PrepareError::FileAccessRequired);
+                    }
                     let tokens = words(tail)?;
                     if tokens.len() != 1 {
                         return Err("Use :r \"filename\".".into());
@@ -311,7 +342,8 @@ impl Parser {
                         _ => {
                             return Err(format!(
                                 "Unsupported SQLCMD command {head}. Nothing was executed."
-                            ));
+                            )
+                            .into());
                         }
                     }
                     continue;
@@ -362,7 +394,14 @@ fn words(text: &str) -> Result<Vec<String>, String> {
     }
     Ok(words)
 }
-pub fn prepare(text: &str, file: Option<&Path>, base_line: u32) -> Result<Script, String> {
+/// Prepares a script without filesystem access unless the caller has obtained
+/// explicit consent for reading its includes, including nested/network paths.
+pub fn prepare(
+    text: &str,
+    file: Option<&Path>,
+    base_line: u32,
+    allow_file_reads: bool,
+) -> Result<Script, PrepareError> {
     let mut parser = Parser {
         steps: Vec::new(),
         variables: HashMap::new(),
@@ -371,12 +410,10 @@ pub fn prepare(text: &str, file: Option<&Path>, base_line: u32) -> Result<Script
         lexer: Lexer::default(),
         stack: Vec::new(),
         bytes: 0,
+        allow_file_reads,
     };
-    if let Some(path) = file {
-        if let Ok(path) = path.canonicalize() {
-            parser.stack.push(path);
-        }
-    }
+    // The editor file is only a base path. Do not canonicalize it here:
+    // that would access the filesystem before include consent, even without :r.
     parser.parse(text, file, base_line)?;
     parser.flush(1);
     Ok(Script {
@@ -409,20 +446,26 @@ mod tests {
     use super::*;
     #[test]
     fn commands_in_multiline_comments_are_not_executed() {
-        let script = prepare("/*\n!! del x\n*/\nSELECT 1", None, 0).unwrap();
+        let script = prepare("/*\n!! del x\n*/\nSELECT 1", None, 0, false).unwrap();
         assert_eq!(script.steps.len(), 1);
         assert!(matches!(&script.steps[0],Step::Sql{sql,..} if sql.contains("!! del")));
     }
     #[test]
     fn variables_and_original_lines() {
-        let script = prepare(":setvar name \"Some DB\"\nSELECT '$(name)';\nGO 2", None, 4).unwrap();
+        let script = prepare(
+            ":setvar name \"Some DB\"\nSELECT '$(name)';\nGO 2",
+            None,
+            4,
+            false,
+        )
+        .unwrap();
         assert!(
             matches!(&script.steps[0],Step::Sql{sql,lines,repeat:2} if sql.contains("Some DB") && lines[0].line==6)
         );
     }
     #[test]
     fn refuses_missing_variables_before_execution() {
-        assert!(prepare("SELECT '$(missing)'", None, 0).is_err());
+        assert!(prepare("SELECT '$(missing)'", None, 0, false).is_err());
     }
     #[test]
     fn recognizes_output_and_os_commands() {
@@ -430,13 +473,56 @@ mod tests {
             ":out \"C:\\folder name\\out.txt\"\n!! dir\n:on error exit",
             None,
             0,
+            false,
         )
         .unwrap();
         assert_eq!(script.steps.len(), 3);
     }
     #[test]
     fn preview_hides_connect_password() {
-        let script = prepare(":connect localhost -U sa -P secret", None, 0).unwrap();
+        let script = prepare(":connect localhost -U sa -P secret", None, 0, false).unwrap();
         assert!(!script.preview().contains("secret"));
+    }
+
+    #[test]
+    fn includes_require_consent_before_any_path_resolution() {
+        for text in [
+            ":r missing-include.sql",
+            r#":r "\\quervio-audit.invalid\share\include.sql""#,
+            r#":r "\\?\UNC\quervio-audit.invalid\share\include.sql""#,
+            ":setvar directive \":r\"\n$(directive) missing-include.sql",
+        ] {
+            assert!(matches!(
+                prepare(text, None, 0, false),
+                Err(PrepareError::FileAccessRequired)
+            ));
+        }
+    }
+
+    #[test]
+    fn commented_includes_and_remote_editor_paths_do_not_require_file_access() {
+        let script = prepare(
+            "/*\n:r missing.sql\n*/\nSELECT 1;",
+            Some(Path::new(r"\\quervio-audit.invalid\share\editor.sql")),
+            0,
+            false,
+        )
+        .unwrap();
+        assert_eq!(script.steps.len(), 1);
+    }
+
+    #[test]
+    fn authorized_nested_includes_are_snapshotted_and_cycles_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.sql");
+        let child = dir.path().join("child.sql");
+        let nested = dir.path().join("nested.sql");
+        std::fs::write(&child, ":r nested.sql").unwrap();
+        std::fs::write(&nested, "SELECT 1;").unwrap();
+        let script = prepare(":r child.sql", Some(&root), 0, true).unwrap();
+        std::fs::write(&nested, "SELECT 2;").unwrap();
+        assert!(script.preview().contains("SELECT 1;"));
+        std::fs::write(&nested, ":r child.sql").unwrap();
+        assert!(prepare(":r child.sql", Some(&root), 0, true).is_err());
     }
 }

@@ -299,6 +299,8 @@ export function Transfer({ context }: { context: Context }) {
           <Notice>
             Choose .csv or .xlsx. Decimal, date and binary values are exported
             exactly as text; Excel does not round large numeric values.
+            CSV rejects formula-like text in values or column names; use .xlsx
+            to preserve these values safely as text.
           </Notice>
           <BridgeOperation
             context={context}

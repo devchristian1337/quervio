@@ -5,6 +5,10 @@ import type { ExecutionEvent, Outcome } from "@/lib/execution";
 
 export type SortDirection = "ascending" | "descending";
 
+export type SqlcmdPreview =
+  | { kind: "fileAccessRequired" }
+  | { kind: "ready"; token: string; script: string; hasLocalCommands: boolean };
+
 /** Mirrors ExecuteOptions in src-tauri/src/query.rs. */
 export interface ExecuteOptions {
   planMode?: "none" | "estimated" | "actual";
@@ -115,7 +119,7 @@ export const api = {
     allowDestructive: boolean,
     onEvent: Channel<ExecutionEvent>,
   ) => invoke<Outcome>("query_execute", { tabId, script, baseLine, options, allowDestructive, onEvent }),
-  sqlcmdPrepare: (tabId: string, script: string, filePath: string | null, baseLine: number) => invoke<{token: string; script: string; hasLocalCommands: boolean}>("query_sqlcmd_prepare", {tabId, script, filePath, baseLine}),
+  sqlcmdPrepare: (tabId: string, script: string, filePath: string | null, baseLine: number, allowFileReads = false) => invoke<SqlcmdPreview>("query_sqlcmd_prepare", {tabId, script, filePath, baseLine, allowFileReads}),
   sqlcmdExecute: (tabId: string, token: string, options: ExecuteOptions, onEvent: Channel<ExecutionEvent>) => invoke<Outcome>("query_sqlcmd_execute", {tabId, token, confirmed: true, options, onEvent}),
   cancelQuery: (tabId: string) => invoke<void>("query_cancel", { tabId }),
 

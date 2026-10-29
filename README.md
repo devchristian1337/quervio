@@ -62,8 +62,10 @@ or database. Query tabs keep their dedicated Rust sessions.
   fallback. Templates can be edited, imported and exported. Metadata is invalidated
   after schema operations and Object Explorer refreshes.
 - SQLCMD expands variables/includes before confirmation and retains source file
-  and line information. The review includes local commands, output paths and
-  server switches. Local commands require that explicit confirmation.
+  and line information. Reading include files requires separate consent before
+  any path is resolved or opened, including network paths, mapped drives, links
+  and nested includes. The final review includes local commands, output paths
+  and server switches. Local commands require that explicit confirmation.
 - Administrative SQL previews are tied to the opened destination session, expire
   after five minutes and can be used once. Microsoft operations also validate the
   destination and approved arguments. Long operations can be cancelled.
@@ -73,11 +75,16 @@ or database. Query tabs keep their dedicated Rust sessions.
 - CSV/Excel export is available from the results grid and the transfer wizard.
   Large exports stream on the backend. Truncated cell values cannot be exported
   as complete data. Excel uses text cells to retain numeric/date precision.
+  CSV rejects formula-like text in cells and column names (including formulas
+  hidden behind leading whitespace), rather than changing exported values.
+  Signed numeric literals remain supported. Use XLSX for formula-like text.
 - Import supports CSV, Excel and installed 64-bit ODBC drivers, column mapping,
   source preview, conversion checks and one destination transaction. Quervio CSV
   exports use `\N` for NULL and escape leading backslashes; enable the corresponding
   import option when reading those exports.
 - DacFx handles `.dacpac`/`.bacpac`; SMO scripts structure/data and dependencies.
+  DACPAC preview and publish hash and load the same immutable byte snapshot;
+  publish rejects a snapshot that differs from the approved hash.
   SQL Server Audit, TDE and certificate-backed Always Encrypted have dedicated tools.
   Microsoft Entra interactive authentication is available for saved connections.
 
@@ -127,8 +134,9 @@ node node_modules/@playwright/test/cli.js test
 Browser tests use the explicitly labelled `?mock` development server. They verify
 tool rendering, previews, preserved drafts, polling suspension, plan rendering and
 desktop layout; they do not certify server operations. The helper self-test checks
-CSV/Excel round trips, NULL versus empty strings, Unicode, decimal(38), and binary
-conversion without connecting to SQL Server.
+CSV/Excel round trips, NULL versus empty strings, Unicode, decimal(38), binary
+conversion, formula rejection/text cells and DACPAC snapshot/hash consistency
+without connecting to SQL Server.
 
 SQL integration tests remain opt-in and use only `QUERVIO_TEST_*` settings. The
 new management tests cover metadata, non-executing estimated plans, untruncated
