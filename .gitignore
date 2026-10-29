@@ -11,24 +11,34 @@ node_modules
 dist
 dist-ssr
 *.local
+*.tsbuildinfo
+
+# Test reports and coverage
+/coverage/
+/playwright-report/
+/test-results/
 
 # Editor directories and files
+/.claude/
 .vscode/*
 !.vscode/extensions.json
 .idea
+.vs/
 .DS_Store
 *.suo
 *.ntvs*
-*.njsproj
-*.sln
 *.sw?
 /target/
 
-# Local test credentials
+# Local environment settings and credentials (keep the example tracked)
 .env
+.env.*
+!.env.example
 
 # Design audit screenshots (tasteskill)
 .taste-skill/
+
+# Microsoft bridge build outputs
 /tools/**/bin/
 /tools/**/obj/
 /src-tauri/resources/microsoft/*
