@@ -212,7 +212,8 @@ function Key({ def, lit, size, delay, still, height = size, className }: KeyProp
       }}
       className={cn(
         // Opaque, and above a lit key (z-1 against z-0), so a glow never tints the keys beside it.
-        "relative z-1 flex min-w-0 items-center justify-center rounded-md border border-t-[1.5px] bg-background px-1.5 text-[11px] text-muted-foreground shadow-[inset_0_0_12px_rgb(0_0_0/0.12)] transition-[color,border-color,box-shadow] duration-200 ease-out select-none motion-reduce:transition-none",
+        // Shadow and transitions in src/index.css (.keyboard-key), with the lit state's.
+        "keyboard-key relative z-1 flex min-w-0 items-center justify-center rounded-md border border-t-[1.5px] bg-background px-1.5 text-[11px] text-muted-foreground select-none",
         def.align === "start" && "justify-start",
         def.align === "end" && "justify-end",
         top && "items-start rounded-b-none! border-b-0! pt-2",
@@ -221,7 +222,9 @@ function Key({ def, lit, size, delay, still, height = size, className }: KeyProp
         className,
       )}
     >
-      <span className={cn("truncate", lit && "font-medium")}>{def.label ?? def.id}</span>
+      <span className={cn("truncate transition-[font-weight] duration-200 ease-out motion-reduce:transition-none", lit && "font-medium")}>
+        {def.label ?? def.id}
+      </span>
     </motion.div>
   );
 }

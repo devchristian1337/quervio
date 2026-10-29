@@ -221,13 +221,29 @@
   background-color: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
 }
 
-/* A lit key on the Settings › Shortcuts keyboard (components/ui/glowing-keyboard.tsx):
-   its border and glow take the key's text colour, the theme's primary. The
-   key's own transition fades both in and out; the glow sits under the
-   neighbouring keys, so it shows evenly in the gaps around it. */
-.glowing-key {
-  border-color: currentColor !important;
-  box-shadow: 0 0 14px color-mix(in oklch, currentColor 55%, transparent);
+/* A key of the Settings › Shortcuts keyboard (components/ui/glowing-keyboard.tsx),
+   and a lit one: its border and glow take the theme's primary, like its text.
+   Both states have the same two shadows, an inner shade and an outer glow, so
+   the glow fades in and out instead of appearing at the end. A lit key sits
+   under its neighbours, so the glow shows evenly in the gaps around it; going
+   out, it stays under them until its glow has faded. */
+.keyboard-key {
+  box-shadow: inset 0 0 12px rgb(0 0 0 / 0.12), 0 0 14px transparent;
+  transition:
+    color 200ms ease-out,
+    border-color 200ms ease-out,
+    box-shadow 200ms ease-out,
+    z-index 0s 200ms;
+}
+.keyboard-key.glowing-key {
+  border-color: var(--color-primary) !important;
+  box-shadow: inset 0 0 12px rgb(0 0 0 / 0), 0 0 14px color-mix(in oklch, var(--color-primary) 55%, transparent);
+  transition-delay: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .keyboard-key {
+    transition: none;
+  }
 }
 
 /* Context menus end each group of items with a separator, whatever follows.
