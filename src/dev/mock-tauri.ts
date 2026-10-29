@@ -19,10 +19,10 @@ const connection: SavedConnection = {
 
 // What the mock's SSMS knows: registered servers in groups, then its history.
 const ssms: SsmsConnection[] = [
-  ...[["Aurelia", "Aurelia [Ambulatorio]", "10.0.1.5"], ["Aurelia", "Aurelia [Ricoveri]", "10.0.1.6"], ["Camilliani", "Camilliani [Produzione]", "10.0.2.5"], ["", "Nightly", "10.0.9.9"]].map(
-    ([group, name, server]): SsmsConnection => ({
+  ...[["Aurelia", "Aurelia [Ambulatorio]", "10.0.1.5"], ["Aurelia", "Aurelia [Ricoveri]", "10.0.1.6"], ["Camilliani", "Camilliani [APP SERVER]", "10.0.2.5"], ["Camilliani", "Camilliani [TEST SERVER]", "10.0.2.5", "H2O_TEST"], ["", "Nightly", "10.0.9.9"]].map(
+    ([group, name, server, database = "H2O_BASE"]): SsmsConnection => ({
       id: `registered:${group}/${name}`, name, groups: group ? [group] : [], server, authentication: { kind: "sql", userName: "sa" },
-      defaultDatabase: "H2O_BASE", encrypt: "optional", trustServerCertificate: true, lastUsed: null, source: "registered", ssmsVersion: null, hasPassword: true,
+      defaultDatabase: database, encrypt: "optional", trustServerCertificate: true, lastUsed: null, source: "registered", ssmsVersion: null, hasPassword: true,
     }),
   ),
   { id: "history:localhost,14333|sql:sa", name: "", groups: [], server: "localhost,14333", authentication: { kind: "sql", userName: "sa" }, defaultDatabase: null, encrypt: "optional", trustServerCertificate: true, lastUsed: Date.now() - 86_400_000, source: "history", ssmsVersion: "21.0", hasPassword: false },
@@ -153,13 +153,13 @@ mockIPC(async (cmd, args) => {
     case "ssms_connections":
       return ssms;
     case "ssms_import":
-      for (const pick of a.picks as { id: string; environment: SavedConnection["environment"]; existing: string | null }[]) {
+      for (const pick of a.picks as { id: string; environment: SavedConnection["environment"] | null; existing: string | null }[]) {
         const found = ssms.find((c) => c.id === pick.id);
         if (!found) continue;
         const group = found.groups.join(" / ") || null;
         const existing = saved.find((c) => c.id === pick.existing);
-        if (existing) Object.assign(existing, { group, name: found.name });
-        else saved.push({ id: crypto.randomUUID(), name: found.name, group, server: found.server, authentication: found.authentication, defaultDatabase: found.defaultDatabase, environment: pick.environment, encrypt: found.encrypt, trustServerCertificate: found.trustServerCertificate });
+        if (existing) Object.assign(existing, { group, name: found.name, environment: pick.environment ?? existing.environment });
+        else saved.push({ id: crypto.randomUUID(), name: found.name, group, server: found.server, authentication: found.authentication, defaultDatabase: found.defaultDatabase, environment: pick.environment ?? "production", encrypt: found.encrypt, trustServerCertificate: found.trustServerCertificate });
       }
       return structuredClone(saved);
     case "explorer_connect":

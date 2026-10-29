@@ -83,8 +83,11 @@ export const api = {
   deleteConnection: (id: string) => invoke<void>("delete_connection", { id }),
   /** What SSMS knows on this PC, or the registered servers of an exported .regsrvr file. */
   ssmsConnections: (file: string | null) => invoke<SsmsConnection[]>("ssms_connections", { file }),
-  /** Creates the picked connections; one with `existing` moves that Saved Connection into its SSMS group instead. */
-  ssmsImport: (file: string | null, picks: { id: string; environment: Environment; existing: string | null }[]) =>
+  /**
+   * Creates the picked connections. One with `existing` updates that Saved
+   * Connection instead: its SSMS group and name, and its Environment unless null.
+   */
+  ssmsImport: (file: string | null, picks: { id: string; environment: Environment | null; existing: string | null }[]) =>
     invoke<SavedConnection[]>("ssms_import", { file, picks }),
   /** Moves connections into a group, or out of any with null, leaving their Sessions open. */
   groupConnections: (ids: string[], group: string | null) =>

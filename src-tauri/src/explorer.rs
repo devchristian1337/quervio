@@ -164,7 +164,9 @@ pub fn ssms_connections(file: Option<String>) -> CommandResult<Vec<SsmsConnectio
 #[serde(rename_all = "camelCase")]
 pub struct SsmsPick {
     id: String,
-    environment: Environment,
+    /// For a new connection, its Environment; for an existing one, a new
+    /// Environment, or None to keep its own.
+    environment: Option<Environment>,
     /// A Saved Connection already for this server and login: it moves into
     /// the SSMS group and takes its name, keeping the rest.
     existing: Option<String>,
@@ -190,6 +192,7 @@ pub fn ssms_import(
             let from_ssms = connection.to_saved(existing.environment);
             existing.group = from_ssms.group;
             existing.name = from_ssms.name;
+            existing.environment = pick.environment.unwrap_or(existing.environment);
             saved.push(store.save(existing).map_err(message)?);
             continue;
         }
@@ -197,7 +200,7 @@ pub fn ssms_import(
             .connections
             .lock()
             .unwrap()
-            .save(connection.to_saved(pick.environment))
+            .save(connection.to_saved(pick.environment.unwrap_or(Environment::Production)))
             .map_err(message)?;
         if let (Authentication::Sql { .. }, Some(password)) = (&created.authentication, connection.password()) {
             state.secrets.set(&created.id, &password).map_err(message)?;
