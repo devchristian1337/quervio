@@ -3,6 +3,7 @@
 # -Publish uploads them as a GitHub Release, where installed copies look for
 # updates (src-tauri/src/updates.rs). Needs the .NET SDK (vpk is pinned in
 # dotnet-tools.json) and, for -Publish, `gh auth login` or -Token.
+# -ReleaseNotes is the text of the notes (Markdown), shown in the release.
 param(
     [switch]$Publish,
     [string]$Token,
@@ -67,7 +68,12 @@ try {
         '--icon', 'src-tauri/icons/icon.ico', '--splashImage', 'src/assets/quervio-q-prisma-v2.png',
         '--framework', 'webview2', '--runtime', 'win-x64'
     )
-    if ($ReleaseNotes) { $pack += @('--releaseNotes', $ReleaseNotes) }
+    if ($ReleaseNotes) {
+        # vpk reads the notes from a Markdown file, not from the argument.
+        $notesFile = Join-Path $root 'target/velopack/release-notes.md'
+        [IO.File]::WriteAllText($notesFile, $ReleaseNotes, [Text.UTF8Encoding]::new($false))
+        $pack += @('--releaseNotes', $notesFile)
+    }
     Invoke-Step 'vpk pack' { dotnet vpk @pack }
 
     if ($Publish) {
