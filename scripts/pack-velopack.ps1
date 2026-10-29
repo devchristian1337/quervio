@@ -30,9 +30,19 @@ if (-not (Test-Path (Join-Path $root 'src-tauri/resources/microsoft/Quervio.Micr
     throw 'The Microsoft bridge is missing: run scripts/build-microsoft.ps1 first.'
 }
 
+# A missing tool otherwise fails halfway through the build with a vague error.
+$tools = @('dotnet', 'pnpm', 'cargo')
+if ($Publish -and -not $Token) { $tools += 'gh' }
+$missing = @($tools | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
+if ($missing.Count -gt 0) {
+    throw "Not found on PATH: $($missing -join ', '). Install them, then open a new terminal."
+}
+
 Push-Location $root
 try {
     Invoke-Step 'vpk restore' { dotnet tool restore }
+    # A fresh or older clone lacks node_modules, the Tauri CLI included.
+    Invoke-Step 'pnpm install' { pnpm install --frozen-lockfile }
     Invoke-Step 'Tauri build' { pnpm tauri build --no-bundle }
 
     # The same layout as tauri.conf.json's bundle.resources, next to the exe:
