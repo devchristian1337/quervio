@@ -145,19 +145,19 @@ Windows authentication, Azure SQL/Managed Instance, Agent, restore and encryptio
 must be validated on corresponding dedicated environments; compilation and mock
 tests alone are not a compatibility certification.
 
-### Verification — 2026-10-28
+### Verification — 2026-10-30
 
-The TypeScript check, the production build, 62 frontend unit tests, seven browser
-tests, the Rust workspace suite, the 28 SQL integration tests and the Microsoft
-helper's six self-tests pass. The SQL integration tests run against the SQL Server
-2022 container from `docker-compose.yml`, started with `MSSQL_AGENT_ENABLED=true`
-for the Agent checks.
+The TypeScript check, the production build, 99 frontend unit tests, eight browser
+tests, the 75 tests of the Rust workspace suite, the 28 SQL integration tests and
+the Microsoft helper's nine self-tests pass. The SQL integration tests run against
+the SQL Server 2022 container from `docker-compose.yml`, started with
+`MSSQL_AGENT_ENABLED=true` for the Agent checks.
 
-On that container, the SQL the management tools generate was executed for real:
-table and foreign-key designers, backup/restore chains with STOPAT and MOVE,
-maintenance jobs run through SQL Server Agent, Query Store forcing, Extended
-Events, logins/users/roles/permissions, SQL Server Audit, TDE and every read the
-tools issue. The helper's SMO scripting, DacFx extract/publish/bacpac, CSV/Excel/
+On 2026-10-28, on that container, the SQL the management tools generate was
+executed for real: table and foreign-key designers, backup/restore chains with
+STOPAT and MOVE, maintenance jobs run through SQL Server Agent, Query Store
+forcing, Extended Events, logins/users/roles/permissions, SQL Server Audit, TDE
+and every read the tools issue. The helper's SMO scripting, DacFx extract/publish/bacpac, CSV/Excel/
 ODBC import and export round trips, Microsoft Query and cancellation were run
 the same way. The desktop app was also driven by hand against that server.
 
