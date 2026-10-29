@@ -1,5 +1,5 @@
 // A stepper: minus and plus buttons that spring under the pointer, around a
-// value that slides in as it changes (after the Quantity component). Built on
+// value whose changed digits slide in (after the Quantity component). Built on
 // the app's Button; nothing moves under reduced motion.
 import * as React from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
@@ -80,24 +80,56 @@ export function QuantityDecrease({
   )
 }
 
+// A digit rises in as the value goes up and drops in as it goes down;
+// `custom` is the direction, 1 or -1.
+const digit = {
+  enter: (direction: number) => ({ y: 4 * direction, opacity: 0, filter: "blur(2px)" }),
+  center: { y: 0, opacity: 1, filter: "blur(0px)" },
+  exit: (direction: number) => ({ y: -4 * direction, opacity: 0, filter: "blur(2px)" }),
+}
+
 export function QuantityValue({ className, children, ...props }: React.ComponentProps<"div">) {
   const still = useReducedMotion() ?? false
+  const text = String(children)
+  const previous = React.useRef(text)
+  const direction = React.useRef(1)
+  if (previous.current !== text) {
+    direction.current = Number(text) < Number(previous.current) ? -1 : 1
+    previous.current = text
+  }
+  // Slots added after the first render (9 to 10) animate in; the first render does not.
+  const mounted = React.useRef(false)
+  React.useEffect(() => {
+    mounted.current = true
+  }, [])
+  const characters = [...text]
+
   return (
     <div
       className={cn("relative flex items-center justify-center overflow-hidden px-2 tabular-nums", className)}
       {...props}
     >
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.span
-          key={String(children)}
-          initial={still ? false : { y: 4, opacity: 0, filter: "blur(2px)" }}
-          animate={{ y: 0, opacity: 1, filter: "blur(0px)" }}
-          exit={still ? undefined : { y: -4, opacity: 0, filter: "blur(2px)" }}
-          transition={{ duration: 0.15, ease: "easeInOut" }}
-        >
-          {children}
-        </motion.span>
-      </AnimatePresence>
+      {still
+        ? text
+        : characters.map((character, index) => (
+            // Keyed from the right, so 15 to 16 keeps the 1 and swaps only the 5 for the 6.
+            <span key={characters.length - index} className="inline-grid">
+              <AnimatePresence initial={mounted.current} custom={direction.current}>
+                <motion.span
+                  key={character}
+                  custom={direction.current}
+                  variants={digit}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  transition={{ duration: 0.15, ease: "easeInOut" }}
+                  style={{ gridArea: "1 / 1" }}
+                >
+                  {character}
+                </motion.span>
+              </AnimatePresence>
+            </span>
+          ))}
     </div>
   )
 }

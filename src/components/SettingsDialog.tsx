@@ -714,6 +714,33 @@ const FONT_LICENCES: [string, string][] = [
 
 const UPDATE_HELP = "Downloaded from the Quervio releases on GitHub and installed on restart.";
 
+/**
+ * A short bar at the true ratio and its percentage. The figure has a fixed
+ * width, so the row neither wraps nor shifts as the digits change.
+ */
+function DownloadProgress({ percent }: { percent: number }) {
+  const value = Math.max(0, Math.min(100, Math.round(percent)));
+  return (
+    <span className="flex items-center gap-2">
+      <span
+        role="progressbar"
+        aria-label="Download progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={value}
+        className="h-1.5 w-24 overflow-hidden rounded-full bg-muted"
+      >
+        <span
+          // Width, not scaleX: a scaled fill would squash its rounded end.
+          className="block h-full rounded-full bg-primary transition-[width] duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+          style={{ width: `${value}%` }}
+        />
+      </span>
+      <span className="w-[4ch] text-right text-sm text-muted-foreground tabular-nums">{value}%</span>
+    </span>
+  );
+}
+
 /** Check, download, then restart into the new version. */
 function UpdateControl() {
   const { phase, available, progress, error, failed, check, download, install } = useUpdates();
@@ -725,7 +752,7 @@ function UpdateControl() {
     current: "Quervio is up to date",
     empty: "No release has been published yet",
     available: `Version ${available} is available`,
-    downloading: `Downloading ${available}… ${progress}%`,
+    downloading: `Downloading ${available}`,
     ready: `Version ${available} is ready`,
     installing: "Restarting…",
     error: {
@@ -745,9 +772,11 @@ function UpdateControl() {
     <div className="flex max-w-80 flex-col items-end gap-1">
       <div className="flex items-center gap-3">
         {text && (
-          <span className={cn("text-sm", phase === "error" ? "text-destructive" : "text-muted-foreground")}>{text}</span>
+          <span className={cn("text-sm whitespace-nowrap", phase === "error" ? "text-destructive" : "text-muted-foreground")}>{text}</span>
         )}
-        {phase !== "not-installed" && (
+        {phase === "downloading" && <DownloadProgress percent={progress} />}
+        {/* While downloading, the bar takes the place of a button that could not be pressed. */}
+        {phase !== "not-installed" && phase !== "downloading" && (
           <Button size="sm" variant={phase === "ready" ? "default" : "outline"} disabled={busy} onClick={() => void action.run()}>
             {action.label}
           </Button>
