@@ -128,6 +128,23 @@ export function findObject(objects: CatalogObject[], name: string, schema: strin
 }
 
 /**
+ * How each suggested object goes into the script: a dbo object by its name
+ * alone, which SQL Server finds there, unless another schema has the same
+ * name; any other object with its schema, which the name alone would miss.
+ */
+export function objectReference(objects: CatalogObject[]): (object: CatalogObject) => string {
+  const schemas = new Map<string, number>();
+  for (const o of objects) {
+    const key = o.name.toLowerCase();
+    schemas.set(key, (schemas.get(key) ?? 0) + 1);
+  }
+  return (o) =>
+    same(o.schema, "dbo") && schemas.get(o.name.toLowerCase()) === 1
+      ? identifier(o.name)
+      : `${identifier(o.schema)}.${identifier(o.name)}`;
+}
+
+/**
  * What a qualifier stands for: an alias or a table named in the script,
  * whose columns follow the dot, or a schema, whose objects do.
  */
