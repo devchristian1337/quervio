@@ -3,6 +3,7 @@ import {
   declaredVariables,
   findObject,
   identifier,
+  objectReference,
   qualifierBefore,
   resolveQualifier,
   statementAround,
@@ -87,6 +88,20 @@ describe("findObject", () => {
     expect(findObject(objects, "customer", "SALES")?.objectId).toBe(2);
     expect(findObject(objects, "Customer", null)?.objectId).toBe(1);
     expect(findObject(objects, "Order Details", null)?.objectId).toBe(3);
+  });
+});
+
+describe("objectReference", () => {
+  const reference = objectReference(objects);
+  it("leaves out dbo when no other schema has the name", () => {
+    expect(reference(objects[3])).toBe("CustomerNames");
+  });
+  it("keeps the schema when another schema has the name", () => {
+    expect(reference(objects[0])).toBe("dbo.Customer");
+    expect(reference(objects[1])).toBe("sales.Customer");
+  });
+  it("keeps any schema but dbo, bracketing names that need it", () => {
+    expect(reference(objects[2])).toBe("sales.[Order Details]");
   });
 });
 

@@ -14,6 +14,7 @@ import {
   declaredVariables,
   findObject,
   identifier,
+  objectReference,
   qualifierBefore,
   resolveQualifier,
   statementAround,
@@ -332,6 +333,7 @@ async function catalogSuggestions(
       ),
     )
   ).flat();
+  const reference = objectReference(objects);
   return {
     member: false,
     items: [
@@ -342,7 +344,7 @@ async function catalogSuggestions(
         detail: o.type,
         // Found by its name alone too, not only from its schema.
         filterText: `${o.schema}.${o.name} ${o.name}`,
-        insertText: `${identifier(o.schema)}.${identifier(o.name)}`,
+        insertText: reference(o),
         sortText: ORDER.object,
         range: replace,
       })),
