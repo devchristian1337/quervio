@@ -19,5 +19,6 @@ pub mod scripting;
 pub mod secrets;
 pub mod session;
 pub mod sqlcmd;
+pub mod ssms;
 
 pub use error::{Error, Result};
