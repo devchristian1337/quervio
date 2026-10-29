@@ -18,6 +18,7 @@ pub mod results;
 pub mod scripting;
 pub mod secrets;
 pub mod session;
+pub mod sql_format;
 pub mod sqlcmd;
 pub mod ssms;
 

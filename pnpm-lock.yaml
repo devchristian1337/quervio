@@ -62,9 +62,6 @@ importers:
       motion:
         specifier: 14.1.1
         version: 14.1.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      poor-mans-t-sql-formatter:
-        specifier: 1.6.10
-        version: 1.6.10
       radix-ui:
         specifier: ^1.8.1
         version: 1.8.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -2779,9 +2776,6 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
-  poor-mans-t-sql-formatter@1.6.10:
-    resolution: {integrity: sha512-HmfV88y4tmtR9JsLzdtNwJea+cQdGt+ozeDWdlxHbCiPcoG+/iSAnJ1mEAYdOqITgCoFIT67o3VdY684Ed3FWA==}
-
   postcss-selector-parser@7.1.7:
     resolution: {integrity: sha512-wWBro/7hJ40ye6TPiXkUQoXKCw23xSsjriUvqd7Uls9Sso3oLiON1flc18cCdnjgCRXw4fBVqUJJeOdDTh3P3g==}
     engines: {node: '>=4'}
@@ -3725,7 +3719,7 @@ snapshots:
     dependencies:
       '@hono/node-server': 2.1.5(hono@4.13.14)
       ajv: 8.20.0
-      ajv-formats: 3.0.1
+      ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
       cors: 2.8.6
       cross-spawn: 7.0.6
@@ -5384,12 +5378,12 @@ snapshots:
       mime-types: 3.0.2
       negotiator: 1.1.0
 
-  ajv-formats@2.1.1:
-    dependencies:
+  ajv-formats@2.1.1(ajv@8.20.0):
+    optionalDependencies:
       ajv: 8.20.0
 
-  ajv-formats@3.0.1:
-    dependencies:
+  ajv-formats@3.0.1(ajv@8.20.0):
+    optionalDependencies:
       ajv: 8.20.0
 
   ajv@8.20.0:
@@ -5508,7 +5502,7 @@ snapshots:
   conf@10.2.0:
     dependencies:
       ajv: 8.20.0
-      ajv-formats: 2.1.1
+      ajv-formats: 2.1.1(ajv@8.20.0)
       atomically: 1.7.0
       debounce-fn: 4.0.0
       dot-prop: 6.0.1
@@ -6266,8 +6260,6 @@ snapshots:
   playwright@1.64.1:
     dependencies:
       playwright-core: 1.64.1
-
-  poor-mans-t-sql-formatter@1.6.10: {}
 
   postcss-selector-parser@7.1.7:
     dependencies:

@@ -2,6 +2,7 @@
 // Shapes mirror quervio-core's serde output.
 import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { ExecutionEvent, Outcome } from "@/lib/execution";
+import type { FormatStyle, LaidOut } from "@/lib/format-sql";
 
 export type SortDirection = "ascending" | "descending";
 
@@ -150,6 +151,8 @@ export const api = {
   dataDir: () => invoke<string>("settings_data_dir"),
   tabsSave: (snapshot: string) => invoke<void>("tabs_save", { snapshot }),
 
+  /** Each Batch laid out by sqruff (src-tauri/src/formatting.rs). */
+  formatSql: (batches: string[], style: FormatStyle) => invoke<LaidOut[]>("format_sql", { batches, style }),
   checkScript: (script: string, baseLine: number) => invoke<ScriptCheck>("query_check", { script, baseLine }),
   useDatabase: (tabId: string, database: string) => invoke<string>("query_use_database", { tabId, database }),
   endTransactions: (tabId: string, commit: boolean) =>

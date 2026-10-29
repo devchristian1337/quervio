@@ -1,5 +1,7 @@
 # Formattazione delle query con Poor Man's T-SQL Formatter
 
+Sostituita da [ADR 0006](0006-formatter-sqruff.md): il formatter ora è sqruff, in Rust.
+
 Le query si formattano con Poor Man's T-SQL Formatter (pacchetto npm `poor-mans-t-sql-formatter`, versione 1.6.10 fissata esattamente). L'alternativa era `sql-formatter`, con licenza MIT e mantenuta, che però sbaglia sul T-SQL procedurale: spezza `SET NOCOUNT ON`, scambia `WITH (NOLOCK)` per una CTE e divide `DECLARE @t TABLE`. Poor Man's produce uno stile da SSMS, è corretto anche su procedure, `IF`/`BEGIN`/`END`, `MERGE` e hint, e lascia intatti i commenti. Scrivere un formatter nostro avrebbe richiesto troppo lavoro per arrivare allo stesso livello.
 
 ## Consequences
