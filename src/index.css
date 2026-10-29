@@ -190,6 +190,16 @@
   #root {
     @apply h-full overflow-hidden;
     }
+  /* No spin arrows on number fields: the Settings step with ui/quantity's
+     buttons, and IDs, sizes and days elsewhere are typed. */
+  input[type="number"] {
+    appearance: textfield;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    appearance: none;
+    margin: 0;
+  }
 }
 /* Selected text in the theme's colour, like a selection in the SQL editor,
    instead of the browser's blue. */

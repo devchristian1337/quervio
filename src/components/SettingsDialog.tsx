@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { GlowingKeyboard } from "@/components/ui/glowing-keyboard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { QuantityDecrease, QuantityIncrease, QuantityValue } from "@/components/ui/quantity";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/interfaces-select";
 import { ScrollFade } from "@/components/ui/scroll-fade";
 import { Switch } from "@/components/ui/switch";
@@ -137,7 +138,19 @@ function Row({ label, help, children }: { label: string; help?: string; children
 }
 
 /** A number field that saves only valid values within its range. */
+/** Rounds away the float noise of stepping (0.1 + 0.5), to the precision of the step and minimum. */
+function stepped(value: number, ...by: number[]) {
+  const places = Math.max(...by.map((n) => (String(n).split(".")[1] ?? "").length));
+  return Number(value.toFixed(places));
+}
+
+/**
+ * A number between min and max: minus and plus step it, and the value can be
+ * typed (Arrow Up and Down step it too). An entry out of range or not a
+ * number reverts when the field loses focus.
+ */
 function NumberField({
+  label,
   value,
   min,
   max,
@@ -145,6 +158,7 @@ function NumberField({
   suffix,
   onChange,
 }: {
+  label: string;
   value: number;
   min: number;
   max: number;
@@ -153,23 +167,56 @@ function NumberField({
   onChange: (value: number) => void;
 }) {
   const [text, setText] = useState(String(value));
+  const [editing, setEditing] = useState(false);
   useEffect(() => setText(String(value)), [value]);
+  const stepBy = (direction: 1 | -1) =>
+    onChange(Math.min(max, Math.max(min, stepped(value + direction * step, step, min))));
   return (
     <div className="flex items-center gap-2">
-      <Input
-        type="number"
-        className="w-28 text-right"
-        min={min}
-        max={max}
-        step={step}
-        value={text}
-        onChange={(event) => {
-          setText(event.target.value);
-          const next = Number(event.target.value);
-          if (event.target.value !== "" && Number.isFinite(next) && next >= min && next <= max) onChange(next);
-        }}
-        onBlur={() => setText(String(value))}
-      />
+      <div
+        role="group"
+        aria-label={label}
+        className="grid h-9 grid-cols-[repeat(3,max-content)] items-center rounded-md border border-input px-0.5 shadow-xs transition-[color,box-shadow] has-[input:focus-visible]:border-ring has-[input:focus-visible]:ring-1 has-[input:focus-visible]:ring-ring has-[input:focus-visible]:ring-inset dark:bg-input/30"
+      >
+        <QuantityDecrease className="rounded-[5px]" value={value} min={min} onClick={() => stepBy(-1)} />
+        {/* The typed field lies over the animated value, which shows while it is not being edited. */}
+        <div className="relative h-full w-20">
+          <QuantityValue aria-hidden className={cn("h-full text-sm", editing && "invisible")}>
+            {String(value)}
+          </QuantityValue>
+          <Input
+            aria-label={label}
+            inputMode="decimal"
+            className={cn(
+              "absolute inset-0 h-full rounded-none border-0 bg-transparent px-1 text-center tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent",
+              !editing && "text-transparent caret-transparent",
+            )}
+            value={text}
+            onFocus={(event) => {
+              setEditing(true);
+              event.currentTarget.select();
+            }}
+            onChange={(event) => {
+              setText(event.target.value);
+              const next = Number(event.target.value);
+              if (event.target.value.trim() !== "" && Number.isFinite(next) && next >= min && next <= max) onChange(next);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                event.preventDefault();
+                stepBy(event.key === "ArrowUp" ? 1 : -1);
+              } else if (event.key === "Enter") {
+                event.currentTarget.blur();
+              }
+            }}
+            onBlur={() => {
+              setEditing(false);
+              setText(String(value));
+            }}
+          />
+        </div>
+        <QuantityIncrease className="rounded-[5px]" value={value} max={max} onClick={() => stepBy(1)} />
+      </div>
       {suffix && <span className="w-14 text-xs text-muted-foreground">{suffix}</span>}
     </div>
   );
@@ -315,7 +362,7 @@ function EditorSection() {
         </Select>
       </Row>
       <Row label="Font size">
-        <NumberField value={editor.fontSize} min={EDITOR_FONT_SIZE.min} max={EDITOR_FONT_SIZE.max} suffix="px" onChange={(fontSize) => update("editor", { fontSize })} />
+        <NumberField label="Font size" value={editor.fontSize} min={EDITOR_FONT_SIZE.min} max={EDITOR_FONT_SIZE.max} suffix="px" onChange={(fontSize) => update("editor", { fontSize })} />
       </Row>
       <Row label="Tab size">
         <Select value={String(editor.tabSize)} onValueChange={(size) => update("editor", { tabSize: Number(size) })}>
@@ -404,6 +451,7 @@ function QuerySection() {
       <Heading title="Query" description="Limits and safeguards for every execution. They apply to the next run." />
       <Row label="Execution timeout" help="Cancel a query that runs longer than this. 0 waits forever, as SSMS.">
         <NumberField
+          label="Execution timeout"
           value={query.timeoutSeconds}
           min={0}
           max={86_400}
@@ -413,6 +461,7 @@ function QuerySection() {
       </Row>
       <Row label="Rows per result set" help="Reading stops here, with a message. Rows are kept in memory.">
         <NumberField
+          label="Rows per result set"
           value={query.maxRows}
           min={1}
           max={10_000_000}
@@ -423,6 +472,7 @@ function QuerySection() {
       </Row>
       <Row label="Text per cell" help="Longer values are cut; the value viewer says so.">
         <NumberField
+          label="Text per cell"
           value={query.maxCellMB}
           min={0.1}
           max={64}
