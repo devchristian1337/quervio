@@ -2,7 +2,7 @@
 // (http://localhost:1420/?mock). Never bundled into a release build.
 import type { Channel } from "@tauri-apps/api/core";
 import { mockIPC } from "@tauri-apps/api/mocks";
-import type { CatalogItem, SavedConnection } from "@/lib/api";
+import type { CatalogItem, SavedConnection, SsmsConnection } from "@/lib/api";
 import type { ExecutionEvent } from "@/lib/execution";
 
 const connection: SavedConnection = {
@@ -15,6 +15,19 @@ const connection: SavedConnection = {
   encrypt: "mandatory",
   trustServerCertificate: true,
 };
+
+// What the mock's SSMS knows: registered servers in groups, then its history.
+const ssms: SsmsConnection[] = [
+  ...[["Aurelia", "Aurelia [Ambulatorio]", "10.0.1.5"], ["Aurelia", "Aurelia [Ricoveri]", "10.0.1.6"], ["Camilliani", "Camilliani [Produzione]", "10.0.2.5"], ["", "Nightly", "10.0.9.9"]].map(
+    ([group, name, server]): SsmsConnection => ({
+      id: `registered:${group}/${name}`, name, groups: group ? [group] : [], server, authentication: { kind: "sql", userName: "sa" },
+      defaultDatabase: "H2O_BASE", encrypt: "optional", trustServerCertificate: true, lastUsed: null, source: "registered", ssmsVersion: null, hasPassword: true,
+    }),
+  ),
+  { id: "history:localhost,14333|sql:sa", name: "", groups: [], server: "localhost,14333", authentication: { kind: "sql", userName: "sa" }, defaultDatabase: null, encrypt: "optional", trustServerCertificate: true, lastUsed: Date.now() - 86_400_000, source: "history", ssmsVersion: "21.0", hasPassword: false },
+  { id: "history:10.0.3.7|sql:app", name: "", groups: [], server: "10.0.3.7", authentication: { kind: "sql", userName: "app" }, defaultDatabase: null, encrypt: "optional", trustServerCertificate: true, lastUsed: Date.now() - 40 * 86_400_000, source: "history", ssmsVersion: "20.0", hasPassword: false },
+];
+const imported: SavedConnection[] = [];
 
 const item = (name: string, extra: Partial<CatalogItem> = {}): CatalogItem => ({
   name,
@@ -125,7 +138,16 @@ mockIPC(async (cmd, args) => {
     case "query_sqlcmd_prepare":return {token: "mock-sqlcmd", script: a.script, hasLocalCommands: /!!|:out|:error/i.test(String(a.script))};
     case "language_request":return {result: null};
     case "list_connections":
-      return [connection];
+      return [connection, ...imported];
+    case "ssms_connections":
+      return ssms;
+    case "ssms_import":
+      for (const pick of a.picks as { id: string; environment: SavedConnection["environment"] }[]) {
+        const found = ssms.find((c) => c.id === pick.id);
+        if (!found) continue;
+        imported.push({ id: crypto.randomUUID(), name: [...found.groups, found.name].filter(Boolean).join(" / "), server: found.server, authentication: found.authentication, defaultDatabase: found.defaultDatabase, environment: pick.environment, encrypt: found.encrypt, trustServerCertificate: found.trustServerCertificate });
+      }
+      return imported;
     case "explorer_connect":
     case "test_connection":
       return server;

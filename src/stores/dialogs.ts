@@ -126,3 +126,14 @@ export const useConnectDialog = create<{
   show: (editing = null) => set({ open: true, editing }),
   setOpen: (open) => set({ open }),
 }));
+
+/** The Import from SSMS dialog, opened from the start screen and the Object Explorer. */
+export const useSsmsImportDialog = create<{
+  open: boolean;
+  show: () => void;
+  setOpen: (open: boolean) => void;
+}>()((set) => ({
+  open: false,
+  show: () => set({ open: true }),
+  setOpen: (open) => set({ open }),
+}));

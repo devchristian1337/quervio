@@ -43,6 +43,8 @@ pub fn run() {
             language::language_request,
             language::language_close,
             explorer::list_connections,
+            explorer::ssms_connections,
+            explorer::ssms_import,
             explorer::save_connection,
             explorer::delete_connection,
             explorer::test_connection,

@@ -7,9 +7,11 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use quervio_core::catalog::{self, CatalogItem, ObjectFolder, TableFolder};
-use quervio_core::connection::{Authentication, ConnectionStore, SavedConnection};
+use quervio_core::connection::{Authentication, ConnectionStore, Environment, SavedConnection};
 use quervio_core::secrets::{DpapiSecretStore, SecretStore};
 use quervio_core::session::{ServerInfo, Session};
+use quervio_core::ssms::{self, SsmsConnection};
+use serde::Deserialize;
 use tauri::State;
 
 const APPLICATION_NAME: &str = "Quervio - Object Explorer";
@@ -146,6 +148,51 @@ pub(crate) type CommandResult<T> = Result<T, String>;
 
 pub(crate) fn message(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+/// What SSMS knows on this PC, or the registered servers of an exported
+/// `.regsrvr` file.
+#[tauri::command]
+pub fn ssms_connections(file: Option<String>) -> CommandResult<Vec<SsmsConnection>> {
+    match file {
+        Some(path) => ssms::read_file(Path::new(&path)).map_err(message),
+        None => Ok(ssms::app_data().map(|dir| ssms::discover(&dir)).unwrap_or_default()),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SsmsPick {
+    id: String,
+    environment: Environment,
+}
+
+/// Saves the picked SSMS connections, with the passwords SSMS saved for this
+/// Windows user. They are read again here, so no password reaches the page.
+#[tauri::command]
+pub fn ssms_import(
+    state: State<'_, ExplorerState>,
+    file: Option<String>,
+    picks: Vec<SsmsPick>,
+) -> CommandResult<Vec<SavedConnection>> {
+    let found = ssms_connections(file)?;
+    let mut saved = Vec::new();
+    for pick in picks {
+        let Some(connection) = found.iter().find(|c| c.id == pick.id) else {
+            continue;
+        };
+        let created = state
+            .connections
+            .lock()
+            .unwrap()
+            .save(connection.to_saved(pick.environment))
+            .map_err(message)?;
+        if let (Authentication::Sql { .. }, Some(password)) = (&created.authentication, connection.password()) {
+            state.secrets.set(&created.id, &password).map_err(message)?;
+        }
+        saved.push(created);
+    }
+    Ok(saved)
 }
 
 #[tauri::command]

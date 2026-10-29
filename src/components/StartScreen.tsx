@@ -1,4 +1,4 @@
-import { FolderOpen, Plus } from "lucide-react";
+import { FolderOpen, Import, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/flexnative-tooltip";
 import { ScrollFade } from "@/components/ui/scroll-fade";
@@ -8,7 +8,7 @@ import { ENVIRONMENTS } from "@/lib/environment";
 import { openFile } from "@/lib/files";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
-import { useConnectDialog } from "@/stores/dialogs";
+import { useConnectDialog, useSsmsImportDialog } from "@/stores/dialogs";
 import { useQueries } from "@/stores/queries";
 
 // Q Prisma v2 (design/branding); the transparent cut keeps its centre open on any theme.
@@ -24,6 +24,7 @@ const FIRST_SHORTCUTS: CommandId[] = ["newQuery", "execute", "openFile", "format
 export function StartScreen() {
   const { connections, loaded } = useConnections();
   const showConnect = useConnectDialog((s) => s.show);
+  const showImport = useSsmsImportDialog((s) => s.show);
 
   return (
     <ScrollFade className="min-h-0 flex-1">
@@ -38,6 +39,9 @@ export function StartScreen() {
                 : `${connections.length} saved ${connections.length === 1 ? "connection" : "connections"}. Open a query on one.`}
             </p>
           </div>
+          <Button size="sm" variant="outline" onClick={() => showImport()}>
+            <Import /> Import from SSMS
+          </Button>
           <Button size="sm" variant="outline" onClick={() => showConnect()}>
             <Plus /> New connection
           </Button>
@@ -50,9 +54,14 @@ export function StartScreen() {
           {loaded && connections.length === 0 ? (
             <div className="flex items-center justify-between gap-4 rounded-md border border-dashed px-4 py-3">
               <span className="text-muted-foreground">No saved connections yet.</span>
-              <Button size="sm" onClick={() => showConnect()}>
-                <Plus /> New connection
-              </Button>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => showImport()}>
+                  <Import /> Import from SSMS
+                </Button>
+                <Button size="sm" onClick={() => showConnect()}>
+                  <Plus /> New connection
+                </Button>
+              </div>
             </div>
           ) : (
             <ul className="border-t">

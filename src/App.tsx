@@ -10,6 +10,7 @@ import { SqlcmdConfirmation } from "@/components/management/SqlcmdConfirmation";
 import { Toaster } from "@/components/ui/basic-toast";
 import { SafetyDialogs } from "@/components/SafetyDialogs";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { SsmsImportDialog } from "@/components/SsmsImportDialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useConnections } from "@/stores/connections";
 import { restoreTabs } from "@/lib/session-restore";
@@ -93,6 +94,7 @@ export default function App() {
     <SafetyDialogs />
     <SqlcmdConfirmation />
     <SettingsDialog />
+    <SsmsImportDialog />
     <Toaster />
     </>
   );
