@@ -18,7 +18,7 @@ Sono attive solo le regole di layout (`LT01`–`LT15`) e il maiuscolo o minuscol
   - `AS BEGIN` resta sulla riga della firma della procedura;
   - `MERGE` va a capo in punti poco naturali.
 - Una parte che sqruff non riesce a leggere resta com'era scritta. Il resto viene formattato e una notifica indica la prima riga lasciata intatta.
-- sqruff legge `N'x'` come un nome seguito da una stringa, e la regola sugli spazi (`LT01`) li separa: `N 'x'` fa di `N` un alias. Per questo il prefisso `N` viene tolto prima della formattazione e rimesso dopo, sulle stesse stringhe.
+- sqruff legge `N'x'` come un nome seguito da una stringa, e la regola sugli spazi (`LT01`) li separa: `N 'x'` fa di `N` un alias. Per questo il prefisso `N` viene tolto prima della formattazione e rimesso dopo, sulle stesse stringhe. La 0.44.0 lascia intatto `N'x'` ma separa ancora il minuscolo `n'x'` in `n 'x'` (anche in `WHERE`, `IN`, `VALUES`, `CASE` e negli argomenti di `EXEC`). Il test `keeps_unicode_strings_together` fallisce se si toglie questo passaggio.
 - Il commento a fine riga resta dopo il codice che seguiva (`trailing_comments = after`). Con il valore predefinito sqruff lo sposta prima, e l'ordine dei token cambierebbe.
 - Il controllo dell'ADR 0004 resta: il risultato è accettato solo se ha gli stessi Batch, le stesse righe `GO` e gli stessi token dell'originale, letti come li legge SQL Server. Serve davvero: sqruff legge diversamente un commento a blocco annidato subito dopo una `/` (`2//* /* */ */1`), e il suo risultato cambierebbe la condizione di una `DELETE`.
 - Ogni Batch si formatta da solo e le righe `GO` restano come sono scritte. sqruff non le divide come `batch.rs`.

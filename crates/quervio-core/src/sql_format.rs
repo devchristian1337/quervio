@@ -42,7 +42,8 @@ pub struct Formatted {
 pub fn format_batch(sql: &str, style: Style) -> Result<Formatted, String> {
     // sqruff lexes N'x' as a name and a string, and its spacing rule puts a
     // space between them, which makes N an alias. The strings go through
-    // without the prefix and get it back afterwards.
+    // without the prefix and get it back afterwards. 0.44.0 keeps N'x'
+    // intact but still splits a lowercase n'x' (docs/adr/0006).
     let (sql, prefixes) = without_unicode_prefixes(sql);
     let linted = linter(style)?
         .lint_string(&sql, None, true)
