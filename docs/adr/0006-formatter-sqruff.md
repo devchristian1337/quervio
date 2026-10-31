@@ -2,7 +2,7 @@
 
 Sostituisce [ADR 0004](0004-formatter-poor-mans-t-sql.md).
 
-Format Document e Format Selection usano `sqruff-lib` (github.com/quarylabs/sqruff, licenza Apache-2.0, versione 0.43.0 fissata esattamente) con il dialetto `tsql`. Il modulo è `crates/quervio-core/src/sql_format.rs` e il frontend lo chiama col comando `format_sql`. Poor Man's T-SQL Formatter imponeva la licenza AGPL-3.0 a tutta l'app, non era più aggiornato dal 2022 e pesava 1,2 MB di JavaScript transpilato da C#.
+Format Document e Format Selection usano `sqruff-lib` (github.com/quarylabs/sqruff, licenza Apache-2.0, versione 0.44.0 fissata esattamente) con il dialetto `tsql`. Il modulo è `crates/quervio-core/src/sql_format.rs` e il frontend lo chiama col comando `format_sql`. Poor Man's T-SQL Formatter imponeva la licenza AGPL-3.0 a tutta l'app, non era più aggiornato dal 2022 e pesava 1,2 MB di JavaScript transpilato da C#.
 
 Sono attive solo le regole di layout (`LT01`–`LT15`) e il maiuscolo o minuscolo di parole chiave e `NULL` (`CP01`, `CP04`). Il maiuscolo dei nomi (`CP02`) resta spento: con una collation case-sensitive cambierebbe il codice.
 
