@@ -106,7 +106,9 @@ export function SettingsDialog() {
           // Lays out its own scroll, under a keyboard that stays in view.
           <ShortcutsSection />
         ) : (
-          <ScrollFade className="scrollbar-inset min-w-0 flex-1 px-8 py-6">
+          // One per section: a section opens at its top, not at the scroll
+          // position the previous one was left at.
+          <ScrollFade key={section} className="scrollbar-inset min-w-0 flex-1 px-8 py-6">
             {section === "appearance" && <AppearanceSection />}
             {section === "editor" && <EditorSection />}
             {section === "results" && <ResultsSection />}
@@ -704,7 +706,7 @@ const LICENSES: [string, string][] = [
   ["Motion", "MIT"],
   ["Lucide icons", "ISC"],
   ["Zustand", "MIT"],
-  ["Sonner", "MIT"],
+  ["Ark UI", "MIT"],
 ];
 
 const FONT_LICENCES: [string, string][] = [
@@ -826,11 +828,9 @@ function AboutSection() {
       </Row>
 
       <h4 className="mt-8 mb-1 text-sm font-semibold">Open source</h4>
-      <p className="mb-2 text-xs text-muted-foreground">
-        Quervio is built on these projects. The formatter is AGPL-3.0: if Quervio is distributed outside the team, its
-        source must be made available under the same terms.
-      </p>
-      <div className="divide-y rounded-md border">
+      <p className="mb-2 text-xs text-muted-foreground">Quervio is built on these projects.</p>
+      {/* Groups, so the scroll fade shrinks and blurs row by row, not the whole list. */}
+      <div role="group" aria-label="Open source licences" className="divide-y rounded-md border">
         {LICENSES.map(([name, license]) => (
           <div key={name} className="flex items-center justify-between px-3 py-1.5 text-sm">
             <span>{name}</span>
@@ -843,7 +843,7 @@ function AboutSection() {
       <p className="mb-2 text-xs text-muted-foreground">
         Bundled with Quervio under the SIL Open Font License 1.1, which travels with them.
       </p>
-      <div className="divide-y rounded-md border">
+      <div role="group" aria-label="Font licences" className="divide-y rounded-md border">
         {FONT_LICENCES.map(([name, text]) => (
           <details key={name} className="group px-3 py-1.5 text-sm">
             <summary className="flex list-none items-center justify-between">
