@@ -38,7 +38,13 @@ const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
 
     const boxOf = (index: number): Box | null => {
       const element = tabRefs.current[index]
-      return element ? { left: element.offsetLeft, width: element.offsetWidth } : null
+      const list = listRef.current
+      if (!element || !list) return null
+      // Decorations belong to the outer list, while offsetLeft is relative
+      // to the inner tablist and omits the outer list's horizontal padding.
+      const tabBox = element.getBoundingClientRect()
+      const listBox = list.getBoundingClientRect()
+      return { left: tabBox.left - listBox.left - list.clientLeft, width: tabBox.width }
     }
 
     useLayoutEffect(() => {
