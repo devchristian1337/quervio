@@ -43,7 +43,8 @@ interface Props {
 export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: Props) {
   const save = useConnections((s) => s.save);
   const connections = useConnections((s) => s.connections);
-  const groups = groupNames(connections);
+  const savedGroups = useConnections((s) => s.groups);
+  const groups = groupNames(connections, savedGroups);
   const [draft, setDraft] = useState<SavedConnection>(newConnection);
   const [password, setPassword] = useState("");
   const [test, setTest] = useState<TestState>({ status: "idle" });

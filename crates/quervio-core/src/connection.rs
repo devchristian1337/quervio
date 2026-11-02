@@ -69,22 +69,66 @@ pub enum Encrypt {
 pub struct ConnectionStore {
     path: PathBuf,
     connections: Vec<SavedConnection>,
+    groups: Vec<String>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct StoredConnections {
+    connections: Vec<SavedConnection>,
+    #[serde(default)]
+    groups: Vec<String>,
+}
+
+// Versions before explicit groups stored just an array of connections.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ConnectionFile {
+    Catalog(StoredConnections),
+    Legacy(Vec<SavedConnection>),
 }
 
 impl ConnectionStore {
     /// Opens the store at `path`; a missing file is an empty store.
     pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
-        let connections = match fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes)?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        let data = match fs::read(&path) {
+            Ok(bytes) => match serde_json::from_slice(&bytes)? {
+                ConnectionFile::Catalog(data) => data,
+                ConnectionFile::Legacy(connections) => StoredConnections { connections, groups: Vec::new() },
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => StoredConnections::default(),
             Err(error) => return Err(error.into()),
         };
-        Ok(Self { path, connections })
+        let mut store = Self { path, connections: data.connections, groups: data.groups };
+        store.groups = store.list_groups();
+        Ok(store)
     }
 
     pub fn list(&self) -> &[SavedConnection] {
         &self.connections
+    }
+
+    /// Groups have their own lifetime, including when their last server is deleted.
+    pub fn list_groups(&self) -> Vec<String> {
+        let mut groups = self.groups.clone();
+        groups.extend(self.connections.iter().filter_map(|c| c.group.clone()));
+        groups.sort();
+        groups.dedup();
+        groups
+    }
+
+    /// Renames a group (even an empty one), or explicitly ungroups its servers.
+    pub fn update_group(&mut self, name: &str, new_name: Option<&str>) -> Result<()> {
+        let new_name = new_name.map(str::trim).filter(|s| !s.is_empty());
+        self.groups.retain(|g| g != name);
+        for connection in self.connections.iter_mut().filter(|c| c.group.as_deref() == Some(name)) {
+            connection.group = new_name.map(str::to_string);
+        }
+        if let Some(name) = new_name {
+            self.groups.push(name.to_string());
+        }
+        self.groups = self.list_groups();
+        self.write()
     }
 
     pub fn get(&self, id: &str) -> Result<&SavedConnection> {
@@ -103,6 +147,7 @@ impl ConnectionStore {
             Some(existing) => *existing = connection.clone(),
             None => self.connections.push(connection.clone()),
         }
+        self.groups = self.list_groups();
         self.write()?;
         Ok(connection)
     }
@@ -115,11 +160,13 @@ impl ConnectionStore {
             connection.group = group.clone();
             moved.push(connection.clone());
         }
+        self.groups = self.list_groups();
         self.write()?;
         Ok(moved)
     }
 
     pub fn remove(&mut self, id: &str) -> Result<()> {
+        self.groups = self.list_groups();
         self.connections.retain(|connection| connection.id != id);
         self.write()
     }
@@ -130,7 +177,8 @@ impl ConnectionStore {
             fs::create_dir_all(parent)?;
         }
         let temporary = temporary_path(&self.path);
-        fs::write(&temporary, serde_json::to_vec_pretty(&self.connections)?)?;
+        let data = StoredConnections { connections: self.connections.clone(), groups: self.groups.clone() };
+        fs::write(&temporary, serde_json::to_vec_pretty(&data)?)?;
         fs::rename(&temporary, &self.path)?;
         Ok(())
     }
@@ -200,6 +248,44 @@ mod tests {
             store.get(&first.id),
             Err(Error::UnknownConnection(_))
         ));
+    }
+
+    #[test]
+    fn deleting_the_last_server_keeps_the_group_after_reopening() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        // Start from the original array format, as existing installations do.
+        let mut connection = sample();
+        connection.id = "existing".into();
+        fs::write(&path, serde_json::to_vec(&[connection]).unwrap()).unwrap();
+        let mut store = ConnectionStore::open(&path).unwrap();
+        store.remove("existing").unwrap();
+        let mut reopened = ConnectionStore::open(&path).unwrap();
+        assert!(reopened.list().is_empty());
+        assert_eq!(reopened.list_groups(), ["Rossi"]);
+        reopened.update_group("Rossi", Some("Renamed")).unwrap();
+        assert_eq!(ConnectionStore::open(&path).unwrap().list_groups(), ["Renamed"]);
+        reopened.update_group("Renamed", None).unwrap();
+        assert!(ConnectionStore::open(&path).unwrap().list_groups().is_empty());
+    }
+
+    #[test]
+    fn updating_a_group_preserves_connections_and_merges_existing_groups() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let mut store = ConnectionStore::open(&path).unwrap();
+        let first = store.save(sample()).unwrap();
+        let mut second = sample();
+        second.group = Some("Other".into());
+        store.save(second).unwrap();
+        store.update_group("Rossi", Some("Other")).unwrap();
+        assert_eq!(store.list_groups(), ["Other"]);
+        assert_eq!(store.get(&first.id).unwrap().group.as_deref(), Some("Other"));
+        store.update_group("Other", None).unwrap();
+        let reopened = ConnectionStore::open(&path).unwrap();
+        assert_eq!(reopened.list().len(), 2);
+        assert!(reopened.list().iter().all(|c| c.group.is_none()));
+        assert!(reopened.list_groups().is_empty());
     }
 
     #[test]

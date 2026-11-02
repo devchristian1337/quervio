@@ -33,6 +33,7 @@ const saved: SavedConnection[] = [
   connection,
   { ...connection, id: "legacy", name: "Aurelia / Aurelia [Ambulatorio]", server: "10.0.1.5", environment: "test", defaultDatabase: "H2O_BASE", encrypt: "optional" },
 ];
+const savedGroups = new Set<string>();
 
 const item = (name: string, extra: Partial<CatalogItem> = {}): CatalogItem => ({
   name,
@@ -145,9 +146,30 @@ mockIPC(async (cmd, args) => {
     // Copies, as IPC hands over: the page must not share the mock's objects.
     case "list_connections":
       return structuredClone(saved);
+    case "list_connection_groups":
+      return [...new Set([...savedGroups, ...saved.flatMap((c) => c.group ? [c.group] : [])])];
+    case "delete_connection": {
+      const index = saved.findIndex((c) => c.id === a.id);
+      if (index !== -1) {
+        if (saved[index].group) savedGroups.add(saved[index].group!);
+        saved.splice(index, 1);
+      }
+      return null;
+    }
+    case "update_connection_group": {
+      savedGroups.delete(String(a.name));
+      const name = (a.newName as string | null)?.trim() || null;
+      for (const c of saved) if (c.group === a.name) c.group = name;
+      if (name) savedGroups.add(name);
+      return null;
+    }
     case "group_connections": {
       const moved = saved.filter((c) => (a.ids as string[]).includes(c.id));
-      for (const c of moved) c.group = (a.group as string | null)?.trim() || null;
+      for (const c of moved) {
+        if (c.group) savedGroups.add(c.group);
+        c.group = (a.group as string | null)?.trim() || null;
+        if (c.group) savedGroups.add(c.group);
+      }
       return structuredClone(moved);
     }
     case "ssms_connections":

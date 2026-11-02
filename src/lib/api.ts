@@ -83,6 +83,9 @@ export type TableFolder = "columns" | "keys" | "indexes" | "triggers";
 
 export const api = {
   listConnections: () => invoke<SavedConnection[]>("list_connections"),
+  listConnectionGroups: () => invoke<string[]>("list_connection_groups"),
+  updateConnectionGroup: (name: string, newName: string | null) =>
+    invoke<void>("update_connection_group", { name, newName }),
   saveConnection: (connection: SavedConnection, password: string | null) =>
     invoke<SavedConnection>("save_connection", { connection, password }),
   deleteConnection: (id: string) => invoke<void>("delete_connection", { id }),

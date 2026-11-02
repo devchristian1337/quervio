@@ -226,6 +226,21 @@ pub fn list_connections(state: State<'_, ExplorerState>) -> Vec<SavedConnection>
     state.connections.lock().unwrap().list().to_vec()
 }
 
+#[tauri::command]
+pub fn list_connection_groups(state: State<'_, ExplorerState>) -> Vec<String> {
+    state.connections.lock().unwrap().list_groups()
+}
+
+/// Rename a group, or explicitly ungroup its servers with no new name.
+#[tauri::command]
+pub fn update_connection_group(
+    state: State<'_, ExplorerState>,
+    name: String,
+    new_name: Option<String>,
+) -> CommandResult<()> {
+    state.connections.lock().unwrap().update_group(&name, new_name.as_deref()).map_err(message)
+}
+
 /// Saves the connection and, for SQL logins, the password when one was typed.
 #[tauri::command]
 pub async fn save_connection(

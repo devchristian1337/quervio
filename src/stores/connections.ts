@@ -3,19 +3,24 @@ import { api, displayName, type SavedConnection } from "@/lib/api";
 
 interface ConnectionsState {
   connections: SavedConnection[];
+  groups: string[];
   loaded: boolean;
   load: () => Promise<void>;
   save: (connection: SavedConnection, password: string | null) => Promise<SavedConnection>;
   remove: (id: string) => Promise<void>;
   /** Moves connections into a group, or out of any with null. */
   setGroup: (ids: string[], group: string | null) => Promise<void>;
+  updateGroup: (name: string, newName: string | null) => Promise<void>;
 }
 
 export const useConnections = create<ConnectionsState>((set, get) => ({
   connections: [],
+  groups: [],
   loaded: false,
   load: async () => {
-    set({ connections: await api.listConnections(), loaded: true });
+    const connections = await api.listConnections();
+    const groups = await api.listConnectionGroups();
+    set({ connections, groups, loaded: true });
   },
   save: async (connection, password) => {
     const saved = await api.saveConnection(connection, password);
@@ -23,16 +28,24 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
     const index = get().connections.findIndex((c) => c.id === saved.id);
     const connections = [...others];
     connections.splice(index === -1 ? others.length : index, 0, saved);
-    set({ connections });
+    set({ connections, groups: groupNames(connections, get().groups) });
     return saved;
   },
   remove: async (id) => {
     await api.deleteConnection(id);
-    set({ connections: get().connections.filter((c) => c.id !== id) });
+    set({
+      connections: get().connections.filter((c) => c.id !== id),
+      groups: groupNames(get().connections, get().groups),
+    });
   },
   setGroup: async (ids, group) => {
     const moved = new Map((await api.groupConnections(ids, group)).map((c) => [c.id, c]));
-    set({ connections: get().connections.map((c) => moved.get(c.id) ?? c) });
+    const connections = get().connections.map((c) => moved.get(c.id) ?? c);
+    set({ connections, groups: groupNames(connections, get().groups) });
+  },
+  updateGroup: async (name, newName) => {
+    await api.updateConnectionGroup(name, newName);
+    await get().load();
   },
 }));
 
@@ -48,9 +61,9 @@ export interface ConnectionGroup {
  * Saved Connections as the Object Explorer and the start screen list them:
  * the groups by name, then the connections in none, each by name, as in SSMS.
  */
-export function byGroup(connections: SavedConnection[]): ConnectionGroup[] {
+export function byGroup(connections: SavedConnection[], savedGroups: string[] = []): ConnectionGroup[] {
   const sorted = [...connections].sort((a, b) => byName(displayName(a), displayName(b)));
-  const groups = [...new Set(sorted.flatMap((c) => (c.group ? [c.group] : [])))].sort(byName);
+  const groups = [...new Set([...savedGroups, ...sorted.flatMap((c) => (c.group ? [c.group] : []))])].sort(byName);
   const loose = sorted.filter((c) => !c.group);
   return [
     ...groups.map((group) => ({ group, connections: sorted.filter((c) => c.group === group) })),
@@ -59,8 +72,8 @@ export function byGroup(connections: SavedConnection[]): ConnectionGroup[] {
 }
 
 /** The names of the connection groups, sorted. */
-export function groupNames(connections: SavedConnection[]): string[] {
-  return byGroup(connections).flatMap((g) => (g.group ? [g.group] : []));
+export function groupNames(connections: SavedConnection[], savedGroups: string[] = []): string[] {
+  return byGroup(connections, savedGroups).flatMap((g) => (g.group ? [g.group] : []));
 }
 
 export function newConnection(): SavedConnection {

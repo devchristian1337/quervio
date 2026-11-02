@@ -203,6 +203,9 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
   const blocks = useRef(initialBlocks);
   const pending = useRef(new Set<number>());
   const [selection, setSelection] = useState<GridSelection>(emptySelection);
+  // Arrow gestures must bypass Glide's header selection, including its Shift
+  // anchor, which is updated on pointer-down before onHeaderClicked runs.
+  const sortGesture = useRef<{ column: number; pointerId: number } | null>(null);
   const [widths, setWidths] = useState<Record<number, number>>({});
   const [measuredWidths, setMeasuredWidths] = useState<number[]>([]);
   const [viewer, setViewer] = useState<{ row: number; column: number } | null>(null);
@@ -469,11 +472,53 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
   const size = SIZES[density];
   const sortedName = sort ? set.columns[sort.column] || "(No column name)" : null;
 
+  function sortArrowAt(clientX: number, clientY: number): number | null {
+    for (let column = 0; column < columns.length; column++) {
+      const bounds = gridRef.current?.getBounds(column, -1);
+      if (!bounds || clientY < bounds.y || clientY >= bounds.y + bounds.height) continue;
+      const x = clientX - bounds.x;
+      if (x >= 0 && x < bounds.width) {
+        // Leave the column resize edges to Glide.
+        if (x <= 5 || x >= bounds.width - 5) return null;
+        const onArrow = set.kinds[column] === "number" ? x <= SORT_ZONE : x >= bounds.width - SORT_ZONE;
+        return onArrow ? column : null;
+      }
+    }
+    return null;
+  }
+
+  function onGridPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    const column = sortArrowAt(event.clientX, event.clientY);
+    if (column === null) return;
+    sortGesture.current = { column, pointerId: event.pointerId };
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function onGridPointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    const gesture = sortGesture.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    sortGesture.current = null;
+    event.preventDefault();
+    event.stopPropagation();
+    if (gesture.column === sortArrowAt(event.clientX, event.clientY)) {
+      gridRef.current?.focus();
+      void sortBy(gesture.column);
+    }
+  }
+
   return (
     <div className="flex h-full flex-col" onKeyDownCapture={onKeyDown}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="min-h-0 flex-1">
+          <div
+            className="min-h-0 flex-1"
+            onPointerDownCapture={onGridPointerDown}
+            onPointerCancelCapture={() => { sortGesture.current = null; }}
+            onPointerUpCapture={onGridPointerUp}
+          >
             <DataEditor
               ref={gridRef}
               columns={columns}
@@ -498,17 +543,6 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
               maxColumnWidth={Math.max(10_000, ...minimumWidths)}
               onColumnResize={(_column, width, index) => setWidths((w) => ({ ...w, [index]: Math.max(width, minimumWidths[index]) }))}
               onCellActivated={([column, row]) => setViewer({ row, column })}
-              onHeaderClicked={(column, event) => {
-                // The arrow sorts; the rest of the header selects the column, as in SSMS.
-                const onArrow =
-                  set.kinds[column] === "number"
-                    ? event.localEventX <= SORT_ZONE
-                    : event.localEventX >= event.bounds.width - SORT_ZONE;
-                if (onArrow) {
-                  event.preventDefault();
-                  void sortBy(column);
-                }
-              }}
             />
           </div>
         </ContextMenuTrigger>

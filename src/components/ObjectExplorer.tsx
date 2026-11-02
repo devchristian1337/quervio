@@ -57,7 +57,7 @@ type Row =
 const INDENT = 14;
 
 export function ObjectExplorer() {
-  const { connections, loaded, load } = useConnections();
+  const { connections, groups, loaded, load } = useConnections();
   const explorer = useExplorer();
   const settingsKey = useShortcutLabel("settings");
   const newQueryKey = useShortcutLabel("newQuery");
@@ -74,7 +74,7 @@ export function ObjectExplorer() {
   const { roots, members } = useMemo(() => {
     const members = new Map<string, TreeNode[]>();
     const roots: TreeNode[] = [];
-    for (const { group, connections: inGroup } of byGroup(connections)) {
+    for (const { group, connections: inGroup } of byGroup(connections, groups)) {
       const nodes = inGroup.map((c): TreeNode => ({ key: serverKey(c.id), label: displayName(c), kind: { type: "server", connectionId: c.id }, expandable: true }));
       if (group === null) roots.push(...nodes);
       else {
@@ -83,7 +83,7 @@ export function ObjectExplorer() {
       }
     }
     return { roots, members };
-  }, [connections]);
+  }, [connections, groups]);
 
   const rows = useMemo(() => {
     const out: Row[] = [];
@@ -243,7 +243,7 @@ export function ObjectExplorer() {
           !selectedNode && "focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
         )}
       >
-        {loaded && connections.length === 0 && (
+        {loaded && roots.length === 0 && (
           // The start screen and this header's + and import buttons offer the
           // first connection, so the tree only says why it is empty.
           <p className="p-3 text-muted-foreground">No saved connections yet.</p>
@@ -358,7 +358,7 @@ export function ObjectExplorer() {
                   ) : (
                     <NodeIcon node={node} />
                   )}
-                  <span className="shrink-0">{node.label}</span>
+                  <span className={connection ? "min-w-0 truncate" : "shrink-0"} title={connection ? node.label : undefined}>{node.label}</span>
                   {node.detail && (
                     <span className="min-w-0 truncate text-muted-foreground">({node.detail})</span>
                   )}
@@ -404,13 +404,15 @@ export function ObjectExplorer() {
                 {node.kind.type === "group" && (
                   <GroupItems
                     name={node.kind.name}
-                    ids={(members.get(node.key) ?? []).flatMap((n) => (n.kind.type === "server" ? [n.kind.connectionId] : []))}
                     onNewConnection={(group) => dialog.show(null, { group })}
-                    onRename={async (name, ids) => {
+                    onRename={async (name) => {
                       const renamed = await askGroupName(`Rename ${name}`, name, "Rename");
-                      if (renamed && renamed !== name) await moveToGroup(ids, renamed);
+                      if (renamed && renamed !== name) {
+                        await useConnections.getState().updateGroup(name, renamed);
+                        void explorer.expand(groupNode(renamed));
+                      }
                     }}
-                    onUngroup={(ids) => void moveToGroup(ids, null)}
+                    onUngroup={(name) => void useConnections.getState().updateGroup(name, null)}
                   />
                 )}
                 {node.expandable && node.kind.type !== "group" && (
@@ -437,7 +439,7 @@ export function ObjectExplorer() {
                     <ContextMenuSub>
                       <ContextMenuSubTrigger>Move to group</ContextMenuSubTrigger>
                       <ContextMenuSubContent className="max-h-80 min-w-48 overflow-y-auto">
-                        {groupNames(connections)
+                        {groupNames(connections, groups)
                           .filter((name) => name !== connection.group)
                           .map((name) => (
                             <ContextMenuItem key={name} onSelect={() => void moveToGroup([connection.id], name)}>
@@ -518,23 +520,21 @@ function groupNode(name: string): TreeNode {
 /** A connection group's menu: a connection in it, a new name, or none. */
 function GroupItems({
   name,
-  ids,
   onNewConnection,
   onRename,
   onUngroup,
 }: {
   name: string;
-  ids: string[];
   onNewConnection: (group: string) => void;
-  onRename: (name: string, ids: string[]) => Promise<void>;
-  onUngroup: (ids: string[]) => void;
+  onRename: (name: string) => Promise<void>;
+  onUngroup: (name: string) => void;
 }) {
   return (
     <>
       <ContextMenuItem onSelect={() => onNewConnection(name)}>New connection in {name}…</ContextMenuItem>
       <ContextMenuSeparator />
-      <ContextMenuItem onSelect={() => void onRename(name, ids)}>Rename group…</ContextMenuItem>
-      <ContextMenuItem onSelect={() => onUngroup(ids)}>Ungroup</ContextMenuItem>
+      <ContextMenuItem onSelect={() => void onRename(name)}>Rename group…</ContextMenuItem>
+      <ContextMenuItem onSelect={() => onUngroup(name)}>Ungroup</ContextMenuItem>
     </>
   );
 }

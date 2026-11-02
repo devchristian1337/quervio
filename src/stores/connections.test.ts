@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byGroup, newConnection, transportWarning } from "@/stores/connections";
+import { byGroup, groupNames, newConnection, transportWarning } from "@/stores/connections";
 
 describe("newConnection", () => {
   it("checks the server certificate by default", () => {
@@ -26,6 +26,14 @@ describe("transportWarning", () => {
 
 describe("byGroup", () => {
   const connection = (name: string, group: string | null) => ({ ...newConnection(), id: name, name, server: name, group });
+
+  it("keeps empty saved groups, sorted and available as destinations", () => {
+    const connections = [connection("srv", "Beta")];
+    expect(byGroup(connections, ["Empty", "Beta"]).map((g) => [g.group, g.connections.length])).toEqual([
+      ["Beta", 1], ["Empty", 0],
+    ]);
+    expect(groupNames([], ["Empty", "Beta", "Beta"])).toEqual(["Beta", "Empty"]);
+  });
 
   it("lists the groups by name, then the connections in none, each by name", () => {
     const groups = byGroup([

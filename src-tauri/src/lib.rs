@@ -55,6 +55,8 @@ pub fn run() {
             language::language_request,
             language::language_close,
             explorer::list_connections,
+            explorer::list_connection_groups,
+            explorer::update_connection_group,
             explorer::ssms_connections,
             explorer::ssms_import,
             explorer::group_connections,
