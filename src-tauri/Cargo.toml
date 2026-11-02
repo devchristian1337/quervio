@@ -25,3 +25,8 @@ windows-sys.workspace = true
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 velopack = "=1.2.161"
+
+[target.'cfg(windows)'.dependencies]
+# Match Tauri's WebView2 bindings; no additional runtime is distributed.
+webview2-com = "=0.39.1"
+windows-core = "0.62"

@@ -22,6 +22,10 @@ pnpm install
 pnpm tauri dev
 ```
 
+On Windows, WebView2's browser shortcuts (page search, reload, print, zoom and
+DevTools) are disabled. Quervio commands, Monaco editing shortcuts and ordinary
+text editing keep their own keyboard handling.
+
 ## Test
 
 ```bash

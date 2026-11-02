@@ -3140,7 +3140,7 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "quervio"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "quervio-core",
  "serde",
@@ -3152,12 +3152,14 @@ dependencies = [
  "tokio",
  "uuid",
  "velopack",
+ "webview2-com",
+ "windows-core 0.62.2",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "quervio-core"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "base64 0.23.1",
  "encoding_rs",

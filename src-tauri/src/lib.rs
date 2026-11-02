@@ -1,3 +1,5 @@
+#[cfg(windows)]
+mod browser_shortcuts;
 mod explorer;
 mod formatting;
 mod language;
@@ -18,6 +20,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            #[cfg(windows)]
+            browser_shortcuts::disable(app)?;
             let data_dir = app.path().app_data_dir()?;
             copy_querydeck_data(&data_dir);
             app.manage(explorer::ExplorerState::open(&data_dir)?);
