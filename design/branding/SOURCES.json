@@ -46,6 +46,16 @@
       "sha256": "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697"
     }
   ],
+  "nativeIcon": {
+    "file": "src-tauri/icons/source.png",
+    "input": "src/assets/quervio-q-prisma-v2-trasparente.png",
+    "source": "Q Prisma v2 initially reframed with built-in imagegen, then enlarged manually by the user to reduce transparent padding further; native variants generated from the user-edited source with the Tauri CLI",
+    "sha256": "754c703cad53cb29d8fd14c014e60048bf2bb6f1e1f37de342bfa238f63e1da3",
+    "prompts": [
+      "Edit target: the attached existing Quervio app icon source. This is a strict framing-only edit for a Windows taskbar icon, not a redesign. Keep the exact existing three-dimensional Q ribbon shape, its inner cutout, proportions, violet/lavender gradients and aqua cyan diagonal tail, orientation, glossy shading and edges. Only reduce the excess empty transparent canvas margin and recenter the entire complete Q silhouette, so the entire Q including its tail takes about 94 percent of the square image height, vertically and horizontally centered by its outer visible bounding box. Preserve aspect ratio: the Q remains slightly narrower than it is tall. Leave approximately 3 percent transparent margin above and below, with symmetrical transparent margins left and right according to the original aspect ratio. Do not clip the Q or its tail. Output a square PNG with actual alpha transparency. No new background, no badge, no tile, no glow, no shadow outside the existing logo, no letters or text, no changes to the mark's design or colors.",
+      "Precise framing correction of this existing transparent Quervio Q icon. The previous result still has too much transparent padding. Enlarge the entire existing Q uniformly by another 8 percent (keep original shape and aspect ratio) about its visible silhouette bounding-box center. Make the Q nearly fill the canvas vertically: its very top should be at about y=3 percent of the square canvas, and the bottom of its aqua tail at y=97 percent. The complete outer Q silhouette including tail must be centered at x=50 percent, y=50 percent. Maintain balanced transparent side margins dictated by its unchanged aspect ratio. This is solely a change to canvas framing and mark scale. Preserve the exact three-dimensional Q ribbon and all its violet/lavender/cyan/aqua colors, lighting, proportions, cutout and diagonal tail from the image. Do not redesign or redraw it creatively. Keep fully transparent background and transparent inner opening. No tile, shadow, glow, text or additional marks. Do not crop off any part of the Q. Output square PNG with alpha."
+    ]
+  },
   "documentation": [
     "https://v2.tauri.app/develop/icons/",
     "https://rsms.me/inter/",
