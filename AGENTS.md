@@ -66,6 +66,7 @@ pnpm tauri dev
 
 ## Git e release
 
+- Per autore e committer usa `devchristian1337 <145341782+devchristian1337@users.noreply.github.com>`. Prima di ogni commit verifica `git var GIT_AUTHOR_IDENT` e `git var GIT_COMMITTER_IDENT`; se differiscono, correggi `user.name` e `user.email` nella sola configurazione locale del repository. Mantieni questa identità nei riferimenti all'autore, senza nomi o email personali.
 - Commit, push e pubblicazione richiedono una richiesta per l'attività corrente. Quando sono già autorizzati, completa i passaggi ordinari senza chiedere nuovamente conferma. Includi nel commit solo le modifiche pertinenti.
 - Gli artefatti di build in `target/`, `dist/` e il bridge pubblicato restano locali secondo `.gitignore`; le icone native già tracciate fanno parte degli asset del progetto.
 
