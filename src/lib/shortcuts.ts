@@ -8,7 +8,7 @@ import { scriptForExecution, findInEditor, formatInEditor, hasSelection } from "
 import { closeTab, openFile, saveTab } from "@/lib/files";
 import { useExplorer } from "@/stores/explorer";
 import { useQueries } from "@/stores/queries";
-import { useSettingsDialog } from "@/stores/dialogs";
+import { useCommandPalette, useSettingsDialog } from "@/stores/dialogs";
 import { useWorkbench } from "@/stores/workbench";
 
 /** New Query on the Object Explorer selection, else on the active tab's server. */
@@ -24,6 +24,13 @@ export function openQueryFromContext() {
 }
 
 export function runCommand(id: CommandId) {
+  if (id === "commandPalette") {
+    const palette = useCommandPalette.getState();
+    if (palette.open || !document.querySelector('[role="dialog"]')) palette.setOpen(!palette.open);
+    return;
+  }
+  // Searching must not run a query or change tabs behind the modal.
+  if (useCommandPalette.getState().open) return;
   const workbench = useWorkbench.getState();
   if (workbench.activeId) {
     if (id === "closeTab") {workbench.close(workbench.activeId);return;}

@@ -16,6 +16,7 @@ export type CommandId =
   | "nextTab"
   | "previousTab"
   | "format"
+  | "commandPalette"
   | "settings";
 
 export interface Command {
@@ -38,6 +39,7 @@ export const COMMANDS: Command[] = [
   { id: "nextTab", label: "Next tab", group: "Tabs and files", defaults: ["Ctrl+Tab"] },
   { id: "previousTab", label: "Previous tab", group: "Tabs and files", defaults: ["Ctrl+Shift+Tab"] },
   { id: "settings", label: "Open settings", group: "App", defaults: ["Ctrl+,"] },
+  { id: "commandPalette", label: "Search commands", group: "App", defaults: ["Ctrl+Shift+P"] },
 ];
 
 /** The keys of a command: the user's, or the defaults. */

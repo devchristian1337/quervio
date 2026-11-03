@@ -66,7 +66,9 @@ export function QueryWorkspace() {
             orientation="vertical"
             className="min-h-0 flex-1"
           >
-            <ResizablePanel defaultSize={resultsVisible ? "60%" : "100%"} minSize={80}>
+            {/* Monaco owns scrolling. Its previous dimensions may briefly exceed
+                the panel while automaticLayout follows a sidebar resize. */}
+            <ResizablePanel defaultSize={resultsVisible ? "60%" : "100%"} minSize={80} style={{ overflow: "hidden" }}>
               <ErrorBoundary label="The editor">
                 <Suspense fallback={<Centered>Loading editor…</Centered>}>
                   <SqlEditor tabId={active.id} initialText={active.initialText} />

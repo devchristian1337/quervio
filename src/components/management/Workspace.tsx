@@ -4,6 +4,9 @@ import { QueryWorkspace } from "@/components/QueryWorkspace";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/flexnative-tooltip";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { CommandPalette } from "@/components/CommandPalette";
+import { useCommandPalette } from "@/stores/dialogs";
+import { useShortcutLabel } from "@/lib/commands";
 import { useConnections } from "@/stores/connections";
 import { useQueries } from "@/stores/queries";
 import { useExplorer } from "@/stores/explorer";
@@ -21,7 +24,7 @@ import {
   type ServerCapabilities,
 } from "@/lib/management-api";
 import { cn } from "@/lib/utils";
-import { ChevronDown, Wrench, X } from "lucide-react";
+import { ChevronDown, Search, Wrench, X } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -98,6 +101,7 @@ const FEATURE_STATE: Record<Exclude<Feature["state"], "available">, string> = {
 };
 
 export function Workspace() {
+  const commandKey = useShortcutLabel("commandPalette");
   const workbench = useWorkbench(),
     connections = useConnections((s) => s.connections),
     explorer = useExplorer((s) => s.context),
@@ -161,6 +165,10 @@ export function Workspace() {
             );
           })}
         </div>
+        <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-2 text-xs text-muted-foreground" onClick={() => useCommandPalette.getState().setOpen(true)} aria-label="Search commands">
+          <Search /><span>Search commands</span>
+          {commandKey && <kbd className="hidden rounded border px-1 text-[10px] lg:inline-flex">{commandKey}</kbd>}
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="h-7 shrink-0">
@@ -186,6 +194,7 @@ export function Workspace() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <CommandPalette context={context} />
       <div className={`min-h-0 flex-1 ${active ? "hidden" : ""}`}>
         <QueryWorkspace />
       </div>

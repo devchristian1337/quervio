@@ -101,6 +101,14 @@ export const useDialogs = create<DialogsState>((set, get) => ({
 
 export type SettingsSection = "appearance" | "editor" | "results" | "query" | "shortcuts" | "about";
 
+export const useCommandPalette = create<{
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}>()((set) => ({
+  open: false,
+  setOpen: (open) => set({ open }),
+}));
+
 /** The Settings dialog, opened from the Object Explorer, Ctrl+, or the About link. */
 export const useSettingsDialog = create<{
   open: boolean;

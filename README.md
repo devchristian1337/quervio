@@ -26,6 +26,11 @@ On Windows, WebView2's browser shortcuts (page search, reload, print, zoom and
 DevTools) are disabled. Quervio commands, Monaco editing shortcuts and ordinary
 text editing keep their own keyboard handling.
 
+**Search commands** in the top bar (Ctrl+Shift+P, configurable in Settings →
+Shortcuts) searches quick actions, management tools, open tabs and saved
+connections. Use the arrow keys and Enter to select, or Esc to return to the
+previous control. Choosing a saved connection opens a new query on it.
+
 ## Test
 
 ```bash
