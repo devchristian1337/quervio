@@ -86,7 +86,7 @@ export function pauseShortcuts(pause: boolean) {
 export function useGlobalShortcuts() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (paused) return;
+      if (paused || document.querySelector("[data-product-tour]")) return;
       const shortcut = shortcutOf(event);
       if (!shortcut) return;
       // F5 and Ctrl+R are never page reloads, bound or not.

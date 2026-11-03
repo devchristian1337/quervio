@@ -242,6 +242,7 @@ export function ObjectExplorer() {
             size="icon"
             className="size-7"
             aria-label="New connection"
+            data-tour="new-connection"
             onClick={() => dialog.show()}
           >
             <Plus />
@@ -543,6 +544,7 @@ export function ObjectExplorer() {
             variant="ghost"
             size="sm"
             className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+            data-tour="settings"
             onClick={() => useSettingsDialog.getState().show()}
           >
             <Settings2 /> Settings

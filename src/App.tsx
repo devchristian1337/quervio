@@ -20,6 +20,7 @@ import { applyTheme } from "@/lib/themes";
 import { useTheme } from "@/lib/use-theme";
 import { applyWindowTheme } from "@/lib/window-theme";
 import { useSettings } from "@/stores/settings";
+import { FirstLaunchTour } from "@/components/FirstLaunchTour";
 
 // The chosen theme, or Light/Dark following Windows.
 function useAppTheme() {
@@ -111,6 +112,7 @@ export default function App() {
     <SqlcmdConfirmation />
     <SettingsDialog />
     <SsmsImportDialog />
+    <FirstLaunchTour />
     <Toaster />
     </>
   );

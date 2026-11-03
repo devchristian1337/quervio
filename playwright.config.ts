@@ -19,6 +19,11 @@ export default defineConfig({
     launchOptions: { executablePath },
     headless: true,
     viewport: { width: 1440, height: 900 },
+    // Ordinary interaction tests run as a returning user. Tour specs override it.
+    storageState: {
+      cookies: [],
+      origins: [{ origin: "http://127.0.0.1:1420", localStorage: [{ name: "quervio.tour.seen", value: "1" }] }],
+    },
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },

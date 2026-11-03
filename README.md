@@ -31,6 +31,13 @@ Shortcuts) searches quick actions, management tools, open tabs and saved
 connections. Use the arrow keys and Enter to select, or Esc to return to the
 previous control. Choosing a saved connection opens a new query on it.
 
+On first launch, a short spotlight tour introduces connections, Object Explorer,
+query tabs, command search, Tools and Settings. Navigate with Next/Back or the
+arrow keys; Esc or Close ends it. Finishing or dismissing the tour records a local
+`quervio.tour.seen` flag in the app's WebView storage so it stays closed on later
+launches. It follows the selected theme and reduced-motion preference, keeps
+keyboard focus inside the tour and blocks workspace shortcuts while open.
+
 ## Test
 
 ```bash
