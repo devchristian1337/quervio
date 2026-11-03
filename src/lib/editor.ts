@@ -65,10 +65,13 @@ function inTauri() {
   return Boolean((window as { __TAURI_INTERNALS__?: { metadata?: unknown } }).__TAURI_INTERNALS__?.metadata);
 }
 
-/** The selection when there is one, otherwise the whole script. */
-export function currentScript(): Script | null {
+/** Dismiss completion and read the selection, or the whole script, for execution. */
+export function scriptForExecution(): Script | null {
   const model = current?.getModel();
   if (!current || !model) return null;
+  // App execution keeps editor focus, so Monaco never gets a blur or the
+  // captured shortcut. Cancel suggestions without inserting the selected item.
+  current.trigger("quervio", "hideSuggestWidget", {});
   const selection = current.getSelection();
   if (selection && !selection.isEmpty()) {
     return { text: model.getValueInRange(selection), baseLine: selection.startLineNumber - 1 };

@@ -4,7 +4,7 @@
 // (Ctrl+K Ctrl+C to comment, Ctrl+K Ctrl+F to format the selection, …).
 import { useEffect } from "react";
 import { commandFor, shortcutOf, type CommandId } from "@/lib/commands";
-import { currentScript, findInEditor, formatInEditor, hasSelection } from "@/lib/editor";
+import { scriptForExecution, findInEditor, formatInEditor, hasSelection } from "@/lib/editor";
 import { closeTab, openFile, saveTab } from "@/lib/files";
 import { useExplorer } from "@/stores/explorer";
 import { useQueries } from "@/stores/queries";
@@ -34,7 +34,7 @@ export function runCommand(id: CommandId) {
   const { activeId, execute, cancel, toggleResults, cycle } = useQueries.getState();
   switch (id) {
     case "execute": {
-      const script = currentScript();
+      const script = scriptForExecution();
       if (activeId && script) void execute(activeId, script);
       break;
     }

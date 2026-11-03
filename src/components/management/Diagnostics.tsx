@@ -41,6 +41,7 @@ import {
   formatNumber,
   Notice,
   Operation,
+  Search,
   Text,
   useRead,
   ViewTabs,
@@ -785,10 +786,11 @@ export function ExtendedEvents({
             </Button>
           </>
         )}
-        <Text
+        <Search
           label="Filter captured events"
           value={filter}
           onChange={setFilter}
+          clearLabel="Clear captured events filter"
         />
       </div>
       {(data.error || error) && <Notice error>{data.error ?? error}</Notice>}

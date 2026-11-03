@@ -5,6 +5,7 @@ import {
   Database,
   Eye,
   Filter,
+  FilterX,
   Folder,
   FunctionSquare,
   Import,
@@ -17,7 +18,6 @@ import {
   Settings2,
   SquarePen,
   Table2,
-  X,
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { ConnectDialog } from "@/components/ConnectDialog";
-import { TextFieldMenu } from "@/components/TextFieldMenu";
+import { SearchInput } from "@/components/ui/search-input";
 import { api, displayName, errorMessage, type SavedConnection, type ScriptKind } from "@/lib/api";
 import { toast } from "@/components/ui/basic-toast";
 import { ENVIRONMENTS } from "@/lib/environment";
@@ -297,12 +297,12 @@ export function ObjectExplorer() {
             return (
               <div key={row.key} style={{ paddingLeft: row.depth * INDENT + 20 }} className="flex items-center gap-1 py-0.5 pr-2">
                 <Filter className="size-3 shrink-0 text-muted-foreground" />
-                <TextFieldMenu>
-                <input
-                  autoComplete="off"
+                <SearchInput
                   autoFocus
                   value={explorer.filters[row.owner] ?? ""}
-                  onChange={(e) => explorer.setFilter(row.owner, e.target.value)}
+                  onValueChange={(value) => explorer.setFilter(row.owner, value)}
+                  clearLabel="Clear name filter"
+                  aria-label="Filter by name"
                   onKeyDown={(e) => {
                     if (e.key === "Escape") {
                       explorer.setFilter(row.owner, null);
@@ -310,19 +310,20 @@ export function ObjectExplorer() {
                     }
                   }}
                   placeholder="Filter by name"
-                  className="h-5 min-w-0 flex-1 rounded border bg-background/60 px-1.5 text-xs outline-none focus:border-ring"
+                  wrapperClassName="flex-1"
+                  className="h-5 rounded border bg-background/60 px-1.5 text-xs shadow-none focus:border-ring md:text-xs"
                 />
-                </TextFieldMenu>
-                <Tip label="Clear filter">
+                <Tip label="Close filter">
                   <button
-                    aria-label="Clear filter"
+                    type="button"
+                    aria-label="Close filter"
                     className="text-muted-foreground hover:text-foreground"
                     onClick={() => {
                       explorer.setFilter(row.owner, null);
                       treeRef.current?.focus();
                     }}
                   >
-                    <X className="size-3" />
+                    <FilterX className="size-3" />
                   </button>
                 </Tip>
               </div>

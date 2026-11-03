@@ -63,7 +63,7 @@ test("every management area opens without browser exceptions", async ({
     security: ["tablist", "Security objects"],
     encryption: ["tablist", "Encryption area"],
     encryptedQuery: ["textbox", "Microsoft SQL query"],
-    templates: ["textbox", "Search templates"],
+    templates: ["searchbox", "Search templates"],
     components: ["button", "Select executable"],
     properties: ["combobox", "Database operation"],
   };

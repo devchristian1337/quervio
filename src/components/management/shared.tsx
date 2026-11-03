@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/radix-checkbox";
 import { Tabs } from "@/components/ui/vercel-tabs";
 import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -72,6 +73,20 @@ export function Field({
     </label>
   );
 }
+export function Search({ label, value, onChange, clearLabel }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  clearLabel: string;
+}) {
+  const id = useId();
+  return (
+    <Field label={label} htmlFor={id}>
+      <SearchInput id={id} value={value} onValueChange={onChange} clearLabel={clearLabel} />
+    </Field>
+  );
+}
+
 export function Text({
   label,
   value,

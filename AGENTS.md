@@ -15,7 +15,7 @@ Queste istruzioni valgono per il repository Quervio e sono condivise da Codex e 
 
 - Per orientarti e scegliere i comandi: leggi `README.md`. Per i termini del dominio: usa `GLOSSARY.md`.
 - Prima di cambiare gestione dei risultati, driver SQL, credenziali, installer o formatter: leggi l'ADR pertinente in `docs/adr/`. Per il formatter attuale fa riferimento l'ADR 0006, che sostituisce la scelta dell'ADR 0004.
-- Prima di indagare un problema, se accessibile, cerca nel vault `C:\git\llm-wiki` per nome tecnico dell'oggetto e sintomo. Parti dai casi pertinenti e citali. Aggiorna il vault quando emerge conoscenza durevole; non eseguire mai commit o push sul vault.
+- Per questo progetto, conserva le informazioni durevoli esclusivamente nella documentazione del repository.
 
 ## Confini del codice
 

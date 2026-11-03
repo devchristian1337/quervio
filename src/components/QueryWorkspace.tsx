@@ -34,7 +34,7 @@ import {
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api, displayName, errorMessage } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/interfaces-select";
-import { currentScript, focusEditor, revealLine } from "@/lib/editor";
+import { scriptForExecution, focusEditor, revealLine } from "@/lib/editor";
 import { ENVIRONMENTS } from "@/lib/environment";
 import { useGlobalShortcuts } from "@/lib/shortcuts";
 import { useShortcutLabel } from "@/lib/commands";
@@ -295,7 +295,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
           // to its unfocused colour for as long as the button is held.
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
-            const script = currentScript();
+            const script = scriptForExecution();
             if (script) void execute(tab.id, script);
             focusEditor();
           }}

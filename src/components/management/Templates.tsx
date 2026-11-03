@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import {
   Check,
   Notice,
+  Search,
   Text,
   textareaClass,
 } from "./shared";
@@ -47,7 +48,7 @@ export function Templates({ context }: { context: Context }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex items-end gap-3">
-        <Text label="Search templates" value={search} onChange={setSearch} />
+        <Search label="Search templates" value={search} onChange={setSearch} clearLabel="Clear template search" />
         <Button
           variant="outline"
           onClick={() =>

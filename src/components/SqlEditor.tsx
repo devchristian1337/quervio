@@ -13,7 +13,7 @@ import {
 import { monaco } from "@/lib/monaco";
 import {
   copySelection,
-  currentScript,
+  scriptForExecution,
   cutSelection,
   focusEditor,
   formatInEditor,
@@ -113,7 +113,7 @@ function clipboard(action: () => Promise<void>) {
 // Runs the selection, or the whole script when nothing is selected.
 function execute() {
   const { activeId, execute } = useQueries.getState();
-  const script = currentScript();
+  const script = scriptForExecution();
   if (activeId && script) void execute(activeId, script);
 }
 
