@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { QueryWorkspace } from "@/components/QueryWorkspace";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useCommandPalette } from "@/stores/dialogs";
 import { useShortcutLabel } from "@/lib/commands";
+import { focusEditor } from "@/lib/editor";
 import { useConnections } from "@/stores/connections";
 import { useQueries } from "@/stores/queries";
 import { useExplorer } from "@/stores/explorer";
@@ -101,6 +102,9 @@ const FEATURE_STATE: Record<Exclude<Feature["state"], "available">, string> = {
 };
 
 export function Workspace() {
+  const workspace = useRef<HTMLElement>(null);
+  const toolsOpenedByPointer = useRef(false);
+  const toolsDismissedByEscape = useRef(false);
   const commandKey = useShortcutLabel("commandPalette");
   const workbench = useWorkbench(),
     connections = useConnections((s) => s.connections),
@@ -120,8 +124,14 @@ export function Workspace() {
           database: connections[0]?.defaultDatabase ?? null,
         });
   const active = workbench.tabs.find((t) => t.id === workbench.activeId);
+
+  function returnToWorkspace() {
+    workspace.current?.focus({ preventScroll: true });
+    if (!useWorkbench.getState().activeId && useQueries.getState().activeId) focusEditor();
+  }
+
   return (
-    <section className="flex h-full min-w-0 flex-col">
+    <section ref={workspace} tabIndex={-1} className="flex h-full min-w-0 flex-col outline-none">
       {/* The query tabs below mark theirs with a top line, so this level
           marks its selection with a fill: two lines would meet at the border. */}
       <div className="flex h-9 shrink-0 items-center gap-1 border-b bg-panel px-2 text-xs">
@@ -165,17 +175,23 @@ export function Workspace() {
             );
           })}
         </div>
-        <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-2 text-xs text-muted-foreground" onClick={() => useCommandPalette.getState().setOpen(true)} aria-label="Search commands">
+        <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-2 text-xs text-muted-foreground" onClick={(event) => useCommandPalette.getState().setOpen(true, event.detail > 0)} aria-label="Search commands">
           <Search /><span>Search commands</span>
           {commandKey && <kbd className="hidden rounded border px-1 text-[10px] lg:inline-flex">{commandKey}</kbd>}
         </Button>
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={(open) => { if (open) toolsDismissedByEscape.current = false; }}>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 shrink-0">
+            <Button variant="ghost" size="sm" className="h-7 shrink-0" onPointerDown={() => { toolsOpenedByPointer.current = true; }} onKeyDown={() => { toolsOpenedByPointer.current = false; }}>
               <Wrench /> Tools <ChevronDown className="opacity-50" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-60">
+          <DropdownMenuContent align="end" className="w-60" onEscapeKeyDown={() => { toolsDismissedByEscape.current = true; }} onCloseAutoFocus={(event) => {
+            if (toolsOpenedByPointer.current && toolsDismissedByEscape.current) {
+              event.preventDefault();
+              returnToWorkspace();
+            }
+            toolsDismissedByEscape.current = false;
+          }}>
             {TOOL_GROUPS.map(([group, kinds], index) => (
               <DropdownMenuGroup key={group}>
                 {index > 0 && <DropdownMenuSeparator />}
@@ -194,7 +210,7 @@ export function Workspace() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <CommandPalette context={context} />
+      <CommandPalette context={context} onPointerDismiss={returnToWorkspace} />
       <div className={`min-h-0 flex-1 ${active ? "hidden" : ""}`}>
         <QueryWorkspace />
       </div>

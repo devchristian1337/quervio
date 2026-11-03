@@ -12,8 +12,8 @@ import { focusEditor } from "@/lib/editor";
 import { useSettings } from "@/stores/settings";
 import type { Context } from "@/lib/management-api";
 
-export function CommandPalette({ context }: { context: Context }) {
-  const { open, setOpen } = useCommandPalette();
+export function CommandPalette({ context, onPointerDismiss }: { context: Context; onPointerDismiss: () => void }) {
+  const { open, setOpen, openedByPointer } = useCommandPalette();
   const [search, setSearch] = useState("");
   const pending = useRef<(() => void) | null>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
@@ -31,7 +31,7 @@ export function CommandPalette({ context }: { context: Context }) {
 
   function select(action: () => void) {
     // Wait for the palette's focus trap to close before opening another dialog
-    // or handing focus to a query. Escape leaves the previous focus intact.
+    // or handing focus to a query.
     pending.current = action;
     setOpen(false);
   }
@@ -51,6 +51,7 @@ export function CommandPalette({ context }: { context: Context }) {
         pending.current = null;
         event.preventDefault();
         if (action) action();
+        else if (openedByPointer) onPointerDismiss();
         else previousFocus.current?.focus();
       }}
     >

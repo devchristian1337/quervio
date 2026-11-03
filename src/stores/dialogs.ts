@@ -103,10 +103,13 @@ export type SettingsSection = "appearance" | "editor" | "results" | "query" | "s
 
 export const useCommandPalette = create<{
   open: boolean;
-  setOpen: (open: boolean) => void;
+  openedByPointer: boolean;
+  setOpen: (open: boolean, openedByPointer?: boolean) => void;
 }>()((set) => ({
   open: false,
-  setOpen: (open) => set({ open }),
+  openedByPointer: false,
+  // Keep the opening gesture until the closing animation restores focus.
+  setOpen: (open, openedByPointer = false) => set((state) => ({ open, openedByPointer: open ? openedByPointer : state.openedByPointer })),
 }));
 
 /** The Settings dialog, opened from the Object Explorer, Ctrl+, or the About link. */

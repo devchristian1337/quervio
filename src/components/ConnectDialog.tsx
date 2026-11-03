@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { DatabasePicker } from "@/components/DatabasePicker";
+import { GroupPicker } from "@/components/GroupPicker";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -114,8 +115,8 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg" onEscapeKeyDown={(event) => {
-        // Escape closes the database suggestions before the connection dialog.
-        if (document.getElementById("database")?.getAttribute("aria-expanded") === "true") event.preventDefault();
+        // Escape closes the current suggestions before the connection dialog.
+        if (["database", "group"].some((id) => document.getElementById(id)?.getAttribute("aria-expanded") === "true")) event.preventDefault();
       }}>
         <form onSubmit={submit} autoComplete="off" className="grid gap-4">
           <DialogHeader>
@@ -197,18 +198,11 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
           </div>
 
           <Field label="Group" htmlFor="group">
-            <Input
-              id="group"
-              list="connection-groups"
-              placeholder="None: at the top of the Object Explorer"
+            <GroupPicker
+              groups={groups}
               value={draft.group ?? ""}
-              onChange={(e) => update({ group: e.target.value })}
+              onChange={(group) => update({ group })}
             />
-            <datalist id="connection-groups">
-              {groups.map((group) => (
-                <option key={group} value={group} />
-              ))}
-            </datalist>
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
