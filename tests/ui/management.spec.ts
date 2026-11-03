@@ -18,7 +18,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("SQLCMD include access is approved separately from script execution", async ({ page }) => {
-  await page.getByRole("button", { name: "New query", exact: true }).last().click();
+  await page.getByRole("button", { name: "New query on Mock server", exact: true }).click();
   // Monaco's EditContext exposes a zero-size accessibility textbox; click
   // the visible editor surface before sending normal keyboard input.
   await page.locator(".monaco-editor").click({ position: { x: 80, y: 12 } });

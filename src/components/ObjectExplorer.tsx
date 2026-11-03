@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   Columns3,
@@ -55,6 +55,7 @@ type Row =
   | { type: "filter"; key: string; depth: number; owner: string };
 
 const INDENT = 14;
+const numberFormat = new Intl.NumberFormat();
 
 export function ObjectExplorer() {
   const { connections, groups, loaded, load } = useConnections();
@@ -78,7 +79,7 @@ export function ObjectExplorer() {
       const nodes = inGroup.map((c): TreeNode => ({ key: serverKey(c.id), label: displayName(c), kind: { type: "server", connectionId: c.id }, expandable: true }));
       if (group === null) roots.push(...nodes);
       else {
-        roots.push({ ...groupNode(group), detail: String(nodes.length) });
+        roots.push({ ...groupNode(group), detail: numberFormat.format(nodes.length) });
         members.set(groupKey(group), nodes);
       }
     }
@@ -137,12 +138,31 @@ export function ObjectExplorer() {
     return kind.type === "server" ? connections.find((c) => c.id === kind.connectionId) : undefined;
   }
 
+  // The row right-clicked last: one menu serves the whole tree, so a folder of
+  // thousands of rows mounts no menu per row.
+  const [menuKey, setMenuKey] = useState<string | null>(null);
+  const menuNode = nodeRows.find((r) => r.node.key === menuKey)?.node;
+  const menuConnection = menuNode ? connectionOf(menuNode) : undefined;
+
+  // Set when the keyboard moves the selection, so the row it lands on scrolls into view.
+  const reveal = useRef(false);
+  useEffect(() => {
+    if (!reveal.current) return;
+    reveal.current = false;
+    treeRef.current?.querySelector('[role="treeitem"][aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [explorer.selected]);
+
   function onKeyDown(event: React.KeyboardEvent) {
     if (event.target !== treeRef.current) return;
     const current = nodeRows[selectedIndex];
+    const selectByKeyboard = (key: string) => {
+      if (key === explorer.selected) return;
+      reveal.current = true;
+      explorer.select(key);
+    };
     const go = (index: number) => {
       const row = nodeRows[Math.max(0, Math.min(nodeRows.length - 1, index))];
-      if (row) explorer.select(row.node.key);
+      if (row) selectByKeyboard(row.node.key);
     };
     switch (event.key) {
       case "ArrowDown":
@@ -159,7 +179,7 @@ export function ObjectExplorer() {
       case "ArrowLeft":
         if (!current) break;
         if (explorer.expanded[current.node.key]) explorer.collapse(current.node.key);
-        else if (current.parent) explorer.select(current.parent);
+        else if (current.parent) selectByKeyboard(current.parent);
         break;
       case "Enter":
         if (current) void explorer.toggle(current.node);
@@ -230,10 +250,18 @@ export function ObjectExplorer() {
         </div>
       </header>
 
+      <ContextMenu>
+      <ContextMenuTrigger asChild>
       <div
         ref={treeRef}
         role="tree"
         tabIndex={0}
+        onContextMenu={(event) => {
+          const key = (event.target as HTMLElement).closest<HTMLElement>("[data-key]")?.dataset.key;
+          // Outside a row there is nothing to act on: the menu stays shut.
+          if (key) setMenuKey(key);
+          else event.preventDefault();
+        }}
         // F5 here refreshes instead of executing (src/lib/shortcuts.ts).
         data-explorer
         onKeyDown={onKeyDown}
@@ -261,7 +289,7 @@ export function ObjectExplorer() {
                 )}
               >
                 {row.tone === "loading" && <Loader2 className="mt-0.5 size-3 animate-spin" />}
-                <span className="break-words">{row.text}</span>
+                <span className="min-w-0 wrap-anywhere">{row.text}</span>
               </div>
             );
           }
@@ -306,27 +334,25 @@ export function ObjectExplorer() {
           const expanded = !!explorer.expanded[node.key];
           const selected = explorer.selected === node.key;
           const info = connection ? explorer.servers[connection.id] : undefined;
+          // Only what the row may not show in full: the server's version, or a long detail.
+          const tip = info
+            ? `${info.serverName} — SQL Server ${info.version}`
+            : node.detail
+              ? `${node.label} (${node.detail})`
+              : undefined;
 
-          return (
-            <ContextMenu key={node.key}>
-              {/* Only what the row may not show in full: the server's version, or a long detail. */}
-              <Tip
-                label={
-                  info
-                    ? `${info.serverName} — SQL Server ${info.version}`
-                    : node.detail
-                      ? `${node.label} (${node.detail})`
-                      : undefined
-                }
-              >
-              <ContextMenuTrigger asChild>
+          const item = (
                 <div
+                  key={node.key}
+                  data-key={node.key}
                   role="treeitem"
                   aria-expanded={node.expandable ? expanded : undefined}
                   aria-selected={selected}
                   style={{ paddingLeft: depth * INDENT + 4 }}
+                  // Off-screen rows skip layout and paint (a folder can hold thousands);
+                  // the scroll margin keeps a row the keyboard reaches clear of the fade.
                   className={cn(
-                    "group flex h-7 cursor-pointer items-center gap-1 pr-2 whitespace-nowrap",
+                    "group flex h-7 cursor-pointer scroll-my-8 items-center gap-1 pr-2 whitespace-nowrap [content-visibility:auto] [contain-intrinsic-size:auto_1.75rem]",
                     selected
                       ? "bg-accent text-accent-foreground group-focus-visible/tree:outline-1 group-focus-visible/tree:-outline-offset-1 group-focus-visible/tree:outline-ring"
                       : "hover:bg-accent/50",
@@ -358,9 +384,12 @@ export function ObjectExplorer() {
                   ) : (
                     <NodeIcon node={node} />
                   )}
-                  <span className={connection ? "min-w-0 truncate" : "shrink-0"} title={connection ? node.label : undefined}>{node.label}</span>
+                  {/* The tip shows the whole label when there is one; a native title otherwise. */}
+                  <span className="min-w-0 truncate" title={tip ? undefined : node.label}>
+                    {node.label}
+                  </span>
                   {node.detail && (
-                    <span className="min-w-0 truncate text-muted-foreground">({node.detail})</span>
+                    <span className="max-w-1/2 shrink-0 truncate text-muted-foreground">({node.detail})</span>
                   )}
                   {connection && (
                     <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground">
@@ -372,7 +401,7 @@ export function ObjectExplorer() {
                       <button
                         tabIndex={-1}
                         aria-label="Filter"
-                        className="ml-auto opacity-0 group-hover:opacity-100"
+                        className="ml-auto shrink-0 opacity-0 group-hover:opacity-100"
                         onClick={(e) => {
                           e.stopPropagation();
                           explorer.setFilter(node.key, "");
@@ -383,16 +412,28 @@ export function ObjectExplorer() {
                     </Tip>
                   )}
                 </div>
-              </ContextMenuTrigger>
-              </Tip>
-              <ContextMenuContent className="min-w-48">
-                <ManagementItems node={node} />
-                <ScriptItems node={node} />
-                {contextOf(node.kind) && (
+          );
+          // A server name can be one unbreakable word. Rows with nothing more to say mount no tooltip.
+          return tip ? (
+            <Tip key={node.key} label={<span className="wrap-anywhere">{tip}</span>}>
+              {item}
+            </Tip>
+          ) : (
+            item
+          );
+        })}
+      </div>
+      </ContextMenuTrigger>
+      {menuNode && (
+              /* A long group name truncates instead of widening the menu past the window. */
+              <ContextMenuContent className="max-w-80 min-w-48">
+                <ManagementItems node={menuNode} />
+                <ScriptItems node={menuNode} />
+                {contextOf(menuNode.kind) && (
                   <>
                     <ContextMenuItem
                       onSelect={() => {
-                        const context = contextOf(node.kind);
+                        const context = contextOf(menuNode.kind);
                         if (context) void useQueries.getState().open(context.connectionId, context.database);
                       }}
                     >
@@ -401,9 +442,9 @@ export function ObjectExplorer() {
                     <ContextMenuSeparator />
                   </>
                 )}
-                {node.kind.type === "group" && (
+                {menuNode.kind.type === "group" && (
                   <GroupItems
-                    name={node.kind.name}
+                    name={menuNode.kind.name}
                     onNewConnection={(group) => dialog.show(null, { group })}
                     onRename={async (name) => {
                       const renamed = await askGroupName(`Rename ${name}`, name, "Rename");
@@ -415,67 +456,65 @@ export function ObjectExplorer() {
                     onUngroup={(name) => void useConnections.getState().updateGroup(name, null)}
                   />
                 )}
-                {node.expandable && node.kind.type !== "group" && (
-                  <ContextMenuItem onSelect={() => void explorer.refresh(node)}>
+                {menuNode.expandable && menuNode.kind.type !== "group" && (
+                  <ContextMenuItem onSelect={() => void explorer.refresh(menuNode)}>
                     Refresh <ContextMenuShortcut>F5</ContextMenuShortcut>
                   </ContextMenuItem>
                 )}
-                {isFilterable(node.kind) && (
+                {isFilterable(menuNode.kind) && (
                   <ContextMenuItem
                     onSelect={() => {
-                      void explorer.expand(node);
-                      explorer.setFilter(node.key, explorer.filters[node.key] ?? "");
+                      void explorer.expand(menuNode);
+                      explorer.setFilter(menuNode.key, explorer.filters[menuNode.key] ?? "");
                     }}
                   >
                     Filter…
                   </ContextMenuItem>
                 )}
-                {connection && (
+                {menuConnection && (
                   <>
                     <ContextMenuSeparator />
-                    <ContextMenuItem onSelect={() => dialog.show(connection)}>
+                    <ContextMenuItem onSelect={() => dialog.show(menuConnection)}>
                       Edit connection…
                     </ContextMenuItem>
                     <ContextMenuSub>
                       <ContextMenuSubTrigger>Move to group</ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="max-h-80 min-w-48 overflow-y-auto">
+                      <ContextMenuSubContent className="max-h-80 max-w-80 min-w-48 overflow-y-auto">
                         {groupNames(connections, groups)
-                          .filter((name) => name !== connection.group)
+                          .filter((name) => name !== menuConnection.group)
                           .map((name) => (
-                            <ContextMenuItem key={name} onSelect={() => void moveToGroup([connection.id], name)}>
-                              {name}
+                            <ContextMenuItem key={name} onSelect={() => void moveToGroup([menuConnection.id], name)}>
+                              <MenuLabel>{name}</MenuLabel>
                             </ContextMenuItem>
                           ))}
                         <ContextMenuSeparator />
                         <ContextMenuItem
                           onSelect={async () => {
                             const name = await askGroupName("New group", "", "Create and move");
-                            if (name) await moveToGroup([connection.id], name);
+                            if (name) await moveToGroup([menuConnection.id], name);
                           }}
                         >
                           New group…
                         </ContextMenuItem>
-                        {connection.group && (
-                          <ContextMenuItem onSelect={() => void moveToGroup([connection.id], null)}>
-                            Remove from {connection.group}
+                        {menuConnection.group && (
+                          <ContextMenuItem onSelect={() => void moveToGroup([menuConnection.id], null)}>
+                            <MenuLabel>{`Remove from ${menuConnection.group}`}</MenuLabel>
                           </ContextMenuItem>
                         )}
                       </ContextMenuSubContent>
                     </ContextMenuSub>
-                    <ContextMenuItem disabled={!info} onSelect={() => void explorer.disconnect(connection.id)}>
+                    <ContextMenuItem disabled={!explorer.servers[menuConnection.id]} onSelect={() => void explorer.disconnect(menuConnection.id)}>
                       Disconnect
                     </ContextMenuItem>
                     <ContextMenuSeparator />
-                    <ContextMenuItem variant="destructive" onSelect={() => void removeConnection(connection)}>
+                    <ContextMenuItem variant="destructive" onSelect={() => void removeConnection(menuConnection)}>
                       Delete connection
                     </ContextMenuItem>
                   </>
                 )}
               </ContextMenuContent>
-            </ContextMenu>
-          );
-        })}
-      </div>
+      )}
+      </ContextMenu>
 
       <ConnectDialog
         open={dialog.open}
@@ -517,6 +556,15 @@ function groupNode(name: string): TreeNode {
   return { key: groupKey(name), label: name, kind: { type: "group", name }, expandable: true };
 }
 
+/** A menu item's text that may hold a long name: it ends in an ellipsis, whole in its title. */
+function MenuLabel({ children }: { children: string }) {
+  return (
+    <span className="min-w-0 truncate" title={children}>
+      {children}
+    </span>
+  );
+}
+
 /** A connection group's menu: a connection in it, a new name, or none. */
 function GroupItems({
   name,
@@ -531,7 +579,9 @@ function GroupItems({
 }) {
   return (
     <>
-      <ContextMenuItem onSelect={() => onNewConnection(name)}>New connection in {name}…</ContextMenuItem>
+      <ContextMenuItem onSelect={() => onNewConnection(name)}>
+        <MenuLabel>{`New connection in ${name}…`}</MenuLabel>
+      </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem onSelect={() => void onRename(name)}>Rename group…</ContextMenuItem>
       <ContextMenuItem onSelect={() => onUngroup(name)}>Ungroup</ContextMenuItem>

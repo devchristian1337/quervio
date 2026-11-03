@@ -59,8 +59,11 @@ function DialogContent({
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
+        // Never taller than the window: a long error scrolls inside, so the title and
+        // the buttons stay reachable. Dialogs that scroll a part of themselves set a
+        // lower max-h or their own overflow.
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] outline-none data-[state=closed]:duration-150 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-96 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-96 motion-reduce:animate-none! sm:max-w-lg",
+          "fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] outline-none data-[state=closed]:duration-150 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-96 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-96 motion-reduce:animate-none! sm:max-w-lg",
           className
         )}
         // A toast is not outside the work: its Undo or close leaves the dialog open.
@@ -90,7 +93,8 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-left", className)}
+      // pr-6 keeps a long title clear of the close button in the corner.
+      className={cn("flex flex-col gap-2 pr-6 text-center sm:text-left", className)}
       {...props}
     />
   )
@@ -130,7 +134,8 @@ function DialogTitle({
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-lg leading-none font-semibold", className)}
+      // A name in a title or description can be one unbreakable word.
+      className={cn("text-lg leading-none font-semibold wrap-anywhere", className)}
       {...props}
     />
   )
@@ -143,7 +148,7 @@ function DialogDescription({
   return (
     <DialogPrimitive.Description
       data-slot="dialog-description"
-      className={cn("text-sm text-muted-foreground", className)}
+      className={cn("text-sm text-muted-foreground wrap-anywhere", className)}
       {...props}
     />
   )

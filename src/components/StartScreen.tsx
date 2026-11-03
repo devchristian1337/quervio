@@ -44,12 +44,12 @@ export function StartScreen() {
         <section aria-labelledby="start-connections">
           {/* The actions sit on the list they add to; with no list yet, the empty
               box below carries them, so they show once either way. */}
-          <div className="mb-2 flex items-center justify-between gap-4">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <h2 id="start-connections" className="text-sm font-medium">
               Connections
             </h2>
             {connections.length > 0 && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => showImport()}>
                   <Import /> Import from SSMS
                 </Button>
@@ -60,9 +60,9 @@ export function StartScreen() {
             )}
           </div>
           {loaded && connections.length === 0 ? (
-            <div className="flex items-center justify-between gap-4 rounded-md border border-dashed px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-dashed px-4 py-3">
               <span className="text-muted-foreground">No saved connections yet.</span>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => showImport()}>
                   <Import /> Import from SSMS
                 </Button>
@@ -74,9 +74,10 @@ export function StartScreen() {
           ) : (
             byGroup(connections).map(({ group, connections: inGroup }) => (
               // A group, so the scroll fade shrinks and blurs row by row, not the whole list.
-              <ul key={group ?? ""} role="group" aria-label={group ?? "Ungrouped"} className="border-t">
+              <ul key={group ?? ""} role="group" aria-label={group ?? "Ungrouped"} className="@container border-t">
+                {/* Wraps rather than truncates: nested SSMS groups differ at the end. */}
                 {group !== null && (
-                  <li className="flex h-8 items-end px-1 pb-1 text-xs font-medium text-muted-foreground">{group}</li>
+                  <li className="flex min-h-8 items-end px-1 pt-2 pb-1 text-xs font-medium text-muted-foreground">{group}</li>
                 )}
                 {inGroup.map((connection) => (
                   <ConnectionRow key={connection.id} connection={connection} />
@@ -104,24 +105,39 @@ export function StartScreen() {
 function ConnectionRow({ connection }: { connection: SavedConnection }) {
   const newQueryKey = useShortcutLabel("newQuery");
   const environment = ENVIRONMENTS[connection.environment];
-  const user = connection.authentication.kind === "sql" ? connection.authentication.userName : "Windows";
-  const details = [connection.server, user, connection.defaultDatabase].filter(Boolean).join(" · ");
+  const name = displayName(connection);
+  const { authentication } = connection;
+  const user =
+    authentication.kind === "sql" ? authentication.userName : authentication.kind === "entra" ? "Microsoft Entra" : "Windows";
+  // The login and database, which tell apart two connections to one server.
+  const rest = [user, connection.defaultDatabase].filter(Boolean).join(" · ");
   const newQuery = () => void useQueries.getState().open(connection.id, connection.defaultDatabase);
 
   return (
-    <li className="group flex h-14 items-center gap-3 border-b px-1" onDoubleClick={newQuery}>
+    // Off-screen rows skip layout, so a desk with a thousand servers still scrolls.
+    <li
+      className="group flex h-14 items-center gap-3 border-b px-1 [contain-intrinsic-size:auto_3.5rem] [content-visibility:auto]"
+      onDoubleClick={newQuery}
+    >
       <span className={cn("size-2 shrink-0 rounded-full", environment.dot)} />
       <div className="min-w-0 flex-1">
-        <div className="truncate font-medium">{displayName(connection)}</div>
-        <div className="truncate text-xs text-muted-foreground">{details}</div>
+        <div className="truncate font-medium" title={name}>
+          {name}
+        </div>
+        {/* The server gives way first; the login and database keep up to 3/5. */}
+        <div className="flex gap-1 text-xs text-muted-foreground" title={[connection.server, rest].filter(Boolean).join(" · ")}>
+          <span className="min-w-0 truncate">{connection.server}</span>
+          {rest && <span className="max-w-3/5 shrink-0 truncate">· {rest}</span>}
+        </div>
       </div>
-      <span className="w-24 shrink-0 text-xs text-muted-foreground">{environment.label}</span>
-      <Tip label={`Open a script on ${displayName(connection)}`}>
+      {/* In a narrow workspace the dot alone shows the Environment. */}
+      <span className="w-24 shrink-0 text-xs text-muted-foreground @max-md:sr-only">{environment.label}</span>
+      <Tip label={`Open a script on ${name}`}>
         <Button
           size="icon"
           variant="ghost"
           className="size-8 text-muted-foreground"
-          aria-label={`Open a script on ${displayName(connection)}`}
+          aria-label={`Open a script on ${name}`}
           onClick={() =>
             void openFile({ connectionId: connection.id, database: connection.defaultDatabase })
           }
@@ -129,14 +145,15 @@ function ConnectionRow({ connection }: { connection: SavedConnection }) {
           <FolderOpen />
         </Button>
       </Tip>
-      <Tip label={`New query on ${displayName(connection)} (${newQueryKey})`}>
+      <Tip label={`New query on ${name}${newQueryKey ? ` (${newQueryKey})` : ""}`}>
         <Button
           size="sm"
           variant="ghost"
           className="text-primary hover:text-primary"
+          aria-label={`New query on ${name}`}
           onClick={newQuery}
         >
-          <Plus /> New query
+          <Plus /> <span className="@max-sm:sr-only">New query</span>
         </Button>
       </Tip>
     </li>
@@ -155,9 +172,16 @@ function Shortcut({ id }: { id: CommandId }) {
   };
   return (
     <div className="flex h-9 items-center justify-between gap-4">
-      <dt className="truncate text-muted-foreground">{labels[id]}</dt>
+      <dt className="truncate text-muted-foreground" title={labels[id]}>
+        {labels[id]}
+      </dt>
       <dd>
-        <kbd className="rounded border bg-muted/40 px-1.5 py-0.5 font-sans text-xs tabular-nums">{key}</kbd>
+        {/* Every key can be removed in Settings. */}
+        {key ? (
+          <kbd className="rounded border bg-muted/40 px-1.5 py-0.5 font-sans text-xs tabular-nums">{key}</kbd>
+        ) : (
+          <span className="text-xs whitespace-nowrap text-muted-foreground">Not set</span>
+        )}
       </dd>
     </div>
   );

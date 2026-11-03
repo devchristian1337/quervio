@@ -771,10 +771,12 @@ function UpdateControl() {
         : { label: "Check for updates", run: check };
 
   return (
-    <div className="flex max-w-80 flex-col items-end gap-1">
-      <div className="flex items-center gap-3">
+    // A long status wraps within the column and the error goes below it, an
+    // unbreakable URL included, never over the row's description.
+    <div className="flex max-w-80 min-w-0 flex-col items-end gap-1">
+      <div className="flex max-w-full items-center gap-3">
         {text && (
-          <span className={cn("text-sm whitespace-nowrap", phase === "error" ? "text-destructive" : "text-muted-foreground")}>{text}</span>
+          <span className={cn("min-w-0 text-right text-sm wrap-anywhere", phase === "error" ? "text-destructive" : "text-muted-foreground")}>{text}</span>
         )}
         {phase === "downloading" && <DownloadProgress percent={progress} />}
         {/* While downloading, the bar takes the place of a button that could not be pressed. */}
@@ -784,8 +786,24 @@ function UpdateControl() {
           </Button>
         )}
       </div>
-      {phase === "error" && error && <p className="text-right text-xs text-muted-foreground select-text">{error}</p>}
+      {phase === "error" && error && <p className="max-w-full text-right text-xs wrap-anywhere text-muted-foreground select-text">{error}</p>}
     </div>
+  );
+}
+
+/**
+ * A path cut in the middle, so its last folder (com.quervio.app) stays in view:
+ * the start truncates and the tail never shrinks. For a flex parent.
+ */
+function middleTruncated(text: string) {
+  const cut = Math.max(text.lastIndexOf("\\"), text.lastIndexOf("/"));
+  // A last folder too long to keep whole keeps only its end.
+  const at = cut > 0 && text.length - cut <= 32 ? cut : Math.max(0, text.length - 24);
+  return (
+    <>
+      <span className="truncate">{text.slice(0, at)}</span>
+      <span className="shrink-0 whitespace-pre">{text.slice(at)}</span>
+    </>
   );
 }
 
@@ -820,8 +838,8 @@ function AboutSection() {
       </Row>
       <Row label="Data folder" help="Saved connections, encrypted passwords, open tabs and settings.">
         <div className="flex max-w-80 items-center gap-1.5">
-          <Tip label={dataDir}>
-            <span className="truncate font-mono text-xs select-text">{dataDir || "—"}</span>
+          <Tip label={dataDir && <span className="wrap-anywhere">{dataDir}</span>}>
+            <span className="flex min-w-0 font-mono text-xs select-text">{middleTruncated(dataDir || "—")}</span>
           </Tip>
           <CopyButton text={dataDir} label="Copy path" className="size-7" disabled={!dataDir} />
         </div>

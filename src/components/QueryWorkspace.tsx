@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { toast } from "@/components/ui/basic-toast";
 import {
@@ -40,7 +40,9 @@ import { useGlobalShortcuts } from "@/lib/shortcuts";
 import { useShortcutLabel } from "@/lib/commands";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
-import { tabEnvironment, useQueries, type QueryTab } from "@/stores/queries";
+import { tabEnvironment, useQueries, type QueryTab, type ResultSetSummary } from "@/stores/queries";
+import { useSettings, type Density } from "@/stores/settings";
+import { GRID_SIZES } from "@/lib/result-column-widths";
 import { PlanViewer } from "@/components/management/PlanViewer";
 
 const SqlEditor = lazy(() => import("@/components/SqlEditor"));
@@ -102,9 +104,24 @@ async function closeTab(tab: QueryTab) {
 function TabBar() {
   const { tabs, activeId, activate } = useQueries();
   const connections = useConnections((s) => s.connections);
+  const bar = useRef<HTMLDivElement>(null);
+
+  // A tab opened or chosen past the bar's edge scrolls into view. tabs.length:
+  // a new tab is added and made active in the same step. Restored tabs widen
+  // after the first paint, as their servers' names arrive, so it follows them.
+  useEffect(() => {
+    const element = bar.current;
+    if (!element) return;
+    const reveal = () =>
+      element.querySelector('[role="tab"][aria-selected="true"]')?.scrollIntoView({ inline: "nearest", block: "nearest" });
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    for (const tab of element.querySelectorAll('[role="tab"]')) observer.observe(tab);
+    return () => observer.disconnect();
+  }, [activeId, tabs.length]);
 
   return (
-    <div className="flex h-9 shrink-0 items-end overflow-x-auto border-b bg-panel">
+    <div ref={bar} className="flex h-9 shrink-0 items-end overflow-x-auto border-b bg-panel">
       {tabs.map((tab) => {
         const connection = connections.find((c) => c.id === tab.connectionId);
         const selected = tab.id === activeId;
@@ -146,11 +163,13 @@ function TabBar() {
               // The brand's second colour, as for activity: amber is the Test Environment's.
               <Circle className="size-2.5 shrink-0 fill-brand-secondary text-brand-secondary" aria-label="Open transaction" />
             ) : null}
-            <span className="truncate">
-              {tab.title}
-              {tab.dirty ? "*" : ""}
+            {/* The * outside the cut title: a long file name must not hide unsaved changes. */}
+            <span className="flex max-w-40 min-w-0 shrink-0 items-baseline">
+              <span className="min-w-0 truncate">{tab.title}</span>
+              {tab.dirty && <span className="shrink-0">*</span>}
             </span>
-            {connection && <span className="truncate text-xs text-muted-foreground">{displayName(connection)}</span>}
+            {/* The title keeps up to 10rem; the server gives way, so a long name never cuts the title to "Q…". */}
+            {connection && <span className="min-w-0 truncate text-xs text-muted-foreground">{displayName(connection)}</span>}
             <button
               aria-label="Close"
               // A 20 px target; -mr-1 keeps the tab's right padding where it was.
@@ -399,7 +418,12 @@ function Messages({ tab }: { tab: QueryTab }) {
       () => toast.success(`Copied ${what}`),
       (error) => toast.error("Copy failed", { description: errorMessage(error) }),
     );
-  const allText = () => list.current?.innerText.trim() ?? "";
+  // From the lines, not innerText: rows skipped by content-visibility have no layout to read.
+  const allText = () =>
+    [
+      ...tab.messages.flatMap((message) => (message.header ? [message.header, message.text] : [message.text])),
+      ...(finishedAt && tab.status !== "executing" ? [`Completion time: ${finishedAt.toISOString()}`] : []),
+    ].join("\n");
   const selectAll = () => {
     if (list.current) window.getSelection()?.selectAllChildren(list.current);
   };
@@ -408,20 +432,33 @@ function Messages({ tab }: { tab: QueryTab }) {
   return (
     <ContextMenu onOpenChange={(open) => open && setSelection(window.getSelection()?.toString() ?? "")}>
       <ContextMenuTrigger asChild>
-        <div ref={list} className="min-h-full space-y-1 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap select-text">
+        {/* wrap-anywhere: a long value without spaces (a varbinary) wraps instead of widening the pane. */}
+        <div ref={list} className="min-h-full space-y-1 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap wrap-anywhere select-text">
           {tab.messages.map((message, index) => {
             const { line } = message;
-            return (
-              <Tip key={index} label={line ? `Go to line ${line}` : undefined}>
-                <div
-                  className={cn(message.isError && "text-destructive", line && "cursor-pointer hover:underline")}
-                  onDoubleClick={line ? () => revealLine(line) : undefined}
-                  onClick={line ? () => revealLine(line) : undefined}
-                >
-                  {message.header && <div>{message.header}</div>}
-                  <div>{message.text}</div>
-                </div>
+            // Off-screen lines skip layout: ten thousand PRINTs stay cheap to scroll.
+            const row = (
+              <div
+                key={index}
+                className={cn(
+                  "[contain-intrinsic-size:auto_1.25rem] [content-visibility:auto]",
+                  message.isError && "text-destructive",
+                  line && "cursor-pointer hover:underline",
+                )}
+                onDoubleClick={line ? () => revealLine(line) : undefined}
+                onClick={line ? () => revealLine(line) : undefined}
+              >
+                {message.header && <div>{message.header}</div>}
+                <div>{message.text}</div>
+              </div>
+            );
+            // Only lines that lead somewhere get a tooltip.
+            return line ? (
+              <Tip key={index} label={`Go to line ${line}`}>
+                {row}
               </Tip>
+            ) : (
+              row
             );
           })}
           {finishedAt && tab.status !== "executing" && (
@@ -457,23 +494,98 @@ function Running() {
   );
 }
 
+/** Past this a Result Set's box stops growing with its rows and the grid scrolls. */
+const BIG_SET_HEIGHT = 320;
+
+/** The box that shows all of a Result Set: header, rows, footer, border and a horizontal scrollbar. */
+function contentHeight(set: ResultSetSummary, density: Density) {
+  const size = GRID_SIZES[density];
+  // The footer is h-8 plus its top border; scrollbars are 10 px (index.css).
+  return size.header + set.rows * size.row + 33 + 2 + 10;
+}
+
 function Results({ tab }: { tab: QueryTab }) {
+  const density = useSettings((s) => s.settings.results.density);
+  const scroller = useRef<HTMLDivElement>(null);
   if (tab.resultSets.length === 0) {
     if (tab.longRunning) return <Running />;
     return tab.status === "executing" ? null : <Centered>No result sets.</Centered>;
   }
+  // Several sets: small ones take only what their rows need, so the big one
+  // is not squeezed to a few rows; a lone big one takes the rest of the panel.
+  // One set fills the panel as it always has.
+  const single = tab.resultSets.length === 1;
+  const heights = tab.resultSets.map((set) => contentHeight(set, density));
+  const big = heights.filter((height) => height > BIG_SET_HEIGHT).length;
   return (
-    <div className="flex h-full flex-col gap-1 overflow-auto p-1">
-      {tab.resultSets.map((set) => (
-        // Keyed by index, not run: a new Execution reuses the grid (see ResultGrid).
-        <div key={set.index} className="min-h-44 flex-1 overflow-hidden rounded border">
-          <ErrorBoundary label="The results grid">
-            <Suspense fallback={<Centered>Loading grid…</Centered>}>
-              <ResultGrid tabId={tab.id} runId={tab.runId} set={set} />
-            </Suspense>
-          </ErrorBoundary>
-        </div>
-      ))}
+    <div ref={scroller} className="flex h-full flex-col gap-1 overflow-auto p-1">
+      {tab.resultSets.map((set, i) => {
+        const fill = big === 1 && heights[i] > BIG_SET_HEIGHT;
+        return (
+          // Keyed by index, not run: a new Execution reuses the grid (see ResultGrid).
+          // The same element for one set or many, so a second set arriving keeps the first grid.
+          <NearViewport
+            key={set.index}
+            root={scroller}
+            className={single ? "min-h-44 flex-1" : fill ? "flex-1" : "shrink-0"}
+            style={single ? undefined : fill ? { minHeight: BIG_SET_HEIGHT } : { height: Math.min(heights[i], BIG_SET_HEIGHT) }}
+          >
+            <ErrorBoundary label="The results grid">
+              <Suspense fallback={<Centered>Loading grid…</Centered>}>
+                <ResultGrid tabId={tab.id} runId={tab.runId} set={set} />
+              </Suspense>
+            </ErrorBoundary>
+          </NearViewport>
+        );
+      })}
+    </div>
+  );
+}
+
+/** How far outside the results panel's view a grid is already mounted. */
+const NEAR_MARGIN = 600;
+
+/**
+ * A Result Set's box that mounts its grid only once it scrolls near the
+ * panel's view: sixty sets would otherwise draw three hundred canvases at once.
+ * It stays mounted after that, so a sort or selection is not lost on the way back.
+ */
+function NearViewport({
+  root,
+  className,
+  style,
+  children,
+}: {
+  root: React.RefObject<HTMLDivElement | null>;
+  className: string;
+  style: React.CSSProperties | undefined;
+  children: React.ReactNode;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const [near, setNear] = useState(false);
+  // Measured before the first paint, so the boxes on screen never show empty
+  // for a frame while the observer gets round to them.
+  useLayoutEffect(() => {
+    const element = box.current;
+    // On the first mount the parent's ref is not attached yet; the parent is that scroller.
+    const area = root.current ?? element?.parentElement;
+    if (!element || !area) return;
+    const own = element.getBoundingClientRect();
+    const view = area.getBoundingClientRect();
+    if (own.bottom >= view.top - NEAR_MARGIN && own.top <= view.bottom + NEAR_MARGIN) setNear(true);
+  }, [root]);
+  useEffect(() => {
+    if (near || !box.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => entries.some((entry) => entry.isIntersecting) && setNear(true),
+      { root: root.current, rootMargin: `${NEAR_MARGIN}px 0px` },
+    );
+    observer.observe(box.current);
+    return () => observer.disconnect();
+  }, [near, root]);
+  return (
+    <div ref={box} className={cn("overflow-hidden rounded border", className)} style={style}>
+      {near && children}
     </div>
   );
 }
@@ -534,17 +646,25 @@ function StatusBar({ tab }: { tab: QueryTab }) {
     status = "Connected.";
   }
 
+  const login = connection
+    ? connection.authentication.kind === "sql"
+      ? connection.authentication.userName
+      : connection.authentication.kind === "entra"
+        ? "Microsoft Entra"
+        : "Windows"
+    : null;
+  // Long names give way, cut with their full text on hover; the time and row count never do.
   return (
-    <footer className="flex h-6 shrink-0 items-center gap-4 border-t bg-panel px-3 text-xs text-muted-foreground">
-      <span className="flex items-center gap-1.5">{status}</span>
-      <span className="ml-auto">{tab.server?.serverName}</span>
-      {connection && (
-        <span>{connection.authentication.kind === "sql" ? connection.authentication.userName : connection.authentication.kind === "entra" ? "Microsoft Entra" : "Windows"}</span>
+    <footer className="flex h-6 shrink-0 items-center gap-4 overflow-hidden border-t bg-panel px-3 text-xs text-muted-foreground">
+      <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">{status}</span>
+      <span className="ml-auto min-w-0 truncate" title={tab.server?.serverName}>{tab.server?.serverName}</span>
+      {login !== null && (
+        <span className="min-w-0 truncate" title={login}>{login}</span>
       )}
-      <span>{tab.database}</span>
-      <span className="tabular-nums">{formatElapsed(elapsed)}</span>
-      <span className="tabular-nums">
-        {rows.toLocaleString("en-US")} {rows === 1 ? "row" : "rows"}
+      <span className="min-w-0 truncate" title={tab.database ?? undefined}>{tab.database}</span>
+      <span className="shrink-0 tabular-nums">{formatElapsed(elapsed)}</span>
+      <span className="shrink-0 whitespace-nowrap tabular-nums">
+        {rows.toLocaleString()} {rows === 1 ? "row" : "rows"}
       </span>
     </footer>
   );

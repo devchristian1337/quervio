@@ -144,6 +144,8 @@ async function endTransactions(tabs: QueryTab[], commit: boolean) {
 
 /** How long an Execution runs before the UI shows it running. */
 const LONG_RUN_MS = 300;
+/** How often streamed messages are added to the tab. */
+const MESSAGE_FLUSH_MS = 16;
 
 /** Reads the first rows of each Result Set of a quick Execution for the run about to be shown. */
 async function readFirstBlocks(id: string, sets: ResultSetSummary[]) {
@@ -309,8 +311,28 @@ export const useQueries = create<QueriesState>((set, get) => {
         }
       }, LONG_RUN_MS);
 
+      // Messages and row counts are added about once a frame, not one copy of
+      // the list per line: ten thousand PRINTs would copy it ten thousand times.
+      // A timer, not requestAnimationFrame: that one stops in a hidden window.
+      let queued: MessageLine[] = [];
+      let flushTimer: ReturnType<typeof setTimeout> | null = null;
+      const flushMessages = () => {
+        if (flushTimer !== null) clearTimeout(flushTimer);
+        flushTimer = null;
+        if (queued.length === 0) return;
+        const lines = queued;
+        queued = [];
+        output((t) => ({ messages: [...t.messages, ...lines] }));
+      };
+      const queueMessage = (line: MessageLine) => {
+        queued.push(line);
+        flushTimer ??= setTimeout(flushMessages, MESSAGE_FLUSH_MS);
+      };
+
       const channel = new Channel<ExecutionEvent>();
       channel.onmessage = (event) => {
+        // Everything else lands after the lines that came before it.
+        if (event.type !== "message" && event.type !== "rowsAffected") flushMessages();
         switch (event.type) {
           case "sessionClosed":
             patch(id,{status:"disconnected",error:event.reason,openTransactions:0});
@@ -322,15 +344,10 @@ export const useQueries = create<QueriesState>((set, get) => {
             output((t) => ({ plans: [...(t.plans ?? []), event.xml], view: "plans" }));
             break;
           case "message":
-            output((t) => ({ messages: [...t.messages, event] }));
+            queueMessage(event);
             break;
           case "rowsAffected":
-            output((t) => ({
-              messages: [
-                ...t.messages,
-                { text: `(${event.count} row${event.count === 1 ? "" : "s"} affected)`, isError: false },
-              ],
-            }));
+            queueMessage({ text: `(${event.count} row${event.count === 1 ? "" : "s"} affected)`, isError: false });
             break;
           case "resultSetStarted":
             output((t) => ({
@@ -366,8 +383,10 @@ export const useQueries = create<QueriesState>((set, get) => {
                 t.messages.length === 0 && event.outcome === "succeeded"
                   ? [{ text: "Commands completed successfully.", isError: false }]
                   : t.messages,
-              // Errors are easy to miss behind a grid: show them, like SSMS.
-              view: (t.plans?.length ?? 0)>0 ? "plans" : event.outcome === "succeeded" && t.resultSets.length > 0 ? "results" : "messages",
+              // Errors are easy to miss behind a grid or a plan: show them, like SSMS.
+              view: event.outcome === "failed" ? "messages"
+                : (t.plans?.length ?? 0) > 0 ? "plans"
+                : event.outcome === "succeeded" && t.resultSets.length > 0 ? "results" : "messages",
             }));
             break;
           case "batchStarted":
@@ -378,6 +397,7 @@ export const useQueries = create<QueriesState>((set, get) => {
         if (sqlcmdToken) await api.sqlcmdExecute(id, sqlcmdToken, executeOptions(), channel);
         else await api.executeQuery(id, script.text, script.baseLine, { ...executeOptions(), planMode: tab.planMode ?? "none" }, allowDestructive, channel);
       } catch (error) {
+        flushMessages();
         output((t) => ({
           messages: [...t.messages, { text: errorMessage(error), isError: true }],
           outcome: "failed",
@@ -386,6 +406,7 @@ export const useQueries = create<QueriesState>((set, get) => {
         }));
       } finally {
         clearTimeout(longRun);
+        flushMessages();
         if (staged) await readFirstBlocks(id, staged.resultSets ?? []);
         show();
         patch(id, (t) => ({ status: t.status === "executing" ? "ready" : t.status, longRunning: false }));

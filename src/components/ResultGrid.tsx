@@ -35,7 +35,16 @@ import { ValueViewer } from "@/components/ValueViewer";
 import { api, errorMessage, type CopyFormat, type SortDirection } from "@/lib/api";
 import { mix, withAlpha } from "@/lib/color";
 import { CellKind, decodeWindow, firstBlock, forgetFirstBlock, ROW_BLOCK as BLOCK, type Cell } from "@/lib/results";
-import { displayCellText, mergeColumnWidths, minimumColumnWidths, SORT_ZONE, type MeasureGridText } from "@/lib/result-column-widths";
+import {
+  displayCellText,
+  fitText,
+  GRID_SIZES,
+  mergeColumnWidths,
+  MIN_COLUMN_WIDTH,
+  minimumColumnWidths,
+  SORT_ZONE,
+  type MeasureGridText,
+} from "@/lib/result-column-widths";
 import type { Palette } from "@/lib/themes";
 import { useTheme } from "@/lib/use-theme";
 import type { ResultSetSummary } from "@/stores/queries";
@@ -70,9 +79,13 @@ function useFontsReady() {
  * width of the widest one, so digits line up down the column. The canvas has
  * no font-variant-numeric, and Inter's default digits are proportional.
  */
-function drawTabular(ctx: CanvasRenderingContext2D, text: string, right: number, middle: number) {
+function tabularWidths(ctx: CanvasRenderingContext2D, text: string) {
   const digit = Math.max(...[..."0123456789"].map((d) => ctx.measureText(d).width));
-  const widths = [...text].map((c) => (c >= "0" && c <= "9" ? digit : ctx.measureText(c).width));
+  return [...text].map((c) => (c >= "0" && c <= "9" ? digit : ctx.measureText(c).width));
+}
+
+function drawTabular(ctx: CanvasRenderingContext2D, text: string, right: number, middle: number) {
+  const widths = tabularWidths(ctx, text);
   let x = right - widths.reduce((sum, w) => sum + w, 0);
   [...text].forEach((c, i) => {
     const w = widths[i];
@@ -81,10 +94,8 @@ function drawTabular(ctx: CanvasRenderingContext2D, text: string, right: number,
     x += w;
   });
 }
-const SIZES: Record<Density, { row: number; header: number; font: number; padding: number }> = {
-  comfortable: { row: 32, header: 36, font: 13, padding: 12 },
-  compact: { row: 24, header: 28, font: 12, padding: 8 },
-};
+// Shared with the results panel, which sizes each grid's box to its rows.
+const SIZES = GRID_SIZES;
 
 function gridTheme(p: Palette, kind: "light" | "dark", density: Density, monospace: boolean): Partial<GridTheme> {
   const size = SIZES[density];
@@ -125,7 +136,7 @@ function gridTheme(p: Palette, kind: "light" | "dark", density: Density, monospa
 }
 
 function plural(count: number, noun: string) {
-  return `${count.toLocaleString("en-US")} ${noun}${count === 1 ? "" : "s"}`;
+  return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 const emptySelection: GridSelection = {
@@ -139,13 +150,14 @@ function selectedBlock(selection: GridSelection, rows: number, columns: number) 
   if (range) {
     return { rows: [range.y, range.y + range.height], columns: [range.x, range.x + range.width] } as const;
   }
-  const selectedColumns = selection.columns.toArray();
-  if (selectedColumns.length) {
-    return { rows: [0, rows], columns: [Math.min(...selectedColumns), Math.max(...selectedColumns) + 1] } as const;
+  // Sorted ranges: the ends are the bounds. Spreading a million selected rows overflows the stack.
+  const firstColumn = selection.columns.first();
+  if (firstColumn !== undefined) {
+    return { rows: [0, rows], columns: [firstColumn, selection.columns.last()! + 1] } as const;
   }
-  const selectedRows = selection.rows.toArray();
-  if (selectedRows.length) {
-    return { rows: [Math.min(...selectedRows), Math.max(...selectedRows) + 1], columns: [0, columns] } as const;
+  const firstRow = selection.rows.first();
+  if (firstRow !== undefined) {
+    return { rows: [firstRow, selection.rows.last()! + 1], columns: [0, columns] } as const;
   }
   return null;
 }
@@ -279,7 +291,8 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
         return {
           id: String(index),
           title,
-          width: Math.max(widths[index] ?? 0, minimumWidths[index]),
+          // A width the user dragged wins, however narrow: long values draw cut with an ellipsis.
+          width: widths[index] ?? minimumWidths[index],
           themeOverride: sorted ? { bgCell: sortedTint, bgHeader: sortedTint, textHeader: p.fg } : undefined,
         };
       }),
@@ -300,8 +313,8 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
         target.set(block, rows);
         // A dropped block is read again when it scrolls back; widths stay as measured.
         evictFarBlocks(target, block);
-        // Include every fetched row, even in later blocks. Manual resizing
-        // can add room, but may never clip a header or a loaded cell's text.
+        // Include every fetched row, even in later blocks: up to the cap, a
+        // column never sizes itself narrower than a value it has shown.
         const required = minimumColumnWidths(set.columns, set.kinds, rows, base.cellHorizontalPadding!, measure);
         setMeasuredWidths((current) => mergeColumnWidths(current, required));
         const damaged: { cell: Item }[] = [];
@@ -373,17 +386,33 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
   const drawCell = useCallback<DrawCellCallback>(
     (args, drawContent) => {
       const { ctx, cell, rect, theme: cellTheme, col } = args;
-      const text = cell.kind === GridCellKind.Text ? cell.displayData : "";
-      // Numbers only: NULL keeps its italic, other columns their normal drawing.
-      if (set.kinds[col] !== "number" || cell.kind !== GridCellKind.Text || cell.data === "NULL" || monospace) {
+      // NULL keeps its italic and Loading its skeleton.
+      if (cell.kind !== GridCellKind.Text || cell.data === "NULL") {
         drawContent();
         return;
       }
+      const numeric = set.kinds[col] === "number";
+      const tabular = numeric && !monospace;
       ctx.save();
       ctx.font = `${cellTheme.baseFontStyle} ${cellTheme.fontFamily}`;
+      const room = rect.width - cellTheme.cellHorizontalPadding * 2;
+      // The grid would clip a long value mid-glyph; cut it with an ellipsis instead.
+      const text = fitText(cell.displayData, room, (value) =>
+        tabular ? tabularWidths(ctx, value).reduce((sum, w) => sum + w, 0) : ctx.measureText(value).width,
+      );
+      if (text === cell.displayData && !tabular) {
+        ctx.restore();
+        drawContent();
+        return;
+      }
       ctx.fillStyle = cellTheme.textDark;
       ctx.textBaseline = "middle";
-      drawTabular(ctx, text, rect.x + rect.width - cellTheme.cellHorizontalPadding, rect.y + rect.height / 2);
+      const middle = rect.y + rect.height / 2;
+      if (tabular) drawTabular(ctx, text, rect.x + rect.width - cellTheme.cellHorizontalPadding, middle);
+      else if (numeric) {
+        ctx.textAlign = "right";
+        ctx.fillText(text, rect.x + rect.width - cellTheme.cellHorizontalPadding, middle);
+      } else ctx.fillText(text, rect.x + cellTheme.cellHorizontalPadding, middle);
       ctx.restore();
     },
     [set.kinds, monospace],
@@ -395,15 +424,19 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
       // A number column's title ends where its right-aligned figures end, so
       // its sort arrow takes the left edge instead.
       const numeric = set.kinds[columnIndex] === "number";
-      if (numeric) {
-        ctx.save();
-        ctx.font = `${headerTheme.headerFontStyle} ${headerTheme.fontFamily}`;
+      ctx.save();
+      ctx.font = `${headerTheme.headerFontStyle} ${headerTheme.fontFamily}`;
+      // Long titles stop with an ellipsis short of the sort arrow.
+      const title = fitText(column.title, rect.width - headerTheme.cellHorizontalPadding * 2 - SORT_ZONE, (value) => ctx.measureText(value).width);
+      if (numeric || title !== column.title) {
         ctx.fillStyle = isSelected ? headerTheme.textHeaderSelected : headerTheme.textHeader;
-        ctx.textAlign = "right";
+        ctx.textAlign = numeric ? "right" : "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(column.title, rect.x + rect.width - headerTheme.cellHorizontalPadding, rect.y + rect.height / 2);
+        const x = numeric ? rect.x + rect.width - headerTheme.cellHorizontalPadding : rect.x + headerTheme.cellHorizontalPadding;
+        ctx.fillText(title, x, rect.y + rect.height / 2);
         ctx.restore();
       } else {
+        ctx.restore();
         drawContent();
       }
       const active = sort?.column === columnIndex;
@@ -540,8 +573,9 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
               gridSelection={selection}
               onGridSelectionChange={setSelection}
               keybindings={{ copy: false, paste: false, search: false }}
-              maxColumnWidth={Math.max(10_000, ...minimumWidths)}
-              onColumnResize={(_column, width, index) => setWidths((w) => ({ ...w, [index]: Math.max(width, minimumWidths[index]) }))}
+              minColumnWidth={MIN_COLUMN_WIDTH}
+              maxColumnWidth={10_000}
+              onColumnResize={(_column, width, index) => setWidths((w) => ({ ...w, [index]: Math.max(width, MIN_COLUMN_WIDTH) }))}
               onCellActivated={([column, row]) => setViewer({ row, column })}
             />
           </div>
@@ -626,7 +660,7 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
 /** Text that changes in place: the new value rises in, the old one lifts away. */
 function Count({ value, className }: { value: number | string; className?: string }) {
   const reduced = useReducedMotion();
-  const text = typeof value === "number" ? value.toLocaleString("en-US") : value;
+  const text = typeof value === "number" ? value.toLocaleString() : value;
   return (
     <span className={`relative inline-flex overflow-hidden ${className ?? ""}`}>
       <AnimatePresence mode="popLayout" initial={false}>

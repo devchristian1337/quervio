@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, type CSSProperties } from "react";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { api, errorMessage } from "@/lib/api";
 import {
@@ -28,11 +28,51 @@ import {
   inputClass,
   Notice,
   Operation,
+  plural,
   ReadTable,
   Text,
   textareaClass,
   useRead,
 } from "./shared";
+
+// One grid per row rather than a table, so content-visibility can skip the
+// rows out of view (it cannot skip table rows); fixed tracks keep them aligned.
+const COLUMN_GRID = {
+  create:
+    "grid grid-cols-[minmax(10rem,1fr)_9.5rem_3.5rem_4.5rem_calc(2*var(--seed)_+_0.75rem)_minmax(10rem,1fr)_minmax(10rem,1fr)_3rem_6rem] items-center",
+  edit: "grid grid-cols-[minmax(10rem,1fr)_9.5rem_3.5rem_4.5rem_calc(2*var(--seed)_+_0.75rem)_minmax(10rem,1fr)_minmax(10rem,1fr)_6rem] items-center",
+};
+
+// Table names cut to the diagram's box by the font's own widths, so wide
+// (CJK) characters do not run past it. Cached: a drag renders every box.
+const fitted = new Map<string, string>();
+let measure: CanvasRenderingContext2D | null | undefined;
+function fit(text: string, width: number, font: string) {
+  const family = getComputedStyle(document.body).fontFamily;
+  const key = `${font} ${family}\u0000${width}\u0000${text}`;
+  const cached = fitted.get(key);
+  if (cached !== undefined) return cached;
+  measure ??= document.createElement("canvas").getContext("2d");
+  const chars = Array.from(text);
+  let result = text;
+  if (!measure) {
+    if (chars.length > 28) result = `${chars.slice(0, 27).join("")}…`;
+  } else {
+    measure.font = `${font} ${family}`;
+    if (measure.measureText(text).width > width) {
+      let low = 0,
+        high = chars.length;
+      while (low < high) {
+        const mid = (low + high + 1) >> 1;
+        if (measure.measureText(`${chars.slice(0, mid).join("")}…`).width <= width) low = mid;
+        else high = mid - 1;
+      }
+      result = `${chars.slice(0, low).join("")}…`;
+    }
+  }
+  fitted.set(key, result);
+  return result;
+}
 
 const emptyColumn = (): ColumnDefinition => ({
   name: "",
@@ -108,6 +148,10 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
       disposed = true;
     };
   }, [tab.objectId, tab.connectionId, tab.database, tab.schema, tab.name]);
+  const seedDigits = Math.min(
+    40,
+    Math.max(5, ...model.columns.map((c) => Math.max(c.seed.length, c.increment.length))),
+  );
   function change(index: number, patch: Partial<ColumnDefinition>) {
     setModel((value) => ({
       ...value,
@@ -159,10 +203,18 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
       {!loaded && !error && <Notice>Loading table metadata…</Notice>}
       {loaded && (
         <>
-          <div className="overflow-auto rounded-md border">
-            <table className="w-full text-sm">
-              <thead className="bg-panel">
-                <tr>
+          <div
+            role="table"
+            aria-label="Columns"
+            // Never squeezed by the form below; past half the window it scrolls by itself.
+            className="max-h-[max(24rem,50vh)] shrink-0 overflow-auto rounded-md border text-sm"
+            // Wide enough for the longest seed or increment, 9223372036854775807 included.
+            style={{ "--seed": `calc(${seedDigits + 1}ch + 1.625rem)` } as CSSProperties}
+          >
+            {/* Never narrower than the tracks' minimums: the box scrolls sideways instead. */}
+            <div className="min-w-min">
+              <div role="rowgroup">
+                <div role="row" className={cn(COLUMN_GRID[original ? "edit" : "create"], "bg-panel")}>
                   {[
                     "Column",
                     "SQL type",
@@ -174,64 +226,71 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
                     ...(!original ? ["PK"] : []),
                     "",
                   ].map((name) => (
-                    <th key={name} className="h-8 px-2 text-left text-xs font-medium whitespace-nowrap text-muted-foreground">
+                    <div
+                      key={name}
+                      role="columnheader"
+                      className={cn("flex h-8 items-center px-2 text-xs font-medium whitespace-nowrap text-muted-foreground", ["Null", "Identity", "PK"].includes(name) && "justify-center")}
+                    >
                       {name}
-                    </th>
+                    </div>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
+                </div>
+              </div>
+              <div role="rowgroup">
                 {model.columns.map((c, i) => (
-                  <tr key={i} className="border-t">
-                    <td className="p-1">
+                  // Off-screen rows skip layout: a 1,024-column table is some 9,000 controls.
+                  <div
+                    key={i}
+                    role="row"
+                    className={cn(COLUMN_GRID[original ? "edit" : "create"], "border-t [contain-intrinsic-size:auto_44px] [content-visibility:auto]")}
+                  >
+                    <div role="cell" className="p-1">
                       <input
                         aria-label={`Column ${i + 1} name`}
                         className={inputClass}
                         value={c.name}
                         onChange={(e) => change(i, { name: e.target.value })}
                       />
-                    </td>
-                    <td className="p-1">
+                    </div>
+                    <div role="cell" className="p-1">
                       <input
                         aria-label={`Column ${i + 1} type`}
-                        className={cn(inputClass, "w-36")}
+                        className={inputClass}
                         value={c.type}
                         onChange={(e) => change(i, { type: e.target.value })}
                       />
-                    </td>
-                    <td className="px-2 text-center">
+                    </div>
+                    <div role="cell" className="flex justify-center px-2">
                       <Check
                         aria-label={`Column ${i + 1} nullable`}
                         checked={c.nullable}
                         onChange={(nullable) => change(i, { nullable })}
                       />
-                    </td>
-                    <td className="px-2 text-center">
+                    </div>
+                    <div role="cell" className="flex justify-center px-2">
                       <Check
                         aria-label={`Column ${i + 1} identity`}
                         checked={c.identity}
                         onChange={(identity) => change(i, { identity })}
                       />
-                    </td>
-                    <td className="p-1">
-                      <div className="flex gap-1">
-                        <input
-                          aria-label="Identity seed"
-                          className={cn(inputClass, "w-16")}
-                          value={c.seed}
-                          onChange={(e) => change(i, { seed: e.target.value })}
-                        />
-                        <input
-                          aria-label="Identity increment"
-                          className={cn(inputClass, "w-16")}
-                          value={c.increment}
-                          onChange={(e) =>
-                            change(i, { increment: e.target.value })
-                          }
-                        />
-                      </div>
-                    </td>
-                    <td className="p-1">
+                    </div>
+                    <div role="cell" className="flex gap-1 p-1">
+                      <input
+                        aria-label="Identity seed"
+                        className={cn(inputClass, "w-(--seed) tabular-nums")}
+                        value={c.seed}
+                        onChange={(e) => change(i, { seed: e.target.value })}
+                      />
+                      <input
+                        aria-label="Identity increment"
+                        className={cn(inputClass, "w-(--seed) tabular-nums")}
+                        value={c.increment}
+                        onChange={(e) =>
+                          change(i, { increment: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div role="cell" className="p-1">
                       <input
                         aria-label={`Column ${i + 1} computed expression`}
                         className={inputClass}
@@ -240,8 +299,8 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
                           change(i, { computed: e.target.value })
                         }
                       />
-                    </td>
-                    <td className="p-1">
+                    </div>
+                    <div role="cell" className="p-1">
                       <input
                         aria-label={`Column ${i + 1} default`}
                         className={inputClass}
@@ -250,9 +309,9 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
                           change(i, { defaultValue: e.target.value })
                         }
                       />
-                    </td>
+                    </div>
                     {!original && (
-                      <td className="px-2 text-center">
+                      <div role="cell" className="flex justify-center px-2">
                         <Check
                           aria-label={`Column ${i + 1} primary key`}
                           checked={
@@ -270,9 +329,9 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
                             }))
                           }
                         />
-                      </td>
+                      </div>
                     )}
-                    <td className="p-1">
+                    <div role="cell" className="p-1">
                       <Button
                         variant="ghost"
                         onClick={() =>
@@ -286,11 +345,11 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
                       >
                         Remove
                       </Button>
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            </div>
           </div>
           <Button
             variant="outline"
@@ -871,7 +930,9 @@ export function RelationshipDiagram({ context }: { context: Context }) {
                     stroke="var(--border)"
                   />
                   <text x="12" y="28" fontSize="13" fontWeight="500" fill="var(--foreground)">
-                    {`${t.schema}.${t.name}`.slice(0, 28)}
+                    {/* The box is 210 wide and the name starts 12 in: 12 to spare on the right. */}
+                    {fit(`${t.schema}.${t.name}`, 186, "500 13px")}
+                    <title>{`${t.schema}.${t.name}`}</title>
                   </text>
                   <text
                     x="12"
@@ -879,14 +940,14 @@ export function RelationshipDiagram({ context }: { context: Context }) {
                     fontSize="12"
                     fill="var(--muted-foreground)"
                   >
-                    {
+                    {plural(
                       links.filter(
                         (l) =>
                           l.parent_table === t.name &&
                           l.parent_schema === t.schema,
-                      ).length
-                    }{" "}
-                    FK column mappings
+                      ).length,
+                      "FK column mapping",
+                    )}
                   </text>
                 </g>
               );

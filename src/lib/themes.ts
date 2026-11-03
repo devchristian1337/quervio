@@ -444,8 +444,10 @@ export const THEMES: Theme[] = [
 ];
 
 export function findTheme(id: ThemeId, systemDark: boolean): Theme {
-  const wanted = id === "system" ? (systemDark ? "dark" : "light") : id;
-  return THEMES.find((theme) => theme.id === wanted) ?? THEMES[0];
+  const system = systemDark ? "dark" : "light";
+  const wanted = id === "system" ? system : id;
+  // An id this version no longer has (a theme removed in an update) follows the system.
+  return THEMES.find((theme) => theme.id === wanted) ?? THEMES.find((theme) => theme.id === system) ?? THEMES[0];
 }
 
 /** Monaco theme name for a theme (see registerEditorThemes). */

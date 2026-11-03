@@ -59,7 +59,7 @@ test("deleting the last server preserves its group", async ({ page }) => {
 
 test("sort arrows preserve selection while header labels still select columns", async ({ page }) => {
   await page.goto("/?mock");
-  await page.getByRole("button", { name: "New query", exact: true }).last().click();
+  await page.getByRole("button", { name: "New query on Mock server", exact: true }).click();
   await page.locator(".monaco-editor").click({ position: { x: 80, y: 12 } });
   await page.keyboard.insertText("SELECT 1;");
   await page.getByRole("button", { name: "Execute", exact: true }).click();

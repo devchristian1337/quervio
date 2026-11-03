@@ -31,8 +31,10 @@ function loginLabel(authentication: Authentication) {
 }
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+const numberFormat = new Intl.NumberFormat();
 
 interface Section {
+  key: string;
   label: string;
   items: SsmsConnection[];
 }
@@ -41,15 +43,18 @@ interface Section {
 function sectionsOf(found: SsmsConnection[]): Section[] {
   const sections = new Map<string, Section>();
   for (const connection of found) {
+    // By the groups themselves, not the label: a group named "Recent connections",
+    // or one named "A / B", is not the history or A › B.
+    const key = connection.source === "history" ? "history" : JSON.stringify(connection.groups);
     const label =
       connection.source === "history"
         ? "Recent connections"
         : connection.groups.length > 0
           ? connection.groups.join(" / ")
           : "Registered servers";
-    const section = sections.get(label) ?? { label, items: [] };
+    const section = sections.get(key) ?? { key, label, items: [] };
     section.items.push(connection);
-    sections.set(label, section);
+    sections.set(key, section);
   }
   return [...sections.values()];
 }
@@ -173,7 +178,7 @@ export function SsmsImportDialog() {
             <Loader2 className="size-4 animate-spin" /> Reading SSMS settings…
           </div>
         ) : error ? (
-          <p className="py-4 text-sm text-destructive select-text">{error}</p>
+          <p className="py-4 text-sm wrap-anywhere text-destructive select-text">{error}</p>
         ) : found.length === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">
             {file
@@ -186,10 +191,12 @@ export function SsmsImportDialog() {
               const ids = section.items.filter((c) => !isSaved(c)).map((c) => c.id);
               const all = ids.length > 0 && ids.every((id) => picked.has(id));
               return (
-                <div key={section.label} role="group" aria-label={section.label} className="mb-4">
+                <div key={section.key} role="group" aria-label={section.label} className="mb-4">
                   <label className="flex items-center gap-3 border-b py-2 text-xs font-medium text-muted-foreground">
                     <Checkbox checked={all} disabled={ids.length === 0} onCheckedChange={(checked) => toggle(ids, checked === true)} />
-                    {section.label}
+                    <span className="min-w-0 truncate" title={section.label}>
+                      {section.label}
+                    </span>
                   </label>
                   {section.items.map((connection) => (
                     <Row
@@ -229,7 +236,7 @@ export function SsmsImportDialog() {
             </Button>
             <Button disabled={count === 0 || importing} onClick={() => void importPicked()}>
               {importing && <Loader2 className="animate-spin" />}
-              Import {count > 0 ? count : ""}
+              Import {count > 0 ? numberFormat.format(count) : ""}
             </Button>
           </div>
         </DialogFooter>
@@ -250,34 +257,46 @@ function Row({
   onPick: (on: boolean) => void;
 }) {
   const saved = status.kind === "saved";
-  const details = [
-    connection.name && connection.server,
-    loginLabel(connection.authentication),
-    connection.defaultDatabase,
-    connection.source === "history" && connection.lastUsed !== null && `SSMS ${connection.ssmsVersion}, ${dateFormat.format(connection.lastUsed)}`,
-  ].filter(Boolean);
+  // A history entry may lack its SSMS version or its date (0: never recorded).
+  const used =
+    connection.source === "history" &&
+    [connection.ssmsVersion && `SSMS ${connection.ssmsVersion}`, connection.lastUsed && dateFormat.format(connection.lastUsed)]
+      .filter(Boolean)
+      .join(", ");
+  const details = [connection.name && connection.server, loginLabel(connection.authentication), connection.defaultDatabase, used]
+    .filter(Boolean)
+    .join(" · ");
+  const title = connection.name || connection.server;
+  const move =
+    status.kind === "move"
+      ? `In Quervio · ${[
+          status.existing.group !== status.group
+            ? status.group
+              ? `moves to ${status.group}`
+              : "moves out of its group"
+            : status.existing.name !== status.name && `renamed from ${status.existing.name || status.existing.server}`,
+          status.environment && `becomes ${ENVIRONMENTS[status.environment].label}`,
+        ]
+          .filter(Boolean)
+          .join(", ")}`
+      : "";
   return (
     <label className={cn("flex items-center gap-3 border-b py-2 last:border-b-0", saved ? "opacity-60" : "cursor-pointer")}>
       <Checkbox checked={picked && !saved} disabled={saved} onCheckedChange={(checked) => onPick(checked === true)} />
       <div className="min-w-0 flex-1">
-        <div className="truncate">{connection.name || connection.server}</div>
-        <div className="truncate text-xs text-muted-foreground">{details.join(" · ")}</div>
+        <div className="truncate" title={title}>
+          {title}
+        </div>
+        <div className="truncate text-xs text-muted-foreground" title={details}>
+          {details}
+        </div>
       </div>
       {saved ? (
         <span className="shrink-0 text-xs text-muted-foreground">Already in Quervio</span>
       ) : status.kind === "move" ? (
-        <span className="shrink-0 text-xs text-muted-foreground">
-          In Quervio ·{" "}
-          {[
-            status.existing.group !== status.group
-              ? status.group
-                ? `moves to ${status.group}`
-                : "moves out of its group"
-              : status.existing.name !== status.name && `renamed from ${status.existing.name || status.existing.server}`,
-            status.environment && `becomes ${ENVIRONMENTS[status.environment].label}`,
-          ]
-            .filter(Boolean)
-            .join(", ")}
+        // At most half the row, so a long group name cannot squeeze out the server.
+        <span className="max-w-1/2 truncate text-xs text-muted-foreground" title={move}>
+          {move}
         </span>
       ) : (
         (status.kind === "new" && status.environment) || connection.hasPassword ? (

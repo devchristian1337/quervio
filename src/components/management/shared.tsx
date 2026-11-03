@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, useMemo, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useMemo, type ReactNode } from "react";
 import { Info, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/radix-checkbox";
@@ -256,7 +256,7 @@ export function Notice({
     <p
       role={error ? "alert" : "status"}
       className={cn(
-        "flex items-start gap-2 text-sm whitespace-pre-wrap select-text",
+        "flex items-start gap-2 text-sm whitespace-pre-wrap wrap-anywhere select-text",
         error ? "text-destructive" : "text-muted-foreground",
       )}
     >
@@ -286,6 +286,95 @@ export function Section({
   );
 }
 
+// "always": by default some locales (Italian, Spanish, Polish) leave four
+// digits ungrouped, 1284 beside 32.767. The ES2020 typings predate the value.
+const ALWAYS = "always" as unknown as boolean;
+const grouped = new Intl.NumberFormat(undefined, { useGrouping: ALWAYS, maximumFractionDigits: 3 }),
+  ungrouped = new Intl.NumberFormat(undefined, { useGrouping: false, maximumFractionDigits: 3 }),
+  tiny = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 3 });
+
+const counts = new Map<number, Intl.NumberFormat>();
+/** A count or size in the system locale, 1.284 and 32.767 alike, with up to `digits` decimals. */
+export function formatCount(value: number, digits = 0) {
+  let format = counts.get(digits);
+  if (!format) {
+    format = new Intl.NumberFormat(undefined, { useGrouping: ALWAYS, maximumFractionDigits: digits });
+    counts.set(digits, format);
+  }
+  return format.format(value);
+}
+/** "1 row", "1.000 rows". */
+export const plural = (count: number, noun: string) =>
+  `${formatCount(count)} ${noun}${count === 1 ? "" : "s"}`;
+
+/** A numeric cell in the system locale, at most three decimals; integers past 2^53 stay exact. */
+export function formatNumber(value: string, grouping = true) {
+  const format = grouping ? grouped : ungrouped;
+  // BigInt keeps bigint and decimal(38,0) values exact; Number would round them.
+  if (/^-?\d+$/.test(value)) return format.format(BigInt(value));
+  const number = Number(value);
+  if (!Number.isFinite(number)) return value;
+  // Intl reads a decimal string exactly (ES2023); older engines fall back to Number.
+  if (Math.abs(number) > Number.MAX_SAFE_INTEGER) return format.format(value as unknown as number);
+  // Three decimals would show a thousandth or less as 0.
+  if (number !== 0 && Math.abs(number) < 0.0005) return tiny.format(number);
+  return format.format(number);
+}
+
+const NUMBER = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
+// Identifiers are numbers nobody adds up: grouping 32767 as a session id only hides it.
+type ColumnKind = "text" | "number" | "id";
+
+const same = <T,>(a: readonly T[], b: readonly T[]) =>
+  a.length === b.length && a.every((value, i) => value === b[i]);
+
+// A refresh brings new arrays with mostly the same values: only rows whose
+// cells changed render again. (content-visibility cannot skip table rows:
+// containment does not apply to internal table boxes.)
+const GridRow = memo(
+  function GridRow({
+    row,
+    kinds,
+    index,
+    selected,
+    clickable,
+    activate,
+  }: {
+    row: (string | null)[];
+    kinds: ColumnKind[];
+    index: number;
+    selected: boolean;
+    clickable: boolean;
+    activate: (index: number) => void;
+  }) {
+    return (
+      <tr
+        tabIndex={clickable ? 0 : undefined}
+        onClick={() => activate(index)}
+        onKeyDown={(e) => e.key === "Enter" && activate(index)}
+        className={cn("border-b last:border-0", clickable && "cursor-pointer outline-none hover:bg-accent/40 focus-visible:bg-accent/60", selected && "bg-accent")}
+      >
+        {row.map((v, i) => (
+          <td
+            key={i}
+            className={cn("h-8 max-w-lg truncate px-3 select-text", kinds[i] !== "text" && "text-right tabular-nums", v === null && "text-muted-foreground")}
+            title={v ?? "NULL"}
+          >
+            {v === null ? "NULL" : kinds[i] === "text" || v === "" ? v : formatNumber(v, kinds[i] === "number")}
+          </td>
+        ))}
+      </tr>
+    );
+  },
+  (a, b) =>
+    a.index === b.index &&
+    a.selected === b.selected &&
+    a.clickable === b.clickable &&
+    a.activate === b.activate &&
+    same(a.row, b.row) &&
+    same(a.kinds, b.kinds),
+);
+
 export function DataGrid({
   data,
   onRow,
@@ -298,7 +387,31 @@ export function DataGrid({
   /** Take the tool's remaining height, never less than 288px, instead of stopping at 384px. */
   fill?: boolean;
 }) {
-  const numeric=useMemo(()=>data.columns.map((_,index)=>data.rows.some(row=>row[index]!==null) && data.rows.every(row=>row[index]===null || /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(row[index]??""))),[data]);
+  // An empty string is no evidence either way, as NULL is not.
+  const kinds = useMemo(
+    () =>
+      data.columns.map((column, index): ColumnKind =>
+        data.rows.some((row) => row[index] !== null && row[index] !== "") &&
+        data.rows.every((row) => row[index] === null || row[index] === "" || NUMBER.test(row[index]!))
+          ? /(?:^|_)id$/i.test(column)
+            ? "id"
+            : "number"
+          : "text",
+      ),
+    [data],
+  );
+  const record = (row: (string | null)[]) =>
+    Object.fromEntries(data.columns.map((c, i) => [c, row[i]]));
+  // One stable handler for every row, reading the caller's latest callback.
+  const latest = useRef({ data, onRow });
+  useLayoutEffect(() => {
+    latest.current = { data, onRow };
+  });
+  const activate = useCallback((index: number) => {
+    const { data, onRow } = latest.current;
+    const row = data.rows[index];
+    if (onRow && row) onRow(Object.fromEntries(data.columns.map((c, i) => [c, row[i]])));
+  }, []);
   return (
     <div className={cn("overflow-auto rounded-md border", fill ? "min-h-72 flex-1" : "max-h-96 shrink-0")}>
       <table className="w-full border-collapse text-[13px]">
@@ -307,7 +420,7 @@ export function DataGrid({
             {data.columns.map((c, i) => (
               <th
                 key={i}
-                className={`h-8 border-b px-3 text-xs font-medium whitespace-nowrap text-muted-foreground ${numeric[i]?"text-right":"text-left"}`}
+                className={`h-8 border-b px-3 text-xs font-medium whitespace-nowrap text-muted-foreground ${kinds[i] !== "text" ? "text-right" : "text-left"}`}
               >
                 {c.replace(/_/g, " ")}
               </th>
@@ -315,30 +428,17 @@ export function DataGrid({
           </tr>
         </thead>
         <tbody>
-          {data.rows.map((row, index) => {
-            const record = Object.fromEntries(
-              data.columns.map((c, i) => [c, row[i]]),
-            );
-            return (
-              <tr
-                key={index}
-                tabIndex={onRow ? 0 : undefined}
-                onClick={() => onRow?.(record)}
-                onKeyDown={(e) => e.key === "Enter" && onRow?.(record)}
-                className={cn("border-b last:border-0", onRow && "cursor-pointer outline-none hover:bg-accent/40 focus-visible:bg-accent/60", selected?.(record) && "bg-accent")}
-              >
-                {row.map((v, i) => (
-                  <td
-                    key={i}
-                    className={cn("h-8 max-w-lg truncate px-3 select-text", numeric[i] && "text-right tabular-nums", v === null && "text-muted-foreground")}
-                    title={v ?? "NULL"}
-                  >
-                    {v ?? "NULL"}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
+          {data.rows.map((row, index) => (
+            <GridRow
+              key={index}
+              row={row}
+              kinds={kinds}
+              index={index}
+              selected={selected?.(record(row)) ?? false}
+              clickable={!!onRow}
+              activate={activate}
+            />
+          ))}
         </tbody>
       </table>
       {data.rows.length === 0 && (
@@ -346,7 +446,7 @@ export function DataGrid({
       )}
       {data.truncated && (
         <p className="px-3 py-2 text-xs text-muted-foreground">
-          Showing the first {data.rows.length} rows.
+          Showing the first {plural(data.rows.length, "row")}.
         </p>
       )}
     </div>
@@ -427,8 +527,10 @@ export function ReadTable({
   onRow?: (row: Record<string, string | null>) => void;
 }) {
   const result = useRead(context, resource, refreshSeconds);
+  // Never squeezed by the tool's column: a shrunk box would let a full grid
+  // spill over the form after it. The tool scrolls instead.
   return (
-    <div className="flex min-h-0 flex-col gap-2">
+    <div className="flex shrink-0 flex-col gap-2">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Button
           variant="outline"
@@ -660,7 +762,7 @@ export function BridgeOperation({
         (event: Progress) =>
           setProgress(
             event.message +
-              (event.completed !== null ? ` · ${event.completed} rows` : ""),
+              (event.completed !== null ? ` · ${plural(event.completed, "row")}` : ""),
           ),
         operationId,
       );

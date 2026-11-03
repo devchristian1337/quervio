@@ -17,6 +17,7 @@ import { api, displayName, errorMessage } from "@/lib/api";
 import {
   management,
   type Dependency,
+  type Feature,
   type ServerCapabilities,
 } from "@/lib/management-api";
 import { cn } from "@/lib/utils";
@@ -88,6 +89,13 @@ const MicrosoftQuery = lazy(() =>
 const Templates = lazy(() =>
   import("./Templates").then((m) => ({ default: m.Templates })),
 );
+
+// Why a tool cannot run, in words rather than the capability's state.
+const FEATURE_STATE: Record<Exclude<Feature["state"], "available">, string> = {
+  unsupported: "Not available on this server",
+  disabled: "Turned off",
+  denied: "Permission denied",
+};
 
 export function Workspace() {
   const workbench = useWorkbench(),
@@ -241,6 +249,7 @@ function ToolFrame({ tab, active = true }: { tab: ToolTab; active?: boolean }) {
               ? "queryStore"
               : null;
   const unavailable = feature && capabilities?.features[feature];
+  const selectedDatabase = database || capabilities?.database || "";
   const azure = capabilities?.engineEdition === 5;
   function content() {
     switch (tab.kind) {
@@ -288,14 +297,18 @@ function ToolFrame({ tab, active = true }: { tab: ToolTab; active?: boolean }) {
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
       <header className="flex shrink-0 flex-wrap items-end gap-3">
-        <div className="mr-auto">
-          <h1 className="text-lg font-semibold">
+        {/* Takes the row beside the selects, and wraps above them only below 15rem. */}
+        <div className="min-w-60 flex-1">
+          <h1 className="text-lg font-semibold wrap-anywhere">
             {tab.name
               ? `${TOOL_NAMES[tab.kind]} · ${tab.schema ?? "dbo"}.${tab.name}`
               : TOOL_NAMES[tab.kind]}
           </h1>
           {capabilities && (
-            <p className="pt-0.5 text-sm text-muted-foreground">
+            <p
+              className="line-clamp-2 pt-0.5 text-sm wrap-anywhere text-muted-foreground"
+              title={`${capabilities.edition} · ${capabilities.version}`}
+            >
               {capabilities.edition} · {capabilities.version}
             </p>
           )}
@@ -315,10 +328,15 @@ function ToolFrame({ tab, active = true }: { tab: ToolTab; active?: boolean }) {
             <Choice
               label="Database"
               className="w-48"
-              value={database || capabilities?.database || ""}
+              value={selectedDatabase}
               onChange={setDatabase}
               options={[
                 ["", "Default database"],
+                // A renamed or dropped database, or the list still loading: the
+                // select would show nothing for a value it has no option for.
+                ...(selectedDatabase && !databases.includes(selectedDatabase)
+                  ? [[selectedDatabase, selectedDatabase] as const]
+                  : []),
                 ...databases.map((name): [string, string] => [name, name]),
               ]}
             />
@@ -328,7 +346,8 @@ function ToolFrame({ tab, active = true }: { tab: ToolTab; active?: boolean }) {
       {!local && error && <Notice error>{error}</Notice>}
       {unavailable && unavailable.state !== "available" && (
         <Notice>
-          {unavailable.state}: {unavailable.reason}
+          {FEATURE_STATE[unavailable.state]}
+          {unavailable.reason ? `. ${unavailable.reason}` : ""}
         </Notice>
       )}
       {(local || capabilities) &&
@@ -407,7 +426,7 @@ function Components() {
       {dependencies.map((dependency, index) => (
         <div key={dependency.name} className="rounded-md border p-3">
           <h2 className="text-sm font-medium">{dependency.name}</h2>
-          <p className="pt-1 text-xs text-muted-foreground">
+          <p className="pt-1 text-xs wrap-anywhere text-muted-foreground">
             {dependency.available ? "Available" : "Missing"}
             {dependency.path ? ` · ${dependency.path}` : ""}
           </p>

@@ -4,6 +4,8 @@ import type { Channel } from "@tauri-apps/api/core";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { CatalogItem, SavedConnection, SsmsConnection } from "@/lib/api";
 import type { ExecutionEvent } from "@/lib/execution";
+import { CONNECTION_FIXTURES, fixtureFromUrl, mountFixtureSwitch } from "@/dev/connection-fixtures";
+import { override, ssmsList, UNHANDLED } from "@/dev/worst-mock";
 
 const connection: SavedConnection = {
   id: "mock",
@@ -29,10 +31,17 @@ const ssms: SsmsConnection[] = [
   { id: "history:10.0.3.7|sql:app", name: "", groups: [], server: "10.0.3.7", authentication: { kind: "sql", userName: "app" }, defaultDatabase: null, encrypt: "optional", trustServerCertificate: true, lastUsed: Date.now() - 40 * 86_400_000, source: "history", ssmsVersion: "20.0", hasPassword: false },
 ];
 // One connection as Quervio 0.1.14 imported it, before groups: the import moves it into Aurelia.
-const saved: SavedConnection[] = [
+const demo: SavedConnection[] = [
   connection,
   { ...connection, id: "legacy", name: "Aurelia / Aurelia [Ambulatorio]", server: "10.0.1.5", environment: "test", defaultDatabase: "H2O_BASE", encrypt: "optional" },
 ];
+// The Saved Connections the commands see: the demo, or a fixture from the switch.
+// Every other command follows the same switch through worst-mock.ts; a switch
+// reloads, since tabs and settings are read once at start.
+const mode = fixtureFromUrl();
+const saved = mode === "demo" ? demo : CONNECTION_FIXTURES[mode];
+const ssmsKnown = mode === "demo" ? ssms : (ssmsList(mode) as SsmsConnection[]);
+mountFixtureSwitch(() => location.reload());
 const savedGroups = new Set<string>();
 
 const item = (name: string, extra: Partial<CatalogItem> = {}): CatalogItem => ({
@@ -96,6 +105,10 @@ function encodeWindow(start: number, count: number): ArrayBuffer {
 
 mockIPC(async (cmd, args) => {
   const a = args as Record<string, unknown>;
+  if (mode !== "demo") {
+    const result = override(mode, cmd, a);
+    if (result !== UNHANDLED) return result;
+  }
   switch (cmd) {
     case "management_capabilities":return {version: "16.0.0.0", majorVersion: 16, edition: "Developer Edition · browser mock", engineEdition: 3, database: a.database ?? "master", features: Object.fromEntries(["plans", "monitor", "live", "queryStore", "agent", "backup", "events", "audit", "tde", "alwaysEncrypted"].map(f => [f, {state: "available", reason: ""}]))};
     case "management_dependencies":return [{name: "Microsoft bridge (.NET 10, SMO, DacFx, SqlClient)", path: null, available: false, help: "Configure components in the desktop app."}, {name: "SQL Tools Service", path: null, available: false, help: "Browser mock uses catalog completion."}];
@@ -173,10 +186,10 @@ mockIPC(async (cmd, args) => {
       return structuredClone(moved);
     }
     case "ssms_connections":
-      return ssms;
+      return ssmsKnown;
     case "ssms_import":
       for (const pick of a.picks as { id: string; environment: SavedConnection["environment"] | null; existing: string | null }[]) {
-        const found = ssms.find((c) => c.id === pick.id);
+        const found = ssmsKnown.find((c) => c.id === pick.id);
         if (!found) continue;
         const group = found.groups.join(" / ") || null;
         const existing = saved.find((c) => c.id === pick.existing);

@@ -17,6 +17,34 @@ interface PlanNode {
   x: number;
   y: number;
 }
+// The system locale's separators; "—" for a missing or broken attribute.
+const rowsFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+const costFormat = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 4 });
+const compactFormat = new Intl.NumberFormat(undefined, { notation: "compact", maximumSignificantDigits: 4 });
+
+function formatRows(value: string) {
+  // Actual rows are summed as BigInt and can pass 2^53: format them whole.
+  // Past a trillion they go compact, or the line runs out of its box.
+  if (/^\d+$/.test(value)) {
+    const rows = BigInt(value);
+    return (rows >= 1_000_000_000_000n ? compactFormat : rowsFormat).format(rows);
+  }
+  const number = Number(value);
+  if (value.trim() === "" || !Number.isFinite(number)) return "—";
+  return (Math.abs(number) >= 1e12 ? compactFormat : rowsFormat).format(number);
+}
+
+function formatCost(cost: number) {
+  if (!Number.isFinite(cost)) return "—";
+  // Huge costs read as 1.235M, not 1.235e+6; small ones keep their digits.
+  return Math.abs(cost) >= 1e6 ? compactFormat.format(cost) : costFormat.format(cost);
+}
+
+/** Cuts `text` to `max` characters, the last one an ellipsis. */
+function clip(text: string, max: number) {
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+}
+
 function parsePlan(xml: string) {
   const doc = new DOMParser().parseFromString(xml, "application/xml");
   if (
@@ -213,11 +241,13 @@ export function PlanViewer({
                     transform={`translate(${n.x},${n.y})`}
                     role="button"
                     tabIndex={0}
-                    aria-label={`${n.physical}, estimated rows ${n.rows}, actual rows ${n.actual}`}
+                    aria-label={`${n.physical}, estimated rows ${formatRows(n.rows)}, actual rows ${formatRows(n.actual)}`}
                     onClick={() => setSelected(n.id)}
                     onKeyDown={(e) => e.key === "Enter" && setSelected(n.id)}
                     className="cursor-pointer"
                   >
+                    {/* The whole operator name, only where the box cuts it. */}
+                    {n.physical.length > 29 && <title>{n.physical}</title>}
                     <rect
                       width="220"
                       height="82"
@@ -229,7 +259,7 @@ export function PlanViewer({
                       strokeWidth={selected === n.id ? 2 : 1}
                     />
                     <text x="10" y="19" fontSize="12" fill="var(--foreground)">
-                      {n.physical.slice(0, 29)}
+                      {clip(n.physical, 29)}
                     </text>
                     <text
                       x="10"
@@ -237,7 +267,7 @@ export function PlanViewer({
                       fontSize="11"
                       fill="var(--muted-foreground)"
                     >
-                      Estimated rows: {n.rows}
+                      Estimated rows: {formatRows(n.rows)}
                     </text>
                     <text
                       x="10"
@@ -245,7 +275,7 @@ export function PlanViewer({
                       fontSize="11"
                       fill="var(--muted-foreground)"
                     >
-                      Actual rows: {n.actual}
+                      Actual rows: {formatRows(n.actual)}
                     </text>
                     <text
                       x="10"
@@ -257,7 +287,7 @@ export function PlanViewer({
                           : "var(--muted-foreground)"
                       }
                     >
-                      Subtree cost: {n.cost.toPrecision(4)}
+                      Subtree cost: {formatCost(n.cost)}
                       {n.warnings.length ? " · Warning" : ""}
                     </text>
                   </g>

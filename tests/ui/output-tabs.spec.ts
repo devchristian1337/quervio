@@ -12,7 +12,7 @@ async function horizontalAlignment(decoration: Locator, tab: Locator) {
 
 test("output underline and hover highlight align with their tabs", async ({ page }) => {
   await page.goto("/?mock", { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "New query", exact: true }).last().click();
+  await page.getByRole("button", { name: "New query on Mock server", exact: true }).click();
   const tabs = page.getByRole("tablist", { name: "Output", exact: true });
   const bar = tabs.locator("..");
   const hover = bar.locator(":scope > div").nth(0);

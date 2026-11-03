@@ -102,7 +102,8 @@ export default function App() {
         <ObjectExplorer />
       </ResizablePanel>
       <ResizableHandle />
-      <ResizablePanel>
+      {/* Room for the start screen's rows and the query toolbar. */}
+      <ResizablePanel minSize={420}>
         <Workspace />
       </ResizablePanel>
     </ResizablePanelGroup>

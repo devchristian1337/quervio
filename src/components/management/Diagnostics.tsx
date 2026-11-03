@@ -19,6 +19,7 @@ import {
   figures,
   product,
   serverPressure,
+  type Figures,
   type Health,
 } from "@/lib/server-health";
 import {
@@ -36,6 +37,8 @@ import {
   Choice,
   DataGrid,
   Dropdown,
+  formatCount,
+  formatNumber,
   Notice,
   Operation,
   Text,
@@ -181,7 +184,7 @@ function ServerHealth({
   if (row && samples.current.current !== row) {
     samples.current = { previous: samples.current.current, current: row };
   }
-  const f = row ? figures(row, samples.current.previous) : null;
+  const f = row ? consistent(figures(row, samples.current.previous)) : null;
   const pressure = f ? serverPressure(f) : [];
 
   // Each sample becomes a point of the charts, stamped when it arrived.
@@ -192,7 +195,7 @@ function ServerHealth({
   });
   useEffect(() => {
     if (!row) return;
-    const sample = figures(row, samples.current.previous);
+    const sample = consistent(figures(row, samples.current.previous));
     const t = Date.now();
     const add = (points: LivePoint[], v: number | null) =>
       v === null ? points : [...points, { t, v }].slice(-HISTORY_POINTS);
@@ -226,7 +229,7 @@ function ServerHealth({
           : "Online";
   const database = row ? databaseStatus(row.state_desc) : "provisioning";
   const count = (value: number | null | undefined) =>
-    value === null || value === undefined ? "—" : value.toLocaleString();
+    value === null || value === undefined ? "—" : formatCount(value);
   return (
     <section
       aria-label="Server status"
@@ -252,10 +255,10 @@ function ServerHealth({
             {count(f ? (row?.cpu_count ? Number(row.cpu_count) : null) : null)}
           </ServerCardSpec>
           <ServerCardSpec icon="memory" label="Memory">
-            {bytes(f?.memoryTotal ?? null)}
+            {size(f?.memoryTotal ?? null)}
           </ServerCardSpec>
           <ServerCardSpec icon="disk" label="Disk">
-            {bytes(f?.diskTotal ?? null)}
+            {size(f?.diskTotal ?? null)}
           </ServerCardSpec>
         </ServerCardSpecs>
         <div className="grid gap-3">
@@ -263,7 +266,7 @@ function ServerHealth({
           <ServerCardMeter
             label="Memory"
             value={f?.memoryPercent ?? null}
-            detail={f?.sqlMemory ? `SQL Server ${bytes(f.sqlMemory)}` : undefined}
+            detail={f?.sqlMemory ? `SQL Server ${size(f.sqlMemory)}` : undefined}
           />
           <ServerCardMeter label="Disk" value={f?.diskPercent ?? null} />
         </div>
@@ -274,7 +277,7 @@ function ServerHealth({
           <ServerCardTitle
             region={
               f?.batchesPerSecond !== null && f?.batchesPerSecond !== undefined
-                ? `${f.batchesPerSecond.toLocaleString(undefined, { maximumFractionDigits: 1 })} batch requests a second`
+                ? `${formatCount(f.batchesPerSecond, 1)} batch requests a second`
                 : "Batch requests a second after the next refresh"
             }
           >
@@ -302,7 +305,7 @@ function ServerHealth({
             value={f?.workersPercent ?? null}
             detail={
               row?.active_workers && row.max_workers_count
-                ? `${Number(row.active_workers).toLocaleString()} of ${Number(row.max_workers_count).toLocaleString()}`
+                ? `${formatCount(Number(row.active_workers))} of ${formatCount(Number(row.max_workers_count))}`
                 : undefined
             }
           />
@@ -327,9 +330,9 @@ function ServerHealth({
           </ServerCardStatus>
         </ServerCardHeader>
         <ServerCardSpecs>
-          <ServerCardSpec label="Data">{bytes(number(row?.data_bytes))}</ServerCardSpec>
-          <ServerCardSpec label="Used">{bytes(number(row?.data_used_bytes))}</ServerCardSpec>
-          <ServerCardSpec label="Log">{bytes(number(row?.log_bytes))}</ServerCardSpec>
+          <ServerCardSpec label="Data">{size(number(row?.data_bytes))}</ServerCardSpec>
+          <ServerCardSpec label="Used">{size(number(row?.data_used_bytes))}</ServerCardSpec>
+          <ServerCardSpec label="Log">{size(number(row?.log_bytes))}</ServerCardSpec>
         </ServerCardSpecs>
         <div className="grid gap-3">
           {/* Files grow by themselves: how full they are is neutral. */}
@@ -372,11 +375,40 @@ function ServerHealth({
 const HISTORY_WINDOW = 5 * 60 * 1000;
 const HISTORY_POINTS = 300;
 const formatPercent = (v: number) => `${Math.round(v)}%`;
-const formatRate = (v: number) =>
-  `${v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 1 : 0 })}/s`;
+const formatRate = (v: number) => `${formatCount(v, v < 10 ? 1 : 0)}/s`;
 
 const number = (value: string | null | undefined) =>
-  value === null || value === undefined ? null : Number(value);
+  value === null || value === undefined || value === "" ? null : Number(value);
+
+/** bytes() picks the unit and rounds; the figure is then said in the system locale. */
+const size = (value: number | null) =>
+  value !== null && value < 0
+    ? "—"
+    : bytes(value).replace(/^\d+(?:\.\d+)?/, (figure) => formatCount(Number(figure), 1));
+
+// A share outside 0-100% cannot be (available memory above the total, a
+// volume -3% full): unknown, not a misleading 0%.
+const share = (value: number | null) =>
+  value === null || !Number.isFinite(value) || value < 0 || value > 100 ? null : value;
+const tally = (value: number | null) =>
+  value === null || !Number.isFinite(value) || value < 0 ? null : value;
+
+/** The figures as far as they are consistent. CPU and workers can pass 100% and are kept. */
+function consistent(f: Figures): Figures {
+  return {
+    ...f,
+    cpuPercent: tally(f.cpuPercent),
+    memoryPercent: share(f.memoryPercent),
+    diskPercent: share(f.diskPercent),
+    workersPercent: tally(f.workersPercent),
+    dataPercent: share(f.dataPercent),
+    logPercent: share(f.logPercent),
+    sessions: tally(f.sessions),
+    running: tally(f.running),
+    blocked: tally(f.blocked),
+    grantsPending: tally(f.grantsPending),
+  };
+}
 
 export function QueryStore({ context }: { context: Context }) {
   const [minutes, setMinutes] = useState("60"),
@@ -560,7 +592,7 @@ export function QueryStore({ context }: { context: Context }) {
                       .filter((r) => r.plan_id !== plan)
                       .map((r): [string, string] => [
                         r.plan_id ?? "",
-                        `Plan ${r.plan_id} · ${r.avg_duration_us} µs`,
+                        `Plan ${r.plan_id} · ${r.avg_duration_us ? formatNumber(r.avg_duration_us) : "—"} µs`,
                       ]),
                   ]}
                 />

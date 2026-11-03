@@ -179,7 +179,7 @@ const ServerCardSpec = ({
 
 interface ServerCardMeterProps extends React.ComponentProps<"div"> {
   label: React.ReactNode;
-  /** Percent, 0 to 100; null when the server does not report it. */
+  /** Percent; null when the server does not report it. Above 100 the bar is full and the text says the figure. */
   value: number | null;
   /** Shown before the percentage, such as "4.1 of 12 GB". */
   detail?: React.ReactNode;
@@ -195,7 +195,9 @@ const ServerCardMeter = ({
   className,
   ...props
 }: ServerCardMeterProps) => {
-  const pct = value === null ? 0 : Math.max(0, Math.min(100, Math.round(value)));
+  // Below 0 (or not a number) is not a reading: shown as unknown, not as an empty bar.
+  const known = value !== null && Number.isFinite(value) && value >= 0;
+  const pct = known ? Math.min(100, Math.round(value)) : 0;
   const frac = pct / 100;
   const [warn, crit] = thresholds;
   const tone =
@@ -215,7 +217,7 @@ const ServerCardMeter = ({
         <span className="text-muted-foreground">{label}</span>
         <span className="truncate text-foreground tabular-nums">
           {detail ? <span className="text-muted-foreground">{detail} · </span> : null}
-          {value === null ? "—" : `${pct}%`}
+          {known ? `${Math.round(value)}%` : "—"}
         </span>
       </div>
       <div
@@ -223,7 +225,8 @@ const ServerCardMeter = ({
         aria-label={typeof label === "string" ? label : undefined}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={value === null ? undefined : pct}
+        aria-valuenow={known ? pct : undefined}
+        aria-valuetext={known ? `${Math.round(value)}%` : "Unknown"}
         className="h-1.5 overflow-hidden rounded-full bg-muted"
       >
         <div
