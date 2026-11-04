@@ -5,7 +5,6 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-windows-sys.workspace = true
 encoding_rs.workspace = true
 base64.workspace = true
 mssql-tds.workspace = true
@@ -16,6 +15,12 @@ sqruff-lib.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 tempfile.workspace = true

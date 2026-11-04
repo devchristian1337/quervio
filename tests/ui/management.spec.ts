@@ -28,7 +28,7 @@ test("SQLCMD include access is approved separately from script execution", async
   await page.getByRole("button", { name: "Execute", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Allow SQLCMD include file access?", exact: true })).toBeVisible();
-  await expect(dialog).toContainText("using your Windows identity");
+  await expect(dialog).toContainText("using your operating system account");
   await expect(dialog.getByRole("button", { name: "Confirm and execute SQLCMD", exact: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(dialog).toBeHidden();

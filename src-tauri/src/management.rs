@@ -249,22 +249,25 @@ pub(crate) fn source_dir() -> Option<PathBuf> {
 }
 
 pub(crate) fn bridge_path(app: &tauri::AppHandle) -> Option<PathBuf> {
-    if let Some(path) = selected_component(app, "bridge") {
-        return Some(path);
-    }
+    find_bridge(&app.path().app_data_dir().ok()?, &app.path().resource_dir().ok()?)
+}
+
+pub(crate) fn find_bridge(data_dir: &std::path::Path, resource_dir: &std::path::Path) -> Option<PathBuf> {
     let mut paths = vec![];
+    if let Ok(bytes) = std::fs::read(data_dir.join("components/bridge.json")) {
+        if let Ok(path) = serde_json::from_slice::<PathBuf>(&bytes) {
+            paths.push(path);
+        }
+    }
     if let Some(path) = std::env::var_os("QUERVIO_MICROSOFT_BRIDGE") {
         paths.push(PathBuf::from(path));
     }
-    if let Ok(resource) = app.path().resource_dir() {
-        paths.push(resource.join("microsoft/Quervio.MicrosoftBridge.exe"));
-    }
+    paths.push(resource_dir.join("microsoft").join(crate::platform::BRIDGE));
     if let Some(source) = source_dir() {
-        paths.push(source.join("resources/microsoft/Quervio.MicrosoftBridge.exe"));
+        paths.push(source.join(crate::platform::microsoft_resources()).join(crate::platform::BRIDGE));
     }
-    if let Ok(data) = app.path().app_data_dir() {
-        paths.push(data.join("components/microsoft/Quervio.MicrosoftBridge.exe"));
-    }
+    paths.push(data_dir.join("components/microsoft").join(crate::platform::BRIDGE));
+    #[cfg(windows)]
     if let Some(source) = source_dir() {
         paths.push(source.join("../tools/Quervio.MicrosoftBridge/bin/Release/net10.0/win-x64/publish/Quervio.MicrosoftBridge.exe"));
     }
@@ -275,7 +278,7 @@ pub(crate) fn bridge_path(app: &tauri::AppHandle) -> Option<PathBuf> {
 pub fn management_dependencies(app: tauri::AppHandle) -> Vec<Dependency> {
     let bridge = bridge_path(&app);
     let sts = crate::language::service_path(&app);
-    vec![Dependency{name:"Microsoft bridge (.NET 10, SMO, DacFx, SqlClient)".into(),available:bridge.is_some(),path:bridge.map(|p|p.display().to_string()),help:"Build tools/Quervio.MicrosoftBridge with scripts/build-microsoft.ps1, or select an existing published executable.".into()},Dependency{name:"SQL Tools Service".into(),available:sts.is_some(),path:sts.map(|p|p.display().to_string()),help:"Select Microsoft.SqlTools.ServiceLayer.exe from an official SQL Tools Service distribution.".into()}]
+    vec![Dependency{name:"Microsoft bridge (.NET 10, SMO, DacFx, SqlClient)".into(),available:bridge.is_some(),path:bridge.map(|p|p.display().to_string()),help:format!("Select a published {} for this platform.", crate::platform::BRIDGE)},Dependency{name:"SQL Tools Service".into(),available:sts.is_some(),path:sts.map(|p|p.display().to_string()),help:format!("Install SQL Tools Service or select {} from an official distribution for this platform.", crate::platform::SQLTOOLS[0])}]
 }
 
 #[derive(Deserialize, Clone)]
@@ -375,15 +378,11 @@ pub fn management_component_select(
     path: PathBuf,
 ) -> CommandResult<()> {
     let expected = match kind.as_str() {
-        "bridge" => "Quervio.MicrosoftBridge.exe",
-        "language" => "MicrosoftSqlToolsServiceLayer.exe",
+        "bridge" => crate::platform::BRIDGE,
+        "language" => crate::platform::SQLTOOLS[0],
         _ => return Err("Unknown component.".into()),
     };
-    let name = path.file_name().and_then(|n| n.to_str());
-    if !path.is_file()
-        || (name != Some(expected)
-            && !(kind == "language" && name == Some("Microsoft.SqlTools.ServiceLayer.exe")))
-    {
+    if !path.is_file() || !crate::platform::component_name(&kind, &path) {
         return Err(format!("Select {expected}."));
     }
     let dir = app
@@ -404,14 +403,15 @@ pub async fn management_install_language(
     app: tauri::AppHandle,
     on_event: Channel<Progress>,
 ) -> CommandResult<()> {
+    let installer = if cfg!(windows) { "install-sqltools.ps1" } else { "install-sqltools.sh" };
     let resource = app
         .path()
         .resource_dir()
         .map_err(message)?
-        .join("install-sqltools.ps1");
+        .join(installer);
     let script = Some(resource)
         .filter(|p| p.is_file())
-        .or_else(|| source_dir().map(|source| source.join("../scripts/install-sqltools.ps1")))
+        .or_else(|| source_dir().map(|source| source.join("../scripts").join(installer)))
         .filter(|p| p.is_file())
         .ok_or("SQL Tools Service installer script is missing.")?;
     let root = app
@@ -419,13 +419,15 @@ pub async fn management_install_language(
         .app_data_dir()
         .map_err(message)?
         .join("components");
+    #[cfg(windows)]
     let shell = std::env::var_os("SystemRoot")
         .map(PathBuf::from)
         .unwrap_or_else(|| "C:\\Windows".into())
         .join("System32/WindowsPowerShell/v1.0/powershell.exe");
-    let mut command = tokio::process::Command::new(shell);
-    command
-        .args([
+    #[cfg(windows)]
+    let mut command = {
+        let mut command = tokio::process::Command::new(shell);
+        command.args([
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
@@ -435,12 +437,19 @@ pub async fn management_install_language(
         ])
         .arg(script)
         .arg("-ComponentsRoot")
-        .arg(root)
-        .stdout(std::process::Stdio::piped())
+        .arg(&root);
+        command
+    };
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = tokio::process::Command::new("/bin/bash");
+        command.arg(script).arg(&root);
+        command
+    };
+    command.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
+    crate::processes::configure(&mut command);
     let _ = on_event.send(Progress {
         phase: "installing".into(),
         message: "Downloading the official versioned SQL Tools Service and checking SHA-256."

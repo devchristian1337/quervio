@@ -5,6 +5,7 @@ mod formatting;
 mod language;
 mod management;
 mod microsoft;
+mod platform;
 mod processes;
 mod query;
 mod settings;
@@ -24,7 +25,7 @@ pub fn run() {
             browser_shortcuts::disable(app)?;
             let data_dir = app.path().app_data_dir()?;
             copy_querydeck_data(&data_dir);
-            app.manage(explorer::ExplorerState::open(&data_dir)?);
+            app.manage(explorer::ExplorerState::open(&data_dir, &app.path().resource_dir()?)?);
             app.manage(query::QueryState::default());
             app.manage(management::ManagementState::default());
             app.manage(language::LanguageState::default());

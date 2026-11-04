@@ -1,6 +1,27 @@
 # Quervio
 
-A fast, modern SQL Server management tool for Windows 11, inspired by SSMS. Built with Tauri v2, React and Rust.
+A fast, modern SQL Server management tool for Windows 11 and Linux, inspired by SSMS. Built with Tauri v2, React and Rust.
+
+## Download and install
+
+Public installers are available in [GitHub Releases](https://github.com/devchristian1337/quervio/releases/latest).
+
+| Platform | Downloads |
+| --- | --- |
+| Windows 11 x64 | [Installer](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio.App-win-Setup.exe) |
+| Linux Intel/AMD x64 | [Flatpak](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-x64.flatpak) · [DEB](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-x64.deb) · [RPM](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-x64.rpm) · [AppImage](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-x64.AppImage) |
+| Linux ARM64 | [Flatpak](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-arm64.flatpak) · [DEB](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-arm64.deb) · [RPM](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-arm64.rpm) · [AppImage](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-arm64.AppImage) |
+
+On Linux, Flatpak provides a common runtime across distributions; DEB and RPM
+integrate with the system package manager. Install the downloaded Flatpak through
+your software manager, or follow the [Linux installation instructions](docs/linux.md#installazione).
+No .NET SDK, Node.js or Rust installation is required to use Quervio. Saved
+passwords use the desktop's unlocked Secret Service keyring. Windows updates
+automatically; Linux updates by installing the newer package.
+
+Linux packaging, requirements and the actual verification scope are documented in
+[Linux support](docs/linux.md). Linux support does not imply compatibility with
+every historical distribution or with Windows-only certificate operations.
 
 - Domain language: [GLOSSARY.md](GLOSSARY.md)
 - Architecture decisions: [docs/adr](docs/adr)
@@ -15,7 +36,7 @@ A fast, modern SQL Server management tool for Windows 11, inspired by SSMS. Buil
 
 ## Develop
 
-Requires Rust (MSVC toolchain), Node 24+ and pnpm.
+Requires Rust (MSVC on Windows, native GNU toolchain on Linux), Node 24+ and pnpm.
 
 ```bash
 pnpm install
@@ -49,10 +70,17 @@ Integration tests run against SQL Server 2022 in Docker. Copy `.env.example` to 
 
 ```bash
 docker compose up -d --wait
-cargo test --workspace -- --ignored
+cargo test --workspace -- --ignored --skip linux_keyring_round_trip_and_profile_isolation
 ```
 
+The Linux keyring integration runs separately on a private bus with
+`bash scripts/test-linux-keyring.sh`; see [Linux support](docs/linux.md).
+
 ## Build the installer
+
+This section describes Windows. On Linux use `bash scripts/pack-linux.sh`, with
+`--flatpak` to also create a Flatpak bundle after installing its build runtime;
+see [Linux support](docs/linux.md).
 
 Quervio installs and updates itself with [Velopack](https://docs.velopack.io) ([ADR 0005](docs/adr/0005-installer-velopack.md)). With the .NET SDK installed and the Microsoft bridge built (`scripts/build-microsoft.ps1`):
 

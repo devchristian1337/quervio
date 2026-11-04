@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use quervio_core::catalog::{self, CatalogItem, ObjectFolder, TableFolder};
 use quervio_core::connection::{Authentication, ConnectionStore, Environment, SavedConnection};
-use quervio_core::secrets::{DpapiSecretStore, SecretStore};
+use quervio_core::secrets::{platform_store, SecretStore};
 use quervio_core::session::{ServerInfo, Session};
 use quervio_core::ssms::{self, SsmsConnection};
 use serde::Deserialize;
@@ -20,9 +20,10 @@ type SharedSession = Arc<tokio::sync::Mutex<Session>>;
 
 pub struct ExplorerState {
     data_dir: std::path::PathBuf,
+    resource_dir: std::path::PathBuf,
     token: tokio::sync::Mutex<Option<(String, u64)>>,
     connections: Mutex<ConnectionStore>,
-    secrets: DpapiSecretStore,
+    secrets: Box<dyn SecretStore>,
     sessions: tokio::sync::Mutex<HashMap<String, SharedSession>>,
     /// Snapshot of the open Query Tabs, restored on the next start.
     tabs_path: std::path::PathBuf,
@@ -50,12 +51,13 @@ impl ExplorerState {
             })
             .ok_or_else(|| "Save a connection before SQLCMD :connect.".into())
     }
-    pub fn open(data_dir: &Path) -> quervio_core::Result<Self> {
+    pub fn open(data_dir: &Path, resource_dir: &Path) -> quervio_core::Result<Self> {
         Ok(Self {
             data_dir: data_dir.to_path_buf(),
+            resource_dir: resource_dir.to_path_buf(),
             token: tokio::sync::Mutex::new(None),
             connections: Mutex::new(ConnectionStore::open(data_dir.join("connections.json"))?),
-            secrets: DpapiSecretStore::new(data_dir.join("secrets.json")),
+            secrets: platform_store(data_dir),
             sessions: tokio::sync::Mutex::new(HashMap::new()),
             tabs_path: data_dir.join("tabs.json"),
         })
@@ -76,6 +78,9 @@ impl ExplorerState {
         connection: &SavedConnection,
         typed: Option<String>,
     ) -> CommandResult<Option<String>> {
+        if connection.authentication == Authentication::Windows {
+            return Ok(None);
+        }
         if connection.authentication != Authentication::Entra {
             return self.password(&connection.id, typed);
         }
@@ -89,7 +94,7 @@ impl ExplorerState {
                 return Ok(Some(token.clone()));
             }
         }
-        let (token, expires) = crate::microsoft::access_token(&self.data_dir).await?;
+        let (token, expires) = crate::microsoft::access_token(&self.data_dir, &self.resource_dir).await?;
         *cached = Some((token.clone(), expires));
         Ok(Some(token))
     }
@@ -475,7 +480,7 @@ mod tests {
     #[test]
     fn sqlcmd_connect_to_an_unsaved_server_cannot_reach_the_saved_password() {
         let dir = std::env::temp_dir().join(format!("quervio-test-{}", uuid::Uuid::new_v4()));
-        let state = ExplorerState::open(&dir).unwrap();
+        let state = ExplorerState::open(&dir, &dir).unwrap();
         let saved = state
             .connections
             .lock()

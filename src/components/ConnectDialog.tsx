@@ -122,7 +122,7 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
           <DialogHeader>
             <DialogTitle>{editing ? "Edit connection" : "New connection"}</DialogTitle>
             <DialogDescription>
-              Passwords are encrypted for your Windows user and never stored in plain text.
+              Passwords are protected by your operating system and never stored in plain text.
             </DialogDescription>
           </DialogHeader>
 

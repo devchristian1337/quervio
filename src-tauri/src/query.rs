@@ -321,19 +321,12 @@ pub async fn query_sqlcmd_execute(
                     }
                 }
                 Step::Shell(command) => {
-                    let executable = std::env::var_os("SystemRoot")
-                        .map(std::path::PathBuf::from)
-                        .unwrap_or_else(|| "C:\\Windows".into())
-                        .join("System32/cmd.exe");
-                    let mut process = tokio::process::Command::new(executable);
+                    let mut process = crate::platform::local_shell(&command);
                     process
-                        .args(["/D", "/S", "/C", &command])
                         .stdin(std::process::Stdio::null())
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::piped())
                         .kill_on_drop(true);
-                    #[cfg(windows)]
-                    process.creation_flags(0x08000000);
                     let child=process.spawn().map_err(message)?;
                     let pid=child.id();
                     let _registration=pid.map(crate::processes::Registration::new);
@@ -342,10 +335,7 @@ pub async fn query_sqlcmd_execute(
                     let result=tokio::select!{result=&mut process_output=>Some(result.map_err(message)?),_=cancelled=>None};
                     let Some(result)=result else {
                         if let Some(pid)=pid {
-                            let mut kill=tokio::process::Command::new(std::env::var_os("SystemRoot").map(std::path::PathBuf::from).unwrap_or_else(||"C:\\Windows".into()).join("System32/taskkill.exe"));
-                            kill.args(["/PID",&pid.to_string(),"/T","/F"]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-                            #[cfg(windows)] kill.creation_flags(0x08000000);
-                            let _=kill.status().await;
+                            crate::processes::terminate_tree(pid).await;
                         }
                         outcome=Outcome::Cancelled;let _=on_event.send(sqlcmd_message(cancel.cancellation_message().into(),cancel.is_timed_out()));break 'steps;
                     };

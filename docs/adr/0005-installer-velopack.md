@@ -1,5 +1,8 @@
 # Installer e aggiornamenti con Velopack, non con l'installer NSIS di Tauri
 
+Questa procedura riguarda Windows. Per i pacchetti Linux e i loro aggiornamenti
+manuali vedere l'[ADR 0007](0007-linux-support.md).
+
 Quervio si installa con il `Setup.exe` di Velopack e si aggiorna da solo dalle GitHub Release di `devchristian1337/quervio` (il repository deve essere pubblico: l'app non incorpora token). Tauri compila soltanto (`pnpm tauri build --no-bundle`); `scripts/pack-velopack.ps1` mette accanto all'exe le stesse risorse di `bundle.resources` e crea con `vpk` il setup, i pacchetti completi e delta e il feed. L'installer NSIS non aveva un meccanismo di aggiornamento: ogni versione andava riscaricata e reinstallata a mano.
 
 ## Consequences

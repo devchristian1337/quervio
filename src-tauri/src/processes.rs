@@ -12,6 +12,14 @@ fn children() -> &'static Mutex<HashMap<u32, Arc<ProcessHandle>>> {
     CHILDREN.get_or_init(|| Mutex::new(HashMap::new()))
 }
 pub struct Registration(u32);
+/// Put each Unix child in its own group so cancellation also stops its
+/// descendants. All callers register only processes created by this app.
+pub fn configure(command: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    #[cfg(unix)]
+    command.process_group(0);
+}
 impl Registration {
     pub fn new(pid: u32) -> Self {
         #[cfg(windows)]
@@ -42,6 +50,8 @@ impl Drop for Registration {
     }
 }
 pub async fn terminate_tree(pid: u32) {
+    #[cfg(windows)]
+    {
     let path = std::env::var_os("SystemRoot")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| r"C:\Windows".into())
@@ -54,6 +64,13 @@ pub async fn terminate_tree(pid: u32) {
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     let _ = command.status().await;
+    }
+    #[cfg(unix)]
+    if pid > 1 && pid <= i32::MAX as u32 && pid != std::process::id() {
+        // SAFETY: a negative PID addresses the child's group established by
+        // configure(), never Quervio's own process group.
+        unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
+    }
 }
 pub async fn shutdown() {
     let processes = children()
@@ -100,5 +117,36 @@ mod tests {
         assert!(!status.success());
         drop(registration);
         assert!(!children().lock().unwrap().contains_key(&pid));
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use super::*;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    #[tokio::test]
+    async fn cancellation_stops_the_child_and_its_descendants() {
+        let mut command = crate::platform::local_shell("sleep 30 & echo $!; wait");
+        command.stdout(std::process::Stdio::piped()).kill_on_drop(true);
+        let mut child = command.spawn().unwrap();
+        let pid = child.id().unwrap();
+        let registration = Registration::new(pid);
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).await.unwrap();
+        let descendant: u32 = line.trim().parse().unwrap();
+        assert!(child.try_wait().unwrap().is_none());
+        terminate_tree(pid).await;
+        assert!(!tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await.unwrap().unwrap().success());
+        // A killed orphan can remain as a zombie until the system reaps it;
+        // it must no longer be executing or holding an output pipe open.
+        for _ in 0..50 {
+            let alive = std::fs::read_to_string(format!("/proc/{descendant}/stat")).ok()
+                .and_then(|stat| stat.rsplit_once(')').map(|(_, tail)| !tail.trim_start().starts_with('Z')))
+                .unwrap_or(false);
+            if !alive { drop(registration); return; }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("The shell's descendant survived cancellation");
     }
 }

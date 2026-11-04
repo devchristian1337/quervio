@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "Quervio",
+      "width": 1400,
+      "height": 900,
+      "minWidth": 900,
+      "minHeight": 600,
+      "x": 0,
+      "y": 0,
+      "center": false,
+      "maximized": true,
+      "visible": false,
+      "generalAutofillEnabled": false,
+      "transparent": false
+    }]
+  },
+  "bundle": {
+    "targets": ["appimage", "deb", "rpm"],
+    "resources": {
+      "resources/linux/microsoft/": "microsoft/",
+      "resources/linux/sqltools/": "sqltools/",
+      "../scripts/install-sqltools.sh": "install-sqltools.sh"
+    },
+    "category": "Development",
+    "linux": {
+      "appimage": { "bundleMediaFramework": false },
+      "deb": { "depends": ["libsecret-1-0", "libodbc2"] },
+      "rpm": { "depends": ["libsecret", "unixODBC"] }
+    }
+  }
+}

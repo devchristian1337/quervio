@@ -1,5 +1,8 @@
 # Password delle Connessioni salvate cifrate con DPAPI, non in Credential Manager
 
+Questa decisione resta valida su Windows. Il portachiavi Linux è descritto
+nell'[ADR 0007](0007-linux-support.md).
+
 Le password delle Connessioni salvate stanno in un file a parte (`secrets.json` in `%APPDATA%`), ognuna cifrata con DPAPI per l'utente Windows corrente e con un'entropia propria di Quervio. All'inizio avevamo scelto Windows Credential Manager, ma sul PC di sviluppo `CredWrite` fallisce sempre ("risorse di memoria insufficienti", anche con `cmdkey` e senza criteri di gruppo che lo spieghino), mentre DPAPI funziona. È lo stesso meccanismo che usa SSMS per le password salvate: solo lo stesso utente Windows sulla stessa macchina può decifrarle.
 
 ## Consequences

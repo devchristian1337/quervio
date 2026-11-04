@@ -2,6 +2,7 @@
 // change applies at once and is saved by src/stores/settings.ts.
 import { useEffect, useState, type ReactNode } from "react";
 import { getTauriVersion, getVersion } from "@tauri-apps/api/app";
+import { isLinux } from "@/lib/platform";
 import {
   Check,
   Code2,
@@ -246,7 +247,7 @@ function AppearanceSection() {
           // Short enough for the narrowest card, like "Dark · Mica" beside it. Another
           // theme sets the window's own mode (lib/window-theme.ts), which hides
           // Windows' from the page, so the current mode shows only while System is on.
-          note={current === "system" ? `Windows · ${systemDark ? "Dark" : "Light"}` : "Follows Windows"}
+          note={current === "system" ? `System · ${systemDark ? "Dark" : "Light"}` : "Follows system appearance"}
           selected={current === "system"}
           onSelect={() => choose("system")}
           preview={[findTheme("light", false), findTheme("dark", true)]}
@@ -750,7 +751,7 @@ function UpdateControl() {
   const text = {
     idle: "",
     checking: "Checking…",
-    "not-installed": "Only an installed Quervio can update itself",
+    "not-installed": isLinux ? "Install new Linux packages to update Quervio" : "Only an installed Quervio can update itself",
     current: "Quervio is up to date",
     empty: "No release has been published yet",
     available: `Version ${available} is available`,
@@ -824,7 +825,7 @@ function AboutSection() {
         <img src={prismaTile} alt="" className="size-16 rounded-2xl object-contain" draggable={false} />
         <div>
           <div className="text-xl font-semibold tracking-tight">Quervio</div>
-          <p className="text-sm text-muted-foreground">A fast, modern SQL Server client for Windows.</p>
+          <p className="text-sm text-muted-foreground">A fast, modern SQL Server desktop client.</p>
         </div>
       </div>
       <Row label="Version">
@@ -836,7 +837,7 @@ function AboutSection() {
       <Row label="Tauri">
         <span className="font-mono text-sm select-text">{versions?.tauri ?? "…"}</span>
       </Row>
-      <Row label="Data folder" help="Saved connections, encrypted passwords, open tabs and settings.">
+      <Row label="Data folder" help="Saved connections, open tabs and settings. Passwords are protected by your operating system.">
         <div className="flex max-w-80 items-center gap-1.5">
           <Tip label={dataDir && <span className="wrap-anywhere">{dataDir}</span>}>
             <span className="flex min-w-0 font-mono text-xs select-text">{middleTruncated(dataDir || "—")}</span>

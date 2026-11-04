@@ -43,3 +43,7 @@ dist-ssr
 /tools/**/obj/
 /src-tauri/resources/microsoft/*
 !/src-tauri/resources/microsoft/README.txt
+/src-tauri/resources/linux/microsoft/*
+!/src-tauri/resources/linux/microsoft/README.txt
+/src-tauri/resources/linux/sqltools/*
+!/src-tauri/resources/linux/sqltools/README.txt

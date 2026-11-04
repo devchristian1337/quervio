@@ -69,8 +69,14 @@ pub(crate) fn service_path(app: &tauri::AppHandle) -> Option<PathBuf> {
         paths.push(PathBuf::from(path));
     }
     if let Ok(dir) = app.path().app_data_dir() {
-        paths.push(dir.join("components/sqltools/MicrosoftSqlToolsServiceLayer.exe"));
-        paths.push(dir.join("components/sqltools/Microsoft.SqlTools.ServiceLayer.exe"));
+        for name in crate::platform::SQLTOOLS {
+            paths.push(dir.join("components/sqltools").join(name));
+        }
+    }
+    if let Ok(dir) = app.path().resource_dir() {
+        for name in crate::platform::SQLTOOLS {
+            paths.push(dir.join("sqltools").join(name));
+        }
     }
     paths.into_iter().find(|p| p.is_file())
 }
@@ -175,8 +181,7 @@ impl Client {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        #[cfg(windows)]
-        command.creation_flags(0x08000000);
+        crate::processes::configure(&mut command);
         let mut child = command.spawn().map_err(message)?;
         let registration = crate::processes::Registration::new(
             child

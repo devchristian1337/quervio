@@ -47,34 +47,16 @@ pub fn is_write(action: &str) -> bool {
     )
 }
 
-pub async fn access_token(data_dir: &std::path::Path) -> CommandResult<(String, u64)> {
-    let selected = data_dir.join("components/bridge.json");
-    let mut paths = Vec::new();
-    if let Ok(bytes) = std::fs::read(selected) {
-        if let Ok(path) = serde_json::from_slice::<std::path::PathBuf>(&bytes) {
-            paths.push(path);
-        }
-    }
-    if let Some(path) = std::env::var_os("QUERVIO_MICROSOFT_BRIDGE") {
-        paths.push(path.into());
-    }
-    if let Ok(executable) = std::env::current_exe() {
-        if let Some(dir) = executable.parent() {
-            paths.push(dir.join("microsoft/Quervio.MicrosoftBridge.exe"));
-        }
-    }
-    if let Some(source) = crate::management::source_dir() {
-        paths.push(source.join("resources/microsoft/Quervio.MicrosoftBridge.exe"));
-    }
-    let path=paths.into_iter().find(|p|p.is_file()).ok_or("Microsoft Entra authentication requires the Microsoft bridge. Open Tools > Microsoft Components.")?;
+pub async fn access_token(data_dir: &std::path::Path, resource_dir: &std::path::Path) -> CommandResult<(String, u64)> {
+    let path = crate::management::find_bridge(data_dir, resource_dir)
+        .ok_or("Microsoft Entra authentication requires the Microsoft bridge. Open Tools > Microsoft Components.")?;
     let mut command = Command::new(path);
     command
         .arg("--access-token")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
+    crate::processes::configure(&mut command);
     let child = command.spawn().map_err(message)?;
     let _registration =
         crate::processes::Registration::new(child.id().ok_or("Entra process ID is missing.")?);
@@ -158,8 +140,7 @@ pub async fn run(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
+    crate::processes::configure(&mut command);
     let mut child = command.spawn().map_err(message)?;
     let _registration =
         crate::processes::Registration::new(child.id().ok_or("Microsoft process ID is missing.")?);

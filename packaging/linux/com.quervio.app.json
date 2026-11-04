@@ -1,0 +1,24 @@
+{
+  "app-id": "com.quervio.app",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "50",
+  "sdk": "org.gnome.Sdk",
+  "command": "quervio",
+  "rename-icon": "quervio",
+  "finish-args": [
+    "--share=network", "--share=ipc", "--socket=wayland", "--socket=fallback-x11",
+    "--device=dri", "--talk-name=org.freedesktop.secrets", "--filesystem=home"
+  ],
+  "modules": [{
+    "name": "quervio",
+    "buildsystem": "simple",
+    "build-commands": [
+      "install -Dm755 usr/bin/quervio /app/bin/quervio",
+      "mkdir -p /app/lib /app/share/icons",
+      "cp -a usr/lib/Quervio /app/lib/Quervio",
+      "cp -a usr/share/icons/. /app/share/icons/",
+      "install -Dm644 usr/share/applications/Quervio.desktop /app/share/applications/com.quervio.app.desktop"
+    ],
+    "sources": [{ "type": "dir", "path": "payload" }]
+  }]
+}

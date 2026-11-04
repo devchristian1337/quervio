@@ -67,6 +67,8 @@ internal static class Program
             string action = request["action"]!.GetValue<string>();
             bool readOnly = action is "version" or "script" or "dacPreview" or "importPreview" or "export" or "extract" or "bacpacExport" or "azureList" or "azureBackups";
             if (!readOnly && request["confirmed"]?.GetValue<bool>() != true) throw new InvalidOperationException("Operation was not confirmed.");
+            if (!OperatingSystem.IsWindows() && (action is "columnEncryption" or "createColumnKeys" or "rotateMasterKey"))
+                throw new PlatformNotSupportedException("This Always Encrypted operation uses the Windows certificate store and must run on Windows.");
             object result = action switch
             {
                 "version" => new { version = "1.0", runtime = Environment.Version.ToString() },

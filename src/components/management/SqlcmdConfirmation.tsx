@@ -20,7 +20,7 @@ export function SqlcmdConfirmation() {
           <DialogTitle>{fileAccess ? "Allow SQLCMD include file access?" : "Review expanded SQLCMD script"}</DialogTitle>
           <DialogDescription>
             {fileAccess
-              ? "Preparing this script reads its :r include files and any nested includes. Network paths, mapped drives or links may contact remote servers using your Windows identity. Allow file access only if you trust this script. You will review the expanded script separately before anything executes."
+              ? "Preparing this script reads its :r include files and any nested includes. Network paths, mapped drives or links may contact remote servers using your operating system account. Allow file access only if you trust this script. You will review the expanded script separately before anything executes."
               : pending?.localCommands
               ? "This script includes local commands or file writes. Confirming authorizes those exact operations as well as the SQL batches and target switches below."
               : "Includes and variables have been expanded. Confirm the batches and server switches before execution."}

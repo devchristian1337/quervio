@@ -1,6 +1,5 @@
-//! Saved Connection passwords, encrypted with DPAPI for the current Windows
-//! user and kept in their own file next to the connections
-//! (docs/adr/0003-passwords-with-dpapi.md).
+//! Saved Connection passwords: DPAPI on Windows, Secret Service on Linux.
+//! Neither backend writes plaintext credentials to the connection file.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -14,6 +13,67 @@ pub trait SecretStore: Send + Sync {
     fn get(&self, connection_id: &str) -> Result<Option<String>>;
     fn set(&self, connection_id: &str, secret: &str) -> Result<()>;
     fn delete(&self, connection_id: &str) -> Result<()>;
+}
+
+pub fn platform_store(data_dir: &std::path::Path) -> Box<dyn SecretStore> {
+    #[cfg(target_os = "linux")]
+    { Box::new(LinuxSecretStore::new(data_dir)) }
+    #[cfg(not(target_os = "linux"))]
+    { Box::new(DpapiSecretStore::new(data_dir.join("secrets.json"))) }
+}
+
+/// GNOME Keyring, KWallet (with Secret Service enabled), or another provider
+/// of org.freedesktop.secrets on the user's session bus. Profiles are isolated
+/// by their data directory, including temporary profiles used by tests.
+#[cfg(target_os = "linux")]
+pub struct LinuxSecretStore {
+    service: String,
+    lock: Mutex<()>,
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxSecretStore {
+    pub fn new(data_dir: &std::path::Path) -> Self {
+        Self {
+            service: format!("com.quervio.app:{}", data_dir.display()),
+            lock: Mutex::new(()),
+        }
+    }
+
+    fn entry(&self, id: &str) -> Result<keyring::Entry> {
+        keyring::Entry::new(&self.service, id).map_err(Self::error)
+    }
+
+    // Do not format arbitrary backend errors: a malformed credential can
+    // include its raw contents in an error (e.g. BadEncoding).
+    fn error(_: keyring::Error) -> Error {
+        Error::Secrets("Cannot access the Linux keyring. Unlock or enable a Secret Service provider (GNOME Keyring or KWallet) in your desktop session. Passwords are never saved as plaintext.".into())
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl SecretStore for LinuxSecretStore {
+    fn get(&self, id: &str) -> Result<Option<String>> {
+        let _guard = self.lock.lock().expect("secret store lock");
+        match self.entry(id)?.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(Self::error(error)),
+        }
+    }
+
+    fn set(&self, id: &str, secret: &str) -> Result<()> {
+        let _guard = self.lock.lock().expect("secret store lock");
+        self.entry(id)?.set_password(secret).map_err(Self::error)
+    }
+
+    fn delete(&self, id: &str) -> Result<()> {
+        let _guard = self.lock.lock().expect("secret store lock");
+        match self.entry(id)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(Self::error(error)),
+        }
+    }
 }
 
 /// A JSON file of DPAPI-encrypted passwords. Only the Windows user who wrote
@@ -244,5 +304,30 @@ mod tests {
         assert_eq!(from_hex(&to_hex(&[0, 15, 255])), Some(vec![0, 15, 255]));
         assert_eq!(from_hex("abc"), None);
         assert_eq!(from_hex("zz"), None);
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires an isolated, unlocked Secret Service; scripts/test-linux-keyring.sh"]
+    fn linux_keyring_round_trip_and_profile_isolation() {
+        assert_eq!(std::env::var("QUERVIO_TEST_KEYRING").as_deref(), Ok("1"));
+        let profile = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let store = LinuxSecretStore::new(profile.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        assert_eq!(store.get(&id).unwrap(), None);
+        store.set(&id, "test-only-pässword-漢字").unwrap();
+        assert_eq!(LinuxSecretStore::new(profile.path()).get(&id).unwrap().as_deref(), Some("test-only-pässword-漢字"));
+        assert_eq!(LinuxSecretStore::new(other.path()).get(&id).unwrap(), None);
+        store.set(&id, "replacement").unwrap();
+        assert_eq!(store.get(&id).unwrap().as_deref(), Some("replacement"));
+        store.delete(&id).unwrap();
+        store.delete(&id).unwrap();
+        assert_eq!(store.get(&id).unwrap(), None);
+        assert_eq!(fs::read_dir(profile.path()).unwrap().count(), 0);
     }
 }

@@ -1,0 +1,114 @@
+name: Linux packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Draft release tag to build and upload (empty: validate main only)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - name: Validate release tag
+        if: inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(node -p "'v' + require('./package.json').version")" = "$RELEASE_TAG"
+      - name: Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev libdbus-1-dev libkrb5-dev libicu-dev libsecret-1-0 libodbc2 gnome-keyring dbus-x11 xvfb xauth webkit2gtk-driver squashfs-tools flatpak flatpak-builder
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.22.0'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Rust toolchain
+        run: rustup update stable --no-self-update
+      - name: Flatpak runtime and SDK
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive -y flathub org.gnome.Platform//50 org.gnome.Sdk//50
+      - name: Backend tests
+        run: cargo test --locked --workspace
+      - name: Linux keyring integration
+        run: bash scripts/test-linux-keyring.sh
+      - name: Frontend tests
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
+      - name: Build Linux packages and self-test the bridge
+        run: bash scripts/pack-linux.sh --flatpak
+      - name: Native packaged application smoke test
+        run: |
+          cargo install tauri-driver --version 2.1.0 --locked
+          bash scripts/test-linux-native.sh
+      - name: Native Flatpak smoke test
+        run: |
+          version=$(node -p "require('./package.json').version")
+          flatpak install --user --noninteractive -y "target/flatpak/Quervio_${version}_$(uname -m).flatpak"
+          QUERVIO_NATIVE_FORMAT=flatpak bash scripts/test-linux-native.sh
+      - name: Stage public packages and checksums
+        run: bash scripts/stage-linux-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Quervio-linux-release-${{ matrix.arch }}
+          compression-level: 0
+          path: |
+            target/linux-release/Quervio-linux-${{ matrix.arch }}.*
+            target/linux-release/SHA256SUMS-linux-${{ matrix.arch }}.txt
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Quervio-linux-validation-${{ matrix.arch }}
+          path: target/linux-smoke/
+          if-no-files-found: ignore
+
+  upload:
+    if: inputs.release_tag != ''
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Quervio-linux-release-*
+          path: linux-assets
+          merge-multiple: true
+      - name: Upload verified Linux packages to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          cd linux-assets
+          sha256sum -c SHA256SUMS-linux-x64.txt
+          sha256sum -c SHA256SUMS-linux-arm64.txt
+          gh release upload "$RELEASE_TAG" ./* --repo "$GITHUB_REPOSITORY" --clobber

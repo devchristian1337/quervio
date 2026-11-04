@@ -221,6 +221,9 @@ async fn sql_login_without_a_password_is_refused_before_connecting() {
     ));
 }
 
+// The fast default-instance check reads the Windows registry. On Linux a
+// local TCP endpoint is attempted normally, including a real local server.
+#[cfg(windows)]
 #[tokio::test]
 #[ignore = "needs SQL Server: docker compose up -d --wait"]
 async fn bare_localhost_without_a_local_instance_explains_itself() {

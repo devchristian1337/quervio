@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileUp, KeyRound, Loader2 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { isLinux } from "@/lib/platform";
 import { toast } from "@/components/ui/basic-toast";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/radix-checkbox";
@@ -158,7 +159,9 @@ export function SsmsImportDialog() {
           <DialogDescription>
             {file
               ? `Registered servers in ${file.split(/[\\/]/).pop()}.`
-              : "The Registered Servers and recent connections of SQL Server Management Studio on this PC. Saved passwords come along, still encrypted for your Windows user."}
+              : isLinux
+                ? "Import Registered Servers from an exported SSMS file. Re-enter saved passwords on Linux."
+                : "The Registered Servers and recent connections of SQL Server Management Studio on this PC. Saved passwords come along, still encrypted for your Windows user."}
           </DialogDescription>
         </DialogHeader>
 

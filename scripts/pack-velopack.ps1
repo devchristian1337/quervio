@@ -4,8 +4,10 @@
 # updates (src-tauri/src/updates.rs). Needs the .NET SDK (vpk is pinned in
 # dotnet-tools.json) and, for -Publish, `gh auth login` or -Token.
 # -ReleaseNotes is the text of the notes (Markdown), shown in the release.
+# -Publish -Draft uploads without publishing, for a combined Windows/Linux release.
 param(
     [switch]$Publish,
+    [switch]$Draft,
     [string]$Token,
     [string]$ReleaseNotes
 )
@@ -17,6 +19,23 @@ $packId = 'Quervio.App'
 $version = (Get-Content (Join-Path $root 'src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json).version
 $publishDir = Join-Path $root 'target/velopack/publish'
 $releasesDir = Join-Path $root 'target/velopack/releases'
+
+if ($Draft -and -not $Publish) { throw '-Draft requires -Publish.' }
+# Cleanup is limited to ordinary directories inside this checkout.
+$workspacePath = [IO.Path]::GetFullPath($root.Path).TrimEnd([IO.Path]::DirectorySeparatorChar)
+foreach ($directory in @($publishDir, $releasesDir)) {
+    $absolute = [IO.Path]::GetFullPath($directory)
+    if (-not $absolute.StartsWith($workspacePath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Build output must stay inside the workspace: $absolute"
+    }
+}
+foreach ($directory in @((Join-Path $root 'target'), (Join-Path $root 'target/velopack'), $publishDir)) {
+    if (Test-Path -LiteralPath $directory) {
+        if ((Get-Item -LiteralPath $directory).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Build output must not traverse a reparse point: $directory"
+        }
+    }
+}
 
 function Invoke-Step([string]$what, [scriptblock]$step) {
     # Windows PowerShell turns a tool's stderr (Tauri logs its progress
@@ -77,9 +96,11 @@ try {
     Invoke-Step 'vpk pack' { dotnet vpk @pack }
 
     if ($Publish) {
+        $upload = @('upload', 'github', '-o', $releasesDir, '--repoUrl', $repo, '--token', $Token,
+            '--merge', '--releaseName', "Quervio $version", '--tag', "v$version")
+        if (-not $Draft) { $upload += '--publish' }
         Invoke-Step 'vpk upload' {
-            dotnet vpk upload github -o $releasesDir --repoUrl $repo --token $Token `
-                --publish --releaseName "Quervio $version" --tag "v$version"
+            dotnet vpk @upload
         }
     }
     Write-Host "Setup: $(Join-Path $releasesDir "$packId-win-Setup.exe")"

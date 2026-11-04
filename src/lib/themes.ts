@@ -502,7 +502,13 @@ export function applyTheme(theme: Theme) {
   root.dataset.theme = theme.id;
   root.style.colorScheme = theme.kind;
   for (const name of ALL_VARIABLES) root.style.removeProperty(name);
-  if (theme.mica) return;
+  if (theme.mica) {
+    // Linux has no Mica backdrop; paint the same palette behind the editor.
+    if (typeof navigator !== "undefined" && /Linux/i.test(navigator.platform)) {
+      root.style.setProperty("--app-background", theme.palette.bg);
+    }
+    return;
+  }
   for (const [name, value] of Object.entries(cssVariables(theme))) root.style.setProperty(name, value);
 }
 

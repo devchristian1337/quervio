@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { isLinux } from "@/lib/platform";
 import { QueryWorkspace } from "@/components/QueryWorkspace";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/flexnative-tooltip";
@@ -424,7 +425,7 @@ function Components() {
     try {
       const path = await open({
         multiple: false,
-        filters: [{ name: "Microsoft component", extensions: ["exe"] }],
+        filters: isLinux ? undefined : [{ name: "Microsoft component", extensions: ["exe"] }],
       });
       if (path) {
         await management.selectComponent(kind, path);
@@ -469,8 +470,9 @@ function Components() {
       <Notice>
         Column encryption migration also requires the official Microsoft
         SqlServer PowerShell module, version 22 or later. Component executables
-        run locally under your Windows account.
+        run locally under your operating system account.
       </Notice>
+      {isLinux && <Notice>Always Encrypted key creation, key rotation and column migration use the Windows certificate store and require Windows.</Notice>}
       <Button
         className="self-start"
         variant="outline"
