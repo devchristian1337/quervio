@@ -1,5 +1,5 @@
 // Loaded lazily: importing it pulls in Monaco.
-import { useEffect, useRef, useState } from "react";
+import { memo, useMemo, useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { Play, WandSparkles } from "lucide-react";
 import {
@@ -117,13 +117,36 @@ function execute() {
   if (activeId && script) void execute(activeId, script);
 }
 
-export default function SqlEditor({ tabId, initialText }: { tabId: string; initialText: string }) {
+// Memoized: its tab's streamed output must not redraw the editor, and new
+// options would make @monaco-editor/react call updateOptions on every render.
+export default memo(function SqlEditor({ tabId, initialText }: { tabId: string; initialText: string }) {
   const theme = useTheme();
   const options = useSettings((s) => s.settings.editor);
   const executeKey = useShortcutLabel("execute");
   const formatKey = useShortcutLabel("format");
   // Read when the menu opens, to disable Cut and Copy without a selection.
   const [selected, setSelected] = useState(false);
+
+  const editorOptions = useMemo(
+    (): monaco.editor.IStandaloneEditorConstructionOptions => ({
+      fontFamily: options.fontFamily,
+      fontSize: options.fontSize,
+      fontLigatures: options.ligatures,
+      minimap: { enabled: options.minimap },
+      wordWrap: options.wordWrap ? "on" : "off",
+      lineNumbers: options.lineNumbers ? "on" : "off",
+      scrollBeyondLastLine: false,
+      renderLineHighlight: "line",
+      automaticLayout: true,
+      tabSize: options.tabSize,
+      padding: { top: 8 },
+      contextmenu: false,
+      // Hover, suggestions and signatures may pass the editor's edges:
+      // on the first lines a hover above the text was cut off by them.
+      fixedOverflowWidgets: true,
+    }),
+    [options],
+  );
 
   const container = useRef<HTMLDivElement>(null);
   const languageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -152,23 +175,7 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
               languageTimer.current = setTimeout(() => {const model = monaco.editor.getModel(monaco.Uri.parse(tabId));if (model) syncLanguage(model);}, 700);
             }}
             theme={editorThemeName(theme)}
-            options={{
-              fontFamily: options.fontFamily,
-              fontSize: options.fontSize,
-              fontLigatures: options.ligatures,
-              minimap: { enabled: options.minimap },
-              wordWrap: options.wordWrap ? "on" : "off",
-              lineNumbers: options.lineNumbers ? "on" : "off",
-              scrollBeyondLastLine: false,
-              renderLineHighlight: "line",
-              automaticLayout: true,
-              tabSize: options.tabSize,
-              padding: { top: 8 },
-              contextmenu: false,
-              // Hover, suggestions and signatures may pass the editor's edges:
-              // on the first lines a hover above the text was cut off by them.
-              fixedOverflowWidgets: true,
-            }}
+            options={editorOptions}
             onMount={(editor) => {
               registerEditor(editor);
               editor.focus();
@@ -212,4 +219,4 @@ export default function SqlEditor({ tabId, initialText }: { tabId: string; initi
       </ContextMenuContent>
     </ContextMenu>
   );
-}
+});

@@ -53,7 +53,13 @@ const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
 
     // Again whenever a label or the bar's size changes.
     useLayoutEffect(() => {
-      const place = () => setActiveBox(boxOf(activeIndex))
+      // Kept when unchanged: a new object would draw the bar again for nothing.
+      const place = () => {
+        const next = boxOf(activeIndex)
+        setActiveBox((box) =>
+          box && next && box.left === next.left && box.width === next.width ? box : next,
+        )
+      }
       place()
       const observer = new ResizeObserver(place)
       if (listRef.current) observer.observe(listRef.current)

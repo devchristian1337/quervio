@@ -63,7 +63,12 @@ export function fitText(text: string, width: number, measure: (text: string) => 
   return `${source.slice(0, low).trimEnd()}…`;
 }
 
-/** Newly loaded rows can widen a column, but cannot hide a previously seen value. */
+/**
+ * Newly loaded rows can widen a column, but cannot hide a previously seen value.
+ * `current` itself when nothing widens: a new array would lay out the grid again.
+ */
 export function mergeColumnWidths(current: readonly number[], incoming: readonly number[]): number[] {
-  return incoming.map((width, column) => Math.max(width, current[column] ?? 0));
+  const merged = incoming.map((width, column) => Math.max(width, current[column] ?? 0));
+  const same = merged.length === current.length && merged.every((width, column) => width === current[column]);
+  return same ? (current as number[]) : merged;
 }

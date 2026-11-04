@@ -42,6 +42,8 @@ export interface QueryTab {
   database: string | null;
   openTransactions: number;
   messages: MessageLine[];
+  /** Some message is an error; kept here so the tab need not scan every line. */
+  hasErrors?: boolean;
   resultSets: ResultSetSummary[];
   outcome: Outcome | null;
   /** Bumped when an Execution's output replaces the last one's, so grids drop rows cached from it. */
@@ -146,6 +148,9 @@ async function endTransactions(tabs: QueryTab[], commit: boolean) {
 const LONG_RUN_MS = 300;
 /** How often streamed messages are added to the tab. */
 const MESSAGE_FLUSH_MS = 16;
+/** Past this many lines, less often: each flush copies the list. */
+const MESSAGE_FLUSH_SLOW_AFTER = 1000;
+const MESSAGE_FLUSH_SLOW_MS = 100;
 
 /** Reads the first rows of each Result Set of a quick Execution for the run about to be shown. */
 async function readFirstBlocks(id: string, sets: ResultSetSummary[]) {
@@ -289,7 +294,7 @@ export const useQueries = create<QueriesState>((set, get) => {
       // Executing blocks a second run from the start.
       const startedAt = Date.now();
       // The output gathered while the last one stays on screen; null once shown.
-      let staged: Partial<QueryTab> | null = { messages: [], resultSets: [], plans: [] };
+      let staged: Partial<QueryTab> | null = { messages: [], hasErrors: false, resultSets: [], plans: [] };
       const output = (update: (t: QueryTab) => Partial<QueryTab>) => {
         if (!staged) return patch(id, update);
         const current = get().tabs.find((t) => t.id === id);
@@ -322,17 +327,27 @@ export const useQueries = create<QueriesState>((set, get) => {
         if (queued.length === 0) return;
         const lines = queued;
         queued = [];
-        output((t) => ({ messages: [...t.messages, ...lines] }));
+        output((t) => ({
+          messages: [...t.messages, ...lines],
+          hasErrors: t.hasErrors === true || lines.some((line) => line.isError),
+        }));
       };
       const queueMessage = (line: MessageLine) => {
         queued.push(line);
-        flushTimer ??= setTimeout(flushMessages, MESSAGE_FLUSH_MS);
+        if (flushTimer === null) {
+          const shownLines = staged ? (staged.messages?.length ?? 0) : (get().tabs.find((t) => t.id === id)?.messages.length ?? 0);
+          flushTimer = setTimeout(flushMessages, shownLines > MESSAGE_FLUSH_SLOW_AFTER ? MESSAGE_FLUSH_SLOW_MS : MESSAGE_FLUSH_MS);
+        }
       };
+      const rowsAffected = (count: number): MessageLine => ({
+        text: `(${count} row${count === 1 ? "" : "s"} affected)`,
+        isError: false,
+      });
 
       const channel = new Channel<ExecutionEvent>();
       channel.onmessage = (event) => {
         // Everything else lands after the lines that came before it.
-        if (event.type !== "message" && event.type !== "rowsAffected") flushMessages();
+        if (event.type !== "message" && event.type !== "rowsAffected" && event.type !== "messages") flushMessages();
         switch (event.type) {
           case "sessionClosed":
             patch(id,{status:"disconnected",error:event.reason,openTransactions:0});
@@ -347,7 +362,10 @@ export const useQueries = create<QueriesState>((set, get) => {
             queueMessage(event);
             break;
           case "rowsAffected":
-            queueMessage({ text: `(${event.count} row${event.count === 1 ? "" : "s"} affected)`, isError: false });
+            queueMessage(rowsAffected(event.count));
+            break;
+          case "messages":
+            for (const item of event.items) queueMessage(item.type === "message" ? item : rowsAffected(item.count));
             break;
           case "resultSetStarted":
             output((t) => ({
@@ -400,6 +418,7 @@ export const useQueries = create<QueriesState>((set, get) => {
         flushMessages();
         output((t) => ({
           messages: [...t.messages, { text: errorMessage(error), isError: true }],
+          hasErrors: true,
           outcome: "failed",
           elapsedMs: Date.now() - startedAt,
           view: "messages",

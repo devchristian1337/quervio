@@ -28,9 +28,21 @@ use tokio::{
     task::JoinHandle,
 };
 
+/// Held only to find or start the service: each tab then waits on its own
+/// document alone, so one tab connecting (up to 20 s) never holds up another.
 #[derive(Default)]
 pub struct LanguageState {
-    client: tokio::sync::Mutex<Option<Client>>,
+    client: tokio::sync::Mutex<Option<Arc<Client>>>,
+}
+
+/// What the service holds for one tab's document. Its lock keeps that tab's
+/// requests in order: connect, then sync, then the request itself.
+#[derive(Default)]
+struct Document {
+    /// The text the service holds, once opened.
+    text: Option<String>,
+    /// The connection, database and metadata revision it is bound to.
+    context: Option<String>,
 }
 
 #[derive(Default)]
@@ -48,10 +60,8 @@ struct Client {
     shared: Arc<Mutex<Shared>>,
     changed: Arc<Notify>,
     reader: JoinHandle<()>,
-    seq: u64,
-    /// The text the service holds for each open document.
-    documents: HashMap<String, String>,
-    contexts: HashMap<String, String>,
+    seq: std::sync::atomic::AtomicU64,
+    documents: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Document>>>>,
 }
 
 impl Drop for Client {
@@ -209,16 +219,15 @@ impl Client {
             shared.clone(),
             changed.clone(),
         ));
-        let mut client = Self {
+        let client = Self {
             _registration: registration,
             _child: child,
             input,
             shared,
             changed,
             reader,
-            seq: 0,
-            documents: HashMap::new(),
-            contexts: HashMap::new(),
+            seq: Default::default(),
+            documents: Default::default(),
         };
         client
             .request(
@@ -229,16 +238,27 @@ impl Client {
         client.notify("initialized", json!({})).await?;
         Ok(client)
     }
-    async fn notify(&mut self, method: &str, params: Value) -> CommandResult<()> {
+    fn next_seq(&self) -> u64 {
+        self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+    }
+    /// The tab's document, created empty on first use.
+    fn document(&self, uri: &str) -> Arc<tokio::sync::Mutex<Document>> {
+        self.documents
+            .lock()
+            .unwrap()
+            .entry(uri.to_owned())
+            .or_default()
+            .clone()
+    }
+    async fn notify(&self, method: &str, params: Value) -> CommandResult<()> {
         write(
             &self.input,
             &json!({"jsonrpc":"2.0","method":method,"params":params}),
         )
         .await
     }
-    async fn request(&mut self, method: &str, params: Value) -> CommandResult<Value> {
-        self.seq += 1;
-        let id = self.seq;
+    async fn request(&self, method: &str, params: Value) -> CommandResult<Value> {
+        let id = self.next_seq();
         let (sender, receiver) = oneshot::channel();
         {
             let mut shared = self.shared.lock().unwrap();
@@ -289,8 +309,8 @@ impl Client {
         }
     }
     /// Connects a document to a database; `options` as connection/connect takes them.
-    async fn connect(&mut self, uri: &str, options: Value) -> CommandResult<()> {
-        if self.contexts.contains_key(uri) {
+    async fn connect(&self, document: &mut Document, uri: &str, options: Value) -> CommandResult<()> {
+        if document.context.take().is_some() {
             self.request("connection/disconnect", json!({"ownerUri":uri}))
                 .await?;
         }
@@ -311,13 +331,12 @@ impl Client {
         }
     }
     /// Gives the service the document's current text.
-    async fn sync(&mut self, uri: &str, text: String) -> CommandResult<()> {
-        self.seq += 1;
-        let version = self.seq;
-        match self.documents.get(uri) {
+    async fn sync(&self, document: &mut Document, uri: &str, text: String) -> CommandResult<()> {
+        let version = self.next_seq();
+        match &document.text {
             None => {
                 self.notify("textDocument/didOpen", json!({"textDocument":{"uri":uri,"languageId":"sql","version":version,"text":text}})).await?;
-                self.documents.insert(uri.into(), text);
+                document.text = Some(text);
                 // Before its first binding the service answers every request empty.
                 let _ = self
                     .event(uri, "textDocument/intelliSenseReady", Duration::from_secs(10))
@@ -328,7 +347,7 @@ impl Client {
                 // The service applies only ranged edits: this one replaces all the old text.
                 let (line, character) = end_of(old);
                 self.notify("textDocument/didChange", json!({"textDocument":{"uri":uri,"version":version},"contentChanges":[{"range":{"start":{"line":0,"character":0},"end":{"line":line,"character":character}},"text":text}]})).await?;
-                self.documents.insert(uri.into(), text);
+                document.text = Some(text);
             }
         }
         Ok(())
@@ -363,63 +382,78 @@ pub async fn language_request(
         "sync" => "textDocument/hover",
         _ => return Err("Unsupported language request.".into()),
     };
-    let path=service_path(&app).ok_or("SQL Tools Service is not configured. Open Tools > Components to select the official service executable.")?;
-    let mut slot = state.client.lock().await;
-    let result=tokio::time::timeout(Duration::from_secs(25),async {
-        if slot.is_none() {
-            let app=app.clone();
-            let emit:OnDiagnostics=Arc::new(move|uri,diagnostics|{if let Some(tab)=tab_of(uri) {let _=app.emit("language-diagnostics",json!({"tabId":tab,"diagnostics":diagnostics}));}});
-            *slot=Some(Client::open(path,emit).await?);
+    // Held only to find or start the service; the path is read only to start it.
+    let client = {
+        let mut slot = state.client.lock().await;
+        match slot.as_ref() {
+            Some(client) => client.clone(),
+            None => {
+                let path=service_path(&app).ok_or("SQL Tools Service is not configured. Open Tools > Components to select the official service executable.")?;
+                let app=app.clone();
+                let emit:OnDiagnostics=Arc::new(move|uri,diagnostics|{if let Some(tab)=tab_of(uri) {let _=app.emit("language-diagnostics",json!({"tabId":tab,"diagnostics":diagnostics}));}});
+                let client = match tokio::time::timeout(Duration::from_secs(25), Client::open(path, emit)).await {
+                    Ok(opened) => Arc::new(opened?),
+                    Err(_) => return Err("SQL Tools Service timed out; it will restart on the next request.".into()),
+                };
+                *slot = Some(client.clone());
+                client
+            }
         }
-        let client=slot.as_mut().unwrap();
-        let uri=format!("file:///quervio/{tab_id}.sql");
+    };
+    let uri=format!("file:///quervio/{tab_id}.sql");
+    let document = client.document(&uri);
+    let mut document = document.lock().await;
+    let result=tokio::time::timeout(Duration::from_secs(25),async {
         let context=format!("{id}\n{database}\n{metadata_revision}");
-        if client.contexts.get(&uri)!=Some(&context) {
+        if document.context.as_ref()!=Some(&context) {
             let connection=explorer.connection(&id)?;
             let credential=explorer.credential(&connection,None).await?;
             let entra=connection.authentication==quervio_core::connection::Authentication::Entra;
             let (authentication,user)=match connection.authentication {quervio_core::connection::Authentication::Sql{user_name}=>("SqlLogin",user_name),quervio_core::connection::Authentication::Entra=>("AzureMFA",String::new()),_=>("Integrated",String::new())};
-            client.connect(&uri,json!({"server":connection.server,"database":database,"authenticationType":authentication,"user":user,"password":if entra{None}else{credential.clone()},"azureAccountToken":if entra{credential}else{None},"encrypt":match connection.encrypt {quervio_core::connection::Encrypt::Strict=>"Strict",quervio_core::connection::Encrypt::Optional=>"Optional",_=>"Mandatory"},"trustServerCertificate":connection.trust_server_certificate,"applicationName":"Quervio - IntelliSense"})).await?;
-            client.contexts.insert(uri.clone(),context);
+            client.connect(&mut document,&uri,json!({"server":connection.server,"database":database,"authenticationType":authentication,"user":user,"password":if entra{None}else{credential.clone()},"azureAccountToken":if entra{credential}else{None},"encrypt":match connection.encrypt {quervio_core::connection::Encrypt::Strict=>"Strict",quervio_core::connection::Encrypt::Optional=>"Optional",_=>"Mandatory"},"trustServerCertificate":connection.trust_server_certificate,"applicationName":"Quervio - IntelliSense"})).await?;
+            document.context=Some(context);
         }
-        client.sync(&uri,text).await?;
+        client.sync(&mut document,&uri,text).await?;
         if method=="sync" {return Ok(json!({"result":null}));}
         let result=client.request(rpc,json!({"textDocument":{"uri":uri},"position":{"line":line,"character":character}})).await?;
         Ok(json!({"result":result}))
     }).await;
-    match result {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(error)) => {
-            *slot = None;
-            Err(error)
-        }
-        Err(_) => {
-            *slot = None;
-            Err("SQL Tools Service timed out; it will restart on the next request.".into())
-        }
+    let error: String = match result {
+        Ok(Ok(value)) => return Ok(value),
+        Ok(Err(error)) => error,
+        Err(_) => "SQL Tools Service timed out; it will restart on the next request.".into(),
+    };
+    drop(document);
+    // Restarted on the next request, unless another tab already did.
+    let mut slot = state.client.lock().await;
+    if slot.as_ref().is_some_and(|current| Arc::ptr_eq(current, &client)) {
+        *slot = None;
     }
+    Err(error)
 }
 
 #[tauri::command]
 pub async fn language_close(state: State<'_, LanguageState>, tab_id: String) -> CommandResult<()> {
-    let mut slot = state.client.lock().await;
-    if let Some(client) = slot.as_mut() {
-        let uri = format!("file:///quervio/{tab_id}.sql");
-        let _ = tokio::time::timeout(Duration::from_secs(2), async {
-            if client.documents.contains_key(&uri) {
-                client
-                    .notify("textDocument/didClose", json!({"textDocument":{"uri":uri}}))
-                    .await?;
-            }
+    let Some(client) = state.client.lock().await.clone() else {
+        return Ok(());
+    };
+    let uri = format!("file:///quervio/{tab_id}.sql");
+    let document = client.document(&uri);
+    let document = document.lock().await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), async {
+        if document.text.is_some() {
             client
-                .request("connection/disconnect", json!({"ownerUri":uri}))
-                .await
-        })
-        .await;
-        client.documents.remove(&uri);
-        client.contexts.remove(&uri);
-        client.forget_events(&uri);
-    }
+                .notify("textDocument/didClose", json!({"textDocument":{"uri":uri}}))
+                .await?;
+        }
+        client
+            .request("connection/disconnect", json!({"ownerUri":uri}))
+            .await
+    })
+    .await;
+    drop(document);
+    client.documents.lock().unwrap().remove(&uri);
+    client.forget_events(&uri);
     Ok(())
 }
 
@@ -447,14 +481,16 @@ mod tests {
         let on_diagnostics: OnDiagnostics = Arc::new(move |_, d| {
             let _ = sender.send(d.clone());
         });
-        let mut client = Client::open(path, on_diagnostics).await.expect("start the service");
+        let client = Client::open(path, on_diagnostics).await.expect("start the service");
         let uri = "file:///quervio/test.sql";
+        let document = client.document(uri);
+        let mut document = document.lock().await;
         client
-            .connect(uri, json!({"server":env("QUERVIO_TEST_SERVER"),"database":"master","authenticationType":"SqlLogin","user":env("QUERVIO_TEST_USER"),"password":env("QUERVIO_TEST_PASSWORD"),"encrypt":"Mandatory","trustServerCertificate":true}))
+            .connect(&mut document, uri, json!({"server":env("QUERVIO_TEST_SERVER"),"database":"master","authenticationType":"SqlLogin","user":env("QUERVIO_TEST_USER"),"password":env("QUERVIO_TEST_PASSWORD"),"encrypt":"Mandatory","trustServerCertificate":true}))
             .await
             .expect("connect");
-        client.sync(uri, "SELECT 1;\nSELECT NoSuchColumn FROM sys.objects;".into()).await.unwrap();
-        client.sync(uri, "SELECT * FROM sys.".into()).await.unwrap();
+        client.sync(&mut document, uri, "SELECT 1;\nSELECT NoSuchColumn FROM sys.objects;".into()).await.unwrap();
+        client.sync(&mut document, uri, "SELECT * FROM sys.".into()).await.unwrap();
         let completion = client
             .request("textDocument/completion", json!({"textDocument":{"uri":uri},"position":{"line":0,"character":18}}))
             .await

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   Columns3,
@@ -56,6 +56,30 @@ type Row =
 
 const INDENT = 14;
 const numberFormat = new Intl.NumberFormat();
+
+// Only the rows in view (and OVERSCAN either side) are in the page: a
+// database's Tables folder can hold tens of thousands.
+/** A node row's height (h-7). */
+const ROW_HEIGHT = 28;
+/** A status or filter row until it is measured: an error can wrap. */
+const OTHER_ROW_HEIGHT = 22;
+const OVERSCAN = 20;
+/** The tree's own padding above the first row and below the last. */
+const TREE_PADDING = 4;
+/** A row the keyboard reaches stays this far from the edges, clear of the fade. */
+const REVEAL_MARGIN = 32;
+
+/** The index of the row at `y` (from the top of the first row). */
+function rowAt(offsets: Float64Array, y: number) {
+  let low = 0;
+  let high = offsets.length - 2;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (offsets[middle] <= y) low = middle;
+    else high = middle - 1;
+  }
+  return Math.max(0, low);
+}
 
 export function ObjectExplorer() {
   const { connections, groups, loaded, load } = useConnections();
@@ -123,6 +147,71 @@ export function ObjectExplorer() {
     return out;
   }, [roots, members, explorer.expanded, explorer.children, explorer.filters]);
 
+  // Heights of the status and filter rows drawn so far; node rows are all ROW_HEIGHT.
+  const [measured, setMeasured] = useState<Record<string, number>>({});
+  const measurer = useMemo(
+    () =>
+      new ResizeObserver((entries) =>
+        setMeasured((current) => {
+          let next = current;
+          for (const entry of entries) {
+            const element = entry.target as HTMLElement;
+            const key = element.dataset.measure!;
+            if (next[key] === element.offsetHeight) continue;
+            if (next === current) next = { ...current };
+            next[key] = element.offsetHeight;
+          }
+          return next;
+        }),
+      ),
+    [],
+  );
+  useEffect(() => () => measurer.disconnect(), [measurer]);
+  const measureRow = useCallback(
+    (element: HTMLElement | null) => {
+      if (!element) return;
+      measurer.observe(element);
+      return () => measurer.unobserve(element);
+    },
+    [measurer],
+  );
+
+  // offsets[i]: the top of row i; offsets[rows.length]: the height of them all.
+  const offsets = useMemo(() => {
+    const out = new Float64Array(rows.length + 1);
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      out[i + 1] = out[i] + (row.type === "node" ? ROW_HEIGHT : (measured[row.key] ?? OTHER_ROW_HEIGHT));
+    }
+    return out;
+  }, [rows, measured]);
+
+  const [view, setView] = useState({ top: 0, height: 0 });
+  useLayoutEffect(() => {
+    const element = treeRef.current;
+    if (!element) return;
+    const update = () =>
+      setView((current) =>
+        current.top === element.scrollTop && current.height === element.clientHeight
+          ? current
+          : { top: element.scrollTop, height: element.clientHeight },
+      );
+    update();
+    element.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => {
+      element.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, []);
+  const first = rows.length === 0 ? 0 : Math.max(0, rowAt(offsets, view.top - TREE_PADDING) - OVERSCAN);
+  const last =
+    rows.length === 0 ? 0 : Math.min(rows.length, rowAt(offsets, view.top - TREE_PADDING + view.height) + 1 + OVERSCAN);
+
+  // The filter box takes the focus when it is opened, not each time it scrolls back into view.
+  const focusFilter = useRef<string | null>(null);
+
   const nodeRows = rows.filter((r): r is Extract<Row, { type: "node" }> => r.type === "node");
   const selectedIndex = nodeRows.findIndex((r) => r.node.key === explorer.selected);
   const selectedNode = nodeRows[selectedIndex]?.node;
@@ -149,7 +238,17 @@ export function ObjectExplorer() {
   useEffect(() => {
     if (!reveal.current) return;
     reveal.current = false;
-    treeRef.current?.querySelector('[role="treeitem"][aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+    // From the offsets: the row may not be in the page yet.
+    const element = treeRef.current;
+    const index = rows.findIndex((r) => r.type === "node" && r.node.key === explorer.selected);
+    if (!element || index === -1) return;
+    const top = TREE_PADDING + offsets[index];
+    const bottom = TREE_PADDING + offsets[index + 1];
+    if (top - REVEAL_MARGIN < element.scrollTop) element.scrollTop = Math.max(0, top - REVEAL_MARGIN);
+    else if (bottom + REVEAL_MARGIN > element.scrollTop + element.clientHeight) {
+      element.scrollTop = bottom + REVEAL_MARGIN - element.clientHeight;
+    }
+    // Only when the selection moves; rows and offsets are this render's.
   }, [explorer.selected]);
 
   function onKeyDown(event: React.KeyboardEvent) {
@@ -266,9 +365,15 @@ export function ObjectExplorer() {
         // F5 here refreshes instead of executing (src/lib/shortcuts.ts).
         data-explorer
         onKeyDown={onKeyDown}
+        // The rows out of view are padding, not spacer elements: the scroll
+        // fade would blur a spacer as tall as thousands of rows.
+        style={{
+          paddingTop: TREE_PADDING + offsets[first],
+          paddingBottom: TREE_PADDING + offsets[rows.length] - offsets[last],
+        }}
         // Keyboard focus outlines the selected row, or the whole tree while nothing is selected.
         className={cn(
-          "group/tree min-h-0 flex-1 overflow-auto py-1 outline-none select-none",
+          "group/tree min-h-0 flex-1 overflow-auto outline-none select-none",
           !selectedNode && "focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
         )}
       >
@@ -278,11 +383,13 @@ export function ObjectExplorer() {
           <p className="p-3 text-muted-foreground">No saved connections yet.</p>
         )}
 
-        {rows.map((row) => {
+        {rows.slice(first, last).map((row) => {
           if (row.type === "status") {
             return (
               <div
                 key={row.key}
+                ref={measureRow}
+                data-measure={row.key}
                 style={{ paddingLeft: row.depth * INDENT + 26 }}
                 className={cn(
                   "flex items-start gap-1.5 py-0.5 pr-2 text-xs",
@@ -296,10 +403,19 @@ export function ObjectExplorer() {
           }
           if (row.type === "filter") {
             return (
-              <div key={row.key} style={{ paddingLeft: row.depth * INDENT + 20 }} className="flex items-center gap-1 py-0.5 pr-2">
+              <div
+                key={row.key}
+                ref={measureRow}
+                data-measure={row.key}
+                style={{ paddingLeft: row.depth * INDENT + 20 }}
+                className="flex items-center gap-1 py-0.5 pr-2"
+              >
                 <Filter className="size-3 shrink-0 text-muted-foreground" />
                 <SearchInput
-                  autoFocus
+                  autoFocus={focusFilter.current === row.owner}
+                  onFocus={() => {
+                    if (focusFilter.current === row.owner) focusFilter.current = null;
+                  }}
                   value={explorer.filters[row.owner] ?? ""}
                   onValueChange={(value) => explorer.setFilter(row.owner, value)}
                   clearLabel="Clear name filter"
@@ -351,10 +467,9 @@ export function ObjectExplorer() {
                   aria-expanded={node.expandable ? expanded : undefined}
                   aria-selected={selected}
                   style={{ paddingLeft: depth * INDENT + 4 }}
-                  // Off-screen rows skip layout and paint (a folder can hold thousands);
-                  // the scroll margin keeps a row the keyboard reaches clear of the fade.
+                  // ROW_HEIGHT: the tree places its rows by it.
                   className={cn(
-                    "group flex h-7 cursor-pointer scroll-my-8 items-center gap-1 pr-2 whitespace-nowrap [content-visibility:auto] [contain-intrinsic-size:auto_1.75rem]",
+                    "group flex h-7 cursor-pointer items-center gap-1 pr-2 whitespace-nowrap",
                     selected
                       ? "bg-accent text-accent-foreground group-focus-visible/tree:outline-1 group-focus-visible/tree:-outline-offset-1 group-focus-visible/tree:outline-ring"
                       : "hover:bg-accent/50",
@@ -406,6 +521,7 @@ export function ObjectExplorer() {
                         className="ml-auto shrink-0 opacity-0 group-hover:opacity-100"
                         onClick={(e) => {
                           e.stopPropagation();
+                          focusFilter.current = node.key;
                           explorer.setFilter(node.key, "");
                         }}
                       >
@@ -467,6 +583,7 @@ export function ObjectExplorer() {
                   <ContextMenuItem
                     onSelect={() => {
                       void explorer.expand(menuNode);
+                      focusFilter.current = menuNode.key;
                       explorer.setFilter(menuNode.key, explorer.filters[menuNode.key] ?? "");
                     }}
                   >

@@ -5,7 +5,7 @@
 // The look follows the app theme: quiet headers with a sort arrow, the sorted
 // column tinted, numbers right-aligned, horizontal rules only, and a footer
 // with the row count. Sorting happens in Rust over every row.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CompactSelection,
   DataEditor,
@@ -79,20 +79,67 @@ function useFontsReady() {
  * width of the widest one, so digits line up down the column. The canvas has
  * no font-variant-numeric, and Inter's default digits are proportional.
  */
-function tabularWidths(ctx: CanvasRenderingContext2D, text: string) {
-  const digit = Math.max(...[..."0123456789"].map((d) => ctx.measureText(d).width));
-  return [...text].map((c) => (c >= "0" && c <= "9" ? digit : ctx.measureText(c).width));
+interface Glyphs {
+  /** The widest digit's advance. */
+  digit: number;
+  /** Each character's own advance. */
+  widths: Map<string, number>;
+}
+
+/** Character widths per canvas font: measureText per glyph on every draw adds up over thousands of cells. */
+const glyphCache = new Map<string, Glyphs>();
+
+function glyphsFor(ctx: CanvasRenderingContext2D): Glyphs {
+  let glyphs = glyphCache.get(ctx.font);
+  if (!glyphs) {
+    const widths = new Map<string, number>();
+    for (const d of "0123456789") widths.set(d, ctx.measureText(d).width);
+    glyphs = { digit: Math.max(...widths.values()), widths };
+    glyphCache.set(ctx.font, glyphs);
+  }
+  return glyphs;
+}
+
+function glyphWidth(ctx: CanvasRenderingContext2D, glyphs: Glyphs, c: string) {
+  let width = glyphs.widths.get(c);
+  if (width === undefined) {
+    width = ctx.measureText(c).width;
+    glyphs.widths.set(c, width);
+  }
+  return width;
+}
+
+/** The width of `text` with every digit as wide as the widest one. */
+function tabularWidth(ctx: CanvasRenderingContext2D, text: string) {
+  const glyphs = glyphsFor(ctx);
+  let sum = 0;
+  for (const c of text) sum += c >= "0" && c <= "9" ? glyphs.digit : glyphWidth(ctx, glyphs, c);
+  return sum;
 }
 
 function drawTabular(ctx: CanvasRenderingContext2D, text: string, right: number, middle: number) {
-  const widths = tabularWidths(ctx, text);
-  let x = right - widths.reduce((sum, w) => sum + w, 0);
-  [...text].forEach((c, i) => {
-    const w = widths[i];
-    const own = c >= "0" && c <= "9" ? ctx.measureText(c).width : w;
+  const glyphs = glyphsFor(ctx);
+  let x = right - tabularWidth(ctx, text);
+  for (const c of text) {
+    const own = glyphWidth(ctx, glyphs, c);
+    const w = c >= "0" && c <= "9" ? glyphs.digit : own;
     ctx.fillText(c, x + (w - own) / 2, middle);
     x += w;
-  });
+  }
+}
+
+/** Fitted text per font, room and value: scrolling draws the same cells frame after frame. */
+const fittedCache = new Map<string, string>();
+const FITTED_CACHE_MAX = 20_000;
+
+function fitCached(key: string, fit: () => string) {
+  let text = fittedCache.get(key);
+  if (text === undefined) {
+    if (fittedCache.size >= FITTED_CACHE_MAX) fittedCache.clear();
+    text = fit();
+    fittedCache.set(key, text);
+  }
+  return text;
 }
 // Shared with the results panel, which sizes each grid's box to its rows.
 const SIZES = GRID_SIZES;
@@ -182,6 +229,9 @@ function drawArrow(ctx: CanvasRenderingContext2D, x: number, y: number, color: s
 
 type Sort = { column: number; direction: SortDirection } | null;
 
+const ROW_MARKERS = { kind: "clickable-number", headerDisabled: true } as const;
+const KEYBINDINGS = { copy: false, paste: false, search: false } as const;
+
 interface Props {
   tabId: string;
   /** The Execution the Result Set belongs to (QueryTab.runId). */
@@ -205,7 +255,8 @@ function startingBlocks(tabId: string, runId: number, index: number) {
   return new Map<number, Cell[][]>(rows ? [[0, rows]] : []);
 }
 
-export default function ResultGrid({ tabId, runId, set }: Props) {
+// Memoized: its props change only when its own Result Set does.
+export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   const theme = useTheme();
   const { density, monospace } = useSettings((s) => s.settings.results);
   const p = theme.palette;
@@ -352,7 +403,8 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
           themeOverride: nullTheme,
         };
       }
-      const display = displayCellText(cell);
+      // Kept on the cell: every redraw of it would run the regex again.
+      const display = (cell.display ??= displayCellText(cell));
       return { kind: GridCellKind.Text, data: cell.text, displayData: display, allowOverlay: false, contentAlign: align };
     },
     // `order` is a dependency on purpose: a new function makes the grid redraw every cell.
@@ -397,8 +449,8 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
       ctx.font = `${cellTheme.baseFontStyle} ${cellTheme.fontFamily}`;
       const room = rect.width - cellTheme.cellHorizontalPadding * 2;
       // The grid would clip a long value mid-glyph; cut it with an ellipsis instead.
-      const text = fitText(cell.displayData, room, (value) =>
-        tabular ? tabularWidths(ctx, value).reduce((sum, w) => sum + w, 0) : ctx.measureText(value).width,
+      const text = fitCached(`${tabular ? "t" : "p"}|${ctx.font}|${room}|${cell.displayData}`, () =>
+        fitText(cell.displayData, room, (value) => (tabular ? tabularWidth(ctx, value) : ctx.measureText(value).width)),
       );
       if (text === cell.displayData && !tabular) {
         ctx.restore();
@@ -448,6 +500,14 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
     },
     [sort, p.accent, p.accentFg, p.muted, set.kinds],
   );
+
+  // Stable, so a render of the grid's box does not hand Glide new props.
+  const onColumnResize = useCallback(
+    (_column: GridColumn, width: number, index: number) =>
+      setWidths((w) => ({ ...w, [index]: Math.max(width, MIN_COLUMN_WIDTH) })),
+    [],
+  );
+  const onCellActivated = useCallback(([column, row]: Item) => setViewer({ row, column }), []);
 
   const block = selectedBlock(selection, set.rows, set.columns.length);
   const all = { rows: [0, set.rows], columns: [0, set.columns.length] } as const;
@@ -559,7 +619,7 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
               getCellContent={getCellContent}
               // Row numbers that select their row when clicked, as in SSMS: no checkboxes
               // in place of the numbers on hover, and none in the corner (Ctrl+A selects all).
-              rowMarkers={{ kind: "clickable-number", headerDisabled: true }}
+              rowMarkers={ROW_MARKERS}
               rowHeight={size.row}
               headerHeight={size.header}
               width="100%"
@@ -572,11 +632,11 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
               drawCell={drawCell}
               gridSelection={selection}
               onGridSelectionChange={setSelection}
-              keybindings={{ copy: false, paste: false, search: false }}
+              keybindings={KEYBINDINGS}
               minColumnWidth={MIN_COLUMN_WIDTH}
               maxColumnWidth={10_000}
-              onColumnResize={(_column, width, index) => setWidths((w) => ({ ...w, [index]: Math.max(width, MIN_COLUMN_WIDTH) }))}
-              onCellActivated={([column, row]) => setViewer({ row, column })}
+              onColumnResize={onColumnResize}
+              onCellActivated={onCellActivated}
             />
           </div>
         </ContextMenuTrigger>
@@ -655,7 +715,7 @@ export default function ResultGrid({ tabId, runId, set }: Props) {
       )}
     </div>
   );
-}
+});
 
 /** Text that changes in place: the new value rises in, the old one lifts away. */
 function Count({ value, className }: { value: number | string; className?: string }) {

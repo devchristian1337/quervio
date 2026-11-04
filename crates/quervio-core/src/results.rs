@@ -1,6 +1,6 @@
 //! Result Sets kept on the Rust side (docs/adr/0001-result-set-nel-backend-rust.md):
-//! every cell's display text in one buffer, so a million rows stay compact,
-//! and the grid only ever asks for the window it shows.
+//! every cell's display text in a few large buffers (Segments), so a million
+//! rows stay compact, and the grid only ever asks for the window it shows.
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -79,15 +79,32 @@ pub struct CellValue {
     pub clipped: bool,
 }
 
+/// Rows a Segment takes before the next one starts, unless its text reaches
+/// SEGMENT_TEXT first. One buffer for a whole Result Set would be copied in
+/// full each time it grows, hundreds of MB under the write lock while the
+/// grid waits to read.
+const SEGMENT_ROWS: usize = 8192;
+const SEGMENT_TEXT: usize = 256 * 1024 * 1024;
+
+/// Consecutive rows of a Result Set.
+#[derive(Debug, Default)]
+struct Segment {
+    first_row: usize,
+    rows: usize,
+    text: String,
+    /// End offset in `text` of each cell, row-major.
+    ends: Vec<u64>,
+}
+
 #[derive(Debug)]
 pub struct ResultSet {
     /// Unique per set, so a sort computed outside the lock is applied only to
     /// the set it was computed on.
     id: u64,
     columns: Vec<ResultColumn>,
-    text: String,
-    /// End offset in `text` of each cell, row-major.
-    ends: Vec<u64>,
+    segments: Vec<Segment>,
+    rows: usize,
+    /// NULL and clipped cells by index over the whole set, row-major.
     nulls: BitSet,
     clipped: BitSet,
     /// Display order of the rows while sorted: `order[shown] = stored`.
@@ -120,7 +137,11 @@ impl ResultSet {
                     if escape && text.starts_with('\\') {
                         out.write_all(br"\")?;
                     }
-                    out.write_all(text.replace('"', "\"\"").as_bytes())?;
+                    // Copied only when there is a quote to double.
+                    match text.contains('"') {
+                        true => out.write_all(text.replace('"', "\"\"").as_bytes())?,
+                        false => out.write_all(text.as_bytes())?,
+                    }
                 }
             }
             out.write_all(b"\"")
@@ -150,8 +171,8 @@ impl ResultSet {
         Self {
             id: NEXT_ID.fetch_add(1, AtomicOrdering::Relaxed),
             columns,
-            text: String::new(),
-            ends: Vec::new(),
+            segments: Vec::new(),
+            rows: 0,
             nulls: BitSet::default(),
             clipped: BitSet::default(),
             order: None,
@@ -198,57 +219,71 @@ impl ResultSet {
     fn order_by(&self, column: usize, direction: SortDirection) -> Vec<u32> {
         let rows = self.row_count();
         let kind = self.columns[column].kind;
-        // Numbers are compared as numbers; parse each one once.
-        let numbers: Vec<f64> = if kind == ColumnKind::Number {
-            (0..rows)
-                .map(|row| {
-                    self.cell_text(row, column)
-                        .and_then(|text| text.parse().ok())
-                        .unwrap_or(f64::NAN)
-                })
-                .collect()
-        } else {
-            Vec::new()
+        let directed = |ordering: Ordering| match direction {
+            SortDirection::Ascending => ordering,
+            SortDirection::Descending => ordering.reverse(),
         };
-        // Text is compared case-insensitively; fold each value once, not at
-        // every comparison.
-        let folded: Vec<Cow<str>> = if kind == ColumnKind::Text {
-            (0..rows)
-                .map(|row| {
-                    self.cell_text(row, column)
-                        .map_or(Cow::Borrowed(""), fold_case)
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let mut order: Vec<u32> = (0..rows as u32).collect();
-        // Stable: ties keep the Server's order. A merge sort also makes fewer
-        // comparisons than an unstable one here.
-        order.sort_by(|&a, &b| {
-            let (a, b) = (a as usize, b as usize);
-            let ordering = match (self.cell_text(a, column), self.cell_text(b, column)) {
-                (None, None) => return Ordering::Equal,
-                (None, Some(_)) => return Ordering::Greater,
-                (Some(_), None) => return Ordering::Less,
-                (Some(left), Some(right)) => match kind {
-                    ColumnKind::Number => numbers[a]
-                        .partial_cmp(&numbers[b])
-                        .unwrap_or_else(|| left.cmp(right)),
-                    ColumnKind::Date | ColumnKind::Binary => left.cmp(right),
+        // NULLs go last in both directions, in the Server's order.
+        let mut nulls = Vec::new();
+        let mut values: Vec<(&str, u32)> = Vec::with_capacity(rows);
+        for row in 0..rows {
+            match self.cell_text(row, column) {
+                Some(text) => values.push((text, row as u32)),
+                None => nulls.push(row as u32),
+            }
+        }
+        // Each value's sort key is worked out once, next to its row, and the
+        // rows sorted by it. The row number breaks ties: the Server's order
+        // is kept, as a stable sort would, without its extra copying.
+        let mut order: Vec<u32> = match kind {
+            ColumnKind::Number => {
+                // Numbers compare as numbers; text that does not parse goes after them, by text.
+                let mut keyed: Vec<(Option<f64>, &str, u32)> = values
+                    .into_iter()
+                    .map(|(text, row)| (text.parse::<f64>().ok().filter(|n| !n.is_nan()), text, row))
+                    .collect();
+                keyed.sort_unstable_by(|a, b| {
+                    let ordering = match (a.0, b.0) {
+                        (Some(x), Some(y)) => x.total_cmp(&y),
+                        (Some(_), None) => Ordering::Less,
+                        (None, Some(_)) => Ordering::Greater,
+                        (None, None) => a.1.cmp(b.1),
+                    };
+                    directed(ordering).then(a.2.cmp(&b.2))
+                });
+                keyed.into_iter().map(|(_, _, row)| row).collect()
+            }
+            ColumnKind::Date | ColumnKind::Binary => {
+                values.sort_unstable_by(|a, b| directed(a.0.cmp(b.0)).then(a.1.cmp(&b.1)));
+                values.into_iter().map(|(_, row)| row).collect()
+            }
+            ColumnKind::Text => {
+                // Case-insensitive. ASCII text is lowercased while comparing,
+                // with nothing copied; other text is folded once (fold_case).
+                let mut keyed: Vec<(Cow<str>, &str, u32)> = values
+                    .into_iter()
+                    .map(|(text, row)| {
+                        let key = match text.is_ascii() {
+                            true => Cow::Borrowed(text),
+                            false => fold_case(text),
+                        };
+                        (key, text, row)
+                    })
+                    .collect();
+                keyed.sort_unstable_by(|a, b| {
                     // UTF-8 byte order is code point order, so comparing the
                     // folded bytes is comparing the lowercased characters.
-                    ColumnKind::Text => folded[a]
-                        .as_bytes()
-                        .cmp(folded[b].as_bytes())
-                        .then_with(|| left.cmp(right)),
-                },
-            };
-            match direction {
-                SortDirection::Ascending => ordering,
-                SortDirection::Descending => ordering.reverse(),
+                    let folded = a
+                        .0
+                        .bytes()
+                        .map(|byte| byte.to_ascii_lowercase())
+                        .cmp(b.0.bytes().map(|byte| byte.to_ascii_lowercase()));
+                    directed(folded.then_with(|| a.1.cmp(b.1))).then(a.2.cmp(&b.2))
+                });
+                keyed.into_iter().map(|(_, _, row)| row).collect()
             }
-        });
+        };
+        order.extend(nulls);
         order
     }
 
@@ -257,40 +292,74 @@ impl ResultSet {
     }
 
     pub fn row_count(&self) -> usize {
-        match self.columns.len() {
-            0 => 0,
-            width => self.ends.len() / width,
+        self.rows
+    }
+
+    /// The Segment new rows go into, started when the last one is full.
+    fn open_segment(&mut self) -> usize {
+        let full = self
+            .segments
+            .last()
+            .is_none_or(|segment| segment.rows >= SEGMENT_ROWS || segment.text.len() >= SEGMENT_TEXT);
+        if full {
+            self.segments.push(Segment {
+                first_row: self.rows,
+                ..Segment::default()
+            });
         }
+        self.segments.len() - 1
     }
 
     pub fn push_row(&mut self, row: &[ColumnValues], max_cell_bytes: usize) {
-        for value in row.iter().take(self.columns.len()) {
-            let index = self.ends.len();
-            let start = self.text.len();
-            if write_value(value, &mut self.text).is_none() {
-                self.nulls.set(index);
-            } else if self.text.len() - start > max_cell_bytes {
-                let mut cut = start + max_cell_bytes;
-                while !self.text.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                self.text.truncate(cut);
-                self.clipped.set(index);
-            }
-            self.ends.push(self.text.len() as u64);
+        let width = self.columns.len();
+        if width == 0 {
+            return;
         }
+        let base_cell = self.rows * width;
+        let index = self.open_segment();
+        let segment = &mut self.segments[index];
+        for column in 0..width {
+            let start = segment.text.len();
+            // A short row still fills every column, as RowChunk::end_row does.
+            match row.get(column).and_then(|value| write_value(value, &mut segment.text)) {
+                None => self.nulls.set(base_cell + column),
+                Some(_) if segment.text.len() - start > max_cell_bytes => {
+                    let mut cut = start + max_cell_bytes;
+                    while !segment.text.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    segment.text.truncate(cut);
+                    self.clipped.set(base_cell + column);
+                }
+                Some(_) => {}
+            }
+            segment.ends.push(segment.text.len() as u64);
+        }
+        segment.rows += 1;
+        self.rows += 1;
     }
 
     /// Adds the complete rows of `chunk` and empties it, keeping its buffers
     /// for the next rows.
     pub fn append(&mut self, chunk: &mut RowChunk) {
         debug_assert_eq!(chunk.width, self.columns.len());
+        let width = self.columns.len();
         let (text, cells, nulls, clipped) = chunk.complete;
-        let base_text = self.text.len() as u64;
-        let base_cell = self.ends.len();
-        self.text.push_str(&chunk.text[..text]);
-        self.ends
+        if width == 0 || cells == 0 {
+            chunk.clear();
+            return;
+        }
+        let rows = cells / width;
+        let base_cell = self.rows * width;
+        let index = self.open_segment();
+        let segment = &mut self.segments[index];
+        let base_text = segment.text.len() as u64;
+        segment.text.push_str(&chunk.text[..text]);
+        segment
+            .ends
             .extend(chunk.ends[..cells].iter().map(|end| end + base_text));
+        segment.rows += rows;
+        self.rows += rows;
         for &cell in &chunk.nulls[..nulls] {
             self.nulls.set(base_cell + cell as usize);
         }
@@ -301,16 +370,18 @@ impl ResultSet {
     }
 
     fn cell_text(&self, row: usize, column: usize) -> Option<&str> {
-        let index = row * self.columns.len() + column;
-        if self.nulls.get(index) {
+        let width = self.columns.len();
+        if self.nulls.get(row * width + column) {
             return None;
         }
-        let start = if index == 0 {
-            0
-        } else {
-            self.ends[index - 1] as usize
+        // Segments are in row order; most hold SEGMENT_ROWS rows.
+        let segment = &self.segments[self.segments.partition_point(|s| s.first_row <= row) - 1];
+        let index = (row - segment.first_row) * width + column;
+        let start = match index {
+            0 => 0,
+            _ => segment.ends[index - 1] as usize,
         };
-        Some(&self.text[start..self.ends[index] as usize])
+        Some(&segment.text[start..segment.ends[index] as usize])
     }
 
     pub fn cell(&self, row: usize, column: usize) -> Option<CellValue> {
@@ -921,6 +992,95 @@ mod tests {
         // None goes back to the Server's order.
         set.sort(None);
         assert_eq!(set.cell(0, 1).unwrap().text.as_deref(), Some("Rossi"));
+    }
+
+    fn numbers(values: &[Option<&str>]) -> ResultSet {
+        let mut set = ResultSet::new(vec![ResultColumn {
+            name: "N".into(),
+            kind: ColumnKind::Number,
+        }]);
+        for value in values {
+            let value = value.map_or(ColumnValues::Null, |v| {
+                ColumnValues::String(SqlString::from_utf8_string(v.into()))
+            });
+            set.push_row(&[value], 100);
+        }
+        set
+    }
+
+    #[test]
+    fn sort_ties_keep_the_server_order_in_both_directions() {
+        let mut set = ResultSet::new(vec![
+            ResultColumn {
+                name: "Key".into(),
+                kind: ColumnKind::Text,
+            },
+            ResultColumn {
+                name: "Row".into(),
+                kind: ColumnKind::Number,
+            },
+        ]);
+        for (row, key) in ["b", "A", "a", "B", "a"].iter().enumerate() {
+            set.push_row(
+                &[
+                    ColumnValues::String(SqlString::from_utf8_string((*key).into())),
+                    ColumnValues::Int(row as i32),
+                ],
+                100,
+            );
+        }
+        let rows = |set: &ResultSet| -> Vec<String> {
+            (0..set.row_count())
+                .map(|row| set.cell(row, 1).unwrap().text.unwrap())
+                .collect()
+        };
+        // Case-insensitive, then exact text ("A" < "a"), then the Server's order.
+        set.sort(Some((0, SortDirection::Ascending)));
+        assert_eq!(rows(&set), ["1", "2", "4", "3", "0"]);
+        set.sort(Some((0, SortDirection::Descending)));
+        assert_eq!(rows(&set), ["0", "3", "2", "4", "1"]);
+    }
+
+    #[test]
+    fn numbers_that_do_not_parse_sort_after_the_rest_in_a_total_order() {
+        // "1x" against numbers by text and "2" < "10" as numbers would make a
+        // cycle; the sort must still give one order.
+        let mut set = numbers(&[Some("1x"), Some("10"), None, Some("2"), Some("abc")]);
+        set.sort(Some((0, SortDirection::Ascending)));
+        let shown: Vec<_> = (0..5).map(|row| set.cell(row, 0).unwrap().text).collect();
+        assert_eq!(
+            shown,
+            [Some("2".into()), Some("10".into()), Some("1x".into()), Some("abc".into()), None]
+        );
+    }
+
+    #[test]
+    fn rows_across_segments_read_back_whole() {
+        let rows = SEGMENT_ROWS * 2 + 300;
+        let mut set = numbers(&[]);
+        let mut chunk = RowChunk::new(1, 100);
+        for row in 0..rows {
+            if row % 7 == 0 {
+                chunk.write_null(0);
+            } else {
+                chunk.write_i64(0, row as i64);
+            }
+            chunk.end_row();
+            // Chunks of 256 rows straddle the Segment boundaries.
+            if chunk.rows() == 256 {
+                set.append(&mut chunk);
+            }
+        }
+        set.append(&mut chunk);
+        assert_eq!(set.row_count(), rows);
+        assert!(set.segments.len() >= 3);
+        for row in [0, 1, SEGMENT_ROWS - 1, SEGMENT_ROWS, SEGMENT_ROWS + 1, rows - 1] {
+            let expected = (row % 7 != 0).then(|| row.to_string());
+            assert_eq!(set.cell(row, 0).unwrap().text, expected, "row {row}");
+        }
+        set.sort(Some((0, SortDirection::Descending)));
+        assert_eq!(set.cell(0, 0).unwrap().text, Some((rows - 1).to_string()));
+        assert_eq!(set.cell(rows - 1, 0).unwrap().text, None);
     }
 
     #[test]

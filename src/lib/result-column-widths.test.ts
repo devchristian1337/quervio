@@ -47,6 +47,13 @@ describe("result column minimum widths", () => {
     expect(mergeColumnWidths(wide, narrow)).toEqual([MAX_AUTO_COLUMN_WIDTH]);
   });
 
+  it("keeps the same widths array when nothing widens, so the grid is not laid out again", () => {
+    const current = [120, 80];
+    expect(mergeColumnWidths(current, [100, 80])).toBe(current);
+    expect(mergeColumnWidths(current, [100, 90])).toEqual([120, 90]);
+    expect(mergeColumnWidths([120], [100, 90])).toEqual([120, 90]);
+  });
+
   it("measures the text actually drawn for nulls, multiline values and previews", () => {
     const seen: [string, string][] = [];
     minimumColumnWidths(["a", "b", "c"], ["number", "text", "text"], [[

@@ -217,6 +217,21 @@ mockIPC(async (cmd, args) => {
       // WAITFOR DELAY '00:00:05' makes the mock slow, to see the running state.
       const wait = /waitfor\s+delay\s+'00:00:(\d\d)'/i.exec(String(a.script));
       if (wait) await new Promise((resolve) => setTimeout(resolve, Number(wait[1]) * 1000));
+      // "-- mock:prints=10000" streams that many PRINTs, in batches as query_execute sends them.
+      const prints = /mock:prints=(\d+)/.exec(String(a.script));
+      for (let sent = 0, total = prints ? Number(prints[1]) : 0; sent < total; sent += 500) {
+        send({
+          type: "messages",
+          items: Array.from({ length: Math.min(500, total - sent) }, (_, i) => ({
+            type: "message" as const,
+            text: `PRINT line ${sent + i + 1}`,
+            isError: (sent + i + 1) % 2500 === 0,
+            header: null,
+            line: null,
+          })),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 16));
+      }
       send({ type: "resultSetStarted", index: 0, columns: COLUMNS.map((name, i) => ({ name, kind: i === 0 ? "number" : "text" })) });
       send({ type: "resultSetFinished", index: 0, rows: MOCK_ROWS });
       send({ type: "rowsAffected", count: MOCK_ROWS });

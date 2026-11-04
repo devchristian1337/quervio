@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { isLinux } from "@/lib/platform";
 import { QueryWorkspace } from "@/components/QueryWorkspace";
@@ -110,15 +110,16 @@ export function Workspace() {
   const workbench = useWorkbench(),
     connections = useConnections((s) => s.connections),
     explorer = useExplorer((s) => s.context),
-    queries = useQueries((s) => s.tabs),
-    activeQueryId = useQueries((s) => s.activeId);
-  const activeQuery = queries.find((t) => t.id === activeQueryId);
+    // Primitives of the active Query Tab only: streamed output patches the
+    // tabs list many times a second, and this whole screen need not follow it.
+    activeConnectionId = useQueries((s) => s.tabs.find((t) => t.id === s.activeId)?.connectionId ?? null),
+    activeDatabase = useQueries((s) => s.tabs.find((t) => t.id === s.activeId)?.database ?? null);
   const context =
     explorer ??
-    (activeQuery
+    (activeConnectionId !== null
       ? {
-          connectionId: activeQuery.connectionId,
-          database: activeQuery.database,
+          connectionId: activeConnectionId,
+          database: activeDatabase,
         }
       : {
           connectionId: connections[0]?.id ?? "",
@@ -229,7 +230,8 @@ export function Workspace() {
   );
 }
 
-function ToolFrame({ tab, active = true }: { tab: ToolTab; active?: boolean }) {
+// Memoized: a tool stays mounted while hidden, and need not redraw with the workbench.
+const ToolFrame = memo(function ToolFrame({ tab, active = true }: { tab: ToolTab; active?: boolean }) {
   const connections = useConnections((s) => s.connections);
   const [connectionId, setConnectionId] = useState(tab.connectionId),
     [database, setDatabase] = useState(tab.database ?? ""),
@@ -396,7 +398,7 @@ function ToolFrame({ tab, active = true }: { tab: ToolTab; active?: boolean }) {
       )}
     </section>
   );
-}
+});
 
 function Components() {
   const [dependencies, setDependencies] = useState<Dependency[]>([]),

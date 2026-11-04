@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { toast } from "@/components/ui/basic-toast";
 import {
@@ -40,7 +41,7 @@ import { useGlobalShortcuts } from "@/lib/shortcuts";
 import { useShortcutLabel } from "@/lib/commands";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/stores/connections";
-import { tabEnvironment, useQueries, type QueryTab, type ResultSetSummary } from "@/stores/queries";
+import { tabEnvironment, useQueries, type MessageLine, type QueryTab, type ResultSetSummary } from "@/stores/queries";
 import { useSettings, type Density } from "@/stores/settings";
 import { GRID_SIZES } from "@/lib/result-column-widths";
 import { PlanViewer } from "@/components/management/PlanViewer";
@@ -48,15 +49,19 @@ import { PlanViewer } from "@/components/management/PlanViewer";
 const SqlEditor = lazy(() => import("@/components/SqlEditor"));
 const ResultGrid = lazy(() => import("@/components/ResultGrid"));
 
-export function QueryWorkspace() {
+// Each part reads only what it shows: streamed output patches the tabs list
+// many times a second, and a background tab's run must not redraw the front one.
+export const QueryWorkspace = memo(function QueryWorkspace() {
   useGlobalShortcuts();
-  const { tabs, activeId, resultsVisible } = useQueries();
-  const active = tabs.find((t) => t.id === activeId) ?? null;
+  const hasTabs = useQueries((s) => s.tabs.length > 0);
+  const resultsVisible = useQueries((s) => s.resultsVisible);
+  // The same object until that tab changes: patch copies only the tab it updates.
+  const active = useQueries((s) => s.tabs.find((t) => t.id === s.activeId) ?? null);
 
   return (
     <section className="flex h-full flex-col bg-background/70">
       {/* No strip of empty tab bar over the start screen. */}
-      {tabs.length > 0 && <TabBar />}
+      {hasTabs && <TabBar />}
       {active ? (
         <>
           <Toolbar tab={active} />
@@ -93,22 +98,22 @@ export function QueryWorkspace() {
       )}
     </section>
   );
-}
+});
 
 function Centered({ children }: { children: React.ReactNode }) {
   return <div className="grid h-full place-items-center text-muted-foreground">{children}</div>;
 }
 
-async function closeTab(tab: QueryTab) {
+async function closeTab(tab: Pick<QueryTab, "id">) {
   await closeTabSafely(tab.id);
 }
 
 function TabBar() {
-  const { tabs, activeId, activate } = useQueries();
-  const connections = useConnections((s) => s.connections);
+  const ids = useQueries(useShallow((s) => s.tabs.map((t) => t.id)));
+  const activeId = useQueries((s) => s.activeId);
   const bar = useRef<HTMLDivElement>(null);
 
-  // A tab opened or chosen past the bar's edge scrolls into view. tabs.length:
+  // A tab opened or chosen past the bar's edge scrolls into view. ids.length:
   // a new tab is added and made active in the same step. Restored tabs widen
   // after the first paint, as their servers' names arrive, so it follows them.
   useEffect(() => {
@@ -120,77 +125,99 @@ function TabBar() {
     const observer = new ResizeObserver(reveal);
     for (const tab of element.querySelectorAll('[role="tab"]')) observer.observe(tab);
     return () => observer.disconnect();
-  }, [activeId, tabs.length]);
+  }, [activeId, ids.length]);
 
   return (
     <div ref={bar} className="flex h-9 shrink-0 items-end overflow-x-auto border-b bg-panel">
-      {tabs.map((tab) => {
-        const connection = connections.find((c) => c.id === tab.connectionId);
-        const selected = tab.id === activeId;
-        const where = connection ? `${displayName(connection)}${tab.database ? ` · ${tab.database}` : ""}` : undefined;
-        return (
-          <Tip
-            key={tab.id}
-            side="bottom"
-            label={
-              tab.filePath && where ? (
-                <span className="flex flex-col">
-                  <span className="break-all">{tab.filePath}</span>
-                  <span className="opacity-70">{where}</span>
-                </span>
-              ) : (
-                (tab.filePath ?? where)
-              )
-            }
-          >
-          <div
-            role="tab"
-            aria-selected={selected}
-            onMouseDown={(e) => {
-              if (e.button === 1) {
-                e.preventDefault();
-                void closeTab(tab);
-              } else {
-                activate(tab.id);
-              }
-            }}
-            className={cn(
-              "group flex h-full min-w-0 max-w-56 shrink-0 cursor-pointer items-center gap-2 border-r border-t-2 px-3",
-              selected ? "border-t-primary bg-background" : "border-t-transparent text-muted-foreground hover:bg-accent/40",
-            )}
-          >
-            {tab.longRunning ? (
-              <Loader2 className="size-3 shrink-0 animate-spin" />
-            ) : tab.openTransactions > 0 ? (
-              // The brand's second colour, as for activity: amber is the Test Environment's.
-              <Circle className="size-2.5 shrink-0 fill-brand-secondary text-brand-secondary" aria-label="Open transaction" />
-            ) : null}
-            {/* The * outside the cut title: a long file name must not hide unsaved changes. */}
-            <span className="flex max-w-40 min-w-0 shrink-0 items-baseline">
-              <span className="min-w-0 truncate">{tab.title}</span>
-              {tab.dirty && <span className="shrink-0">*</span>}
-            </span>
-            {/* The title keeps up to 10rem; the server gives way, so a long name never cuts the title to "Q…". */}
-            {connection && <span className="min-w-0 truncate text-xs text-muted-foreground">{displayName(connection)}</span>}
-            <button
-              aria-label="Close"
-              // A 20 px target; -mr-1 keeps the tab's right padding where it was.
-              className={cn(
-                "-mr-1 ml-1 grid size-5 shrink-0 place-items-center rounded hover:bg-accent",
-                !selected && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
-              )}
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => void closeTab(tab)}
-            >
-              <X className="size-3.5" />
-            </button>
-          </div>
-          </Tip>
-        );
-      })}
+      {ids.map((id) => (
+        <TabItem key={id} id={id} selected={id === activeId} />
+      ))}
     </div>
   );
 }
+
+/** One tab in the bar: redrawn only when what it shows changes, not on every streamed line. */
+const TabItem = memo(function TabItem({ id, selected }: { id: string; selected: boolean }) {
+  const tab = useQueries(
+    useShallow((s) => {
+      const t = s.tabs.find((t) => t.id === id);
+      return t
+        ? {
+            id: t.id,
+            title: t.title,
+            connectionId: t.connectionId,
+            database: t.database,
+            filePath: t.filePath,
+            dirty: t.dirty,
+            longRunning: t.longRunning,
+            openTransactions: t.openTransactions,
+          }
+        : null;
+    }),
+  );
+  const connection = useConnections((s) => (tab ? s.connections.find((c) => c.id === tab.connectionId) : undefined));
+  const activate = useQueries((s) => s.activate);
+  if (!tab) return null;
+  const where = connection ? `${displayName(connection)}${tab.database ? ` · ${tab.database}` : ""}` : undefined;
+  return (
+    <Tip
+      side="bottom"
+      label={
+        tab.filePath && where ? (
+          <span className="flex flex-col">
+            <span className="break-all">{tab.filePath}</span>
+            <span className="opacity-70">{where}</span>
+          </span>
+        ) : (
+          (tab.filePath ?? where)
+        )
+      }
+    >
+    <div
+      role="tab"
+      aria-selected={selected}
+      onMouseDown={(e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          void closeTab(tab);
+        } else {
+          activate(tab.id);
+        }
+      }}
+      className={cn(
+        "group flex h-full min-w-0 max-w-56 shrink-0 cursor-pointer items-center gap-2 border-r border-t-2 px-3",
+        selected ? "border-t-primary bg-background" : "border-t-transparent text-muted-foreground hover:bg-accent/40",
+      )}
+    >
+      {tab.longRunning ? (
+        <Loader2 className="size-3 shrink-0 animate-spin" />
+      ) : tab.openTransactions > 0 ? (
+        // The brand's second colour, as for activity: amber is the Test Environment's.
+        <Circle className="size-2.5 shrink-0 fill-brand-secondary text-brand-secondary" aria-label="Open transaction" />
+      ) : null}
+      {/* The * outside the cut title: a long file name must not hide unsaved changes. */}
+      <span className="flex max-w-40 min-w-0 shrink-0 items-baseline">
+        <span className="min-w-0 truncate">{tab.title}</span>
+        {tab.dirty && <span className="shrink-0">*</span>}
+      </span>
+      {/* The title keeps up to 10rem; the server gives way, so a long name never cuts the title to "Q…". */}
+      {connection && <span className="min-w-0 truncate text-xs text-muted-foreground">{displayName(connection)}</span>}
+      <button
+        aria-label="Close"
+        // A 20 px target; -mr-1 keeps the tab's right padding where it was.
+        className={cn(
+          "-mr-1 ml-1 grid size-5 shrink-0 place-items-center rounded hover:bg-accent",
+          !selected && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+        )}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={() => void closeTab(tab)}
+      >
+        <X className="size-3.5" />
+      </button>
+    </div>
+    </Tip>
+  );
+});
 
 function DatabaseSelector({ tab }: { tab: QueryTab }) {
   const useDatabase = useQueries((s) => s.useDatabase);
@@ -262,7 +289,8 @@ function Toolbar({ tab }: { tab: QueryTab }) {
     execute: useShortcutLabel("execute"),
     cancel: useShortcutLabel("cancel"),
   };
-  const { execute, cancel } = useQueries();
+  const execute = useQueries((s) => s.execute);
+  const cancel = useQueries((s) => s.cancel);
   // Shown running only past the store's threshold; the store still refuses
   // a second Execution before that.
   const executing = tab.longRunning;
@@ -375,6 +403,26 @@ function Toolbar({ tab }: { tab: QueryTab }) {
 
 function OutputPanel({ tab }: { tab: QueryTab }) {
   const setView = useQueries((s) => s.setView);
+  const hasErrors = tab.hasErrors === true;
+  // The same list until the error dot changes: the bar measures itself again for a new one.
+  const tabs = useMemo(
+    () => [
+      { id: "results", label: "Results" },
+      {
+        id: "messages",
+        label: (
+          <>
+            Messages
+            {hasErrors && (
+              <span className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive" aria-label="has errors" />
+            )}
+          </>
+        ),
+      },
+      { id: "plans", label: "Plans" },
+    ],
+    [hasErrors],
+  );
   // Only the messages scroll here; the grids and plans scroll on their own.
   const output = useRef<HTMLDivElement>(null);
   useScrollFade(output, { enabled: tab.view === "messages" });
@@ -386,21 +434,7 @@ function OutputPanel({ tab }: { tab: QueryTab }) {
         listClassName="px-1"
         activeTab={tab.view}
         onTabChange={(view) => setView(tab.id, view as QueryTab["view"])}
-        tabs={[
-          { id: "results", label: "Results" },
-          {
-            id: "messages",
-            label: (
-              <>
-                Messages
-                {tab.messages.some((m) => m.isError) && (
-                  <span className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive" aria-label="has errors" />
-                )}
-              </>
-            ),
-          },
-          { id: "plans", label: "Plans" },
-        ]}
+        tabs={tabs}
       />
       <div ref={output} className={cn("min-h-0 flex-1", tab.view === "messages" && "overflow-auto")}>
         {tab.view === "plans" ? <div className="flex h-full flex-col p-2"><PlanViewer plans={tab.plans} /></div> : tab.view === "messages" ? <Messages tab={tab} /> : <Results tab={tab} />}
@@ -436,33 +470,10 @@ function Messages({ tab }: { tab: QueryTab }) {
       <ContextMenuTrigger asChild>
         {/* wrap-anywhere: a long value without spaces (a varbinary) wraps instead of widening the pane. */}
         <div ref={list} className="min-h-full space-y-1 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap wrap-anywhere select-text">
-          {tab.messages.map((message, index) => {
-            const { line } = message;
-            // Off-screen lines skip layout: ten thousand PRINTs stay cheap to scroll.
-            const row = (
-              <div
-                key={index}
-                className={cn(
-                  "[contain-intrinsic-size:auto_1.25rem] [content-visibility:auto]",
-                  message.isError && "text-destructive",
-                  line && "cursor-pointer hover:underline",
-                )}
-                onDoubleClick={line ? () => revealLine(line) : undefined}
-                onClick={line ? () => revealLine(line) : undefined}
-              >
-                {message.header && <div>{message.header}</div>}
-                <div>{message.text}</div>
-              </div>
-            );
-            // Only lines that lead somewhere get a tooltip.
-            return line ? (
-              <Tip key={index} label={`Go to line ${line}`}>
-                {row}
-              </Tip>
-            ) : (
-              row
-            );
-          })}
+          {/* In chunks: a new batch of lines redraws only the last chunk, not every line before it. */}
+          {Array.from({ length: Math.ceil(tab.messages.length / MESSAGE_CHUNK) }, (_, chunk) => (
+            <MessageChunk key={chunk} messages={tab.messages} start={chunk * MESSAGE_CHUNK} />
+          ))}
           {finishedAt && tab.status !== "executing" && (
             <div className="pt-2 text-muted-foreground">Completion time: {finishedAt.toISOString()}</div>
           )}
@@ -483,6 +494,59 @@ function Messages({ tab }: { tab: QueryTab }) {
     </ContextMenu>
   );
 }
+
+/** Lines per MessageChunk. */
+const MESSAGE_CHUNK = 200;
+/** A text line in the messages: text-xs (12 px) with leading-relaxed. */
+const LINE_HEIGHT = 19.5;
+
+/**
+ * MESSAGE_CHUNK lines from `start`. The list only grows during a run, so a
+ * full chunk whose lines are the same objects is skipped; one that is off
+ * screen also skips layout and paint. Every line stays in the page, so a
+ * mouse selection and Ctrl+C still take what is selected.
+ */
+const MessageChunk = memo(
+  function MessageChunk({ messages, start }: { messages: MessageLine[]; start: number }) {
+    const lines = messages.slice(start, start + MESSAGE_CHUNK);
+    // Its height until first drawn, near the real one so the scrollbar does not jump.
+    const estimate = lines.reduce((sum, line) => sum + (line.header ? 2 : 1), 0) * LINE_HEIGHT + lines.length * 4;
+    return (
+      // role="group": the scroll fade then fades and blurs line by line, not the whole chunk.
+      <div role="group" className="space-y-1 [content-visibility:auto]" style={{ containIntrinsicSize: `auto ${estimate}px` }}>
+        {lines.map((message, offset) => {
+          const { line } = message;
+          const row = (
+            <div
+              key={start + offset}
+              className={cn(message.isError && "text-destructive", line && "cursor-pointer hover:underline")}
+              onDoubleClick={line ? () => revealLine(line) : undefined}
+              onClick={line ? () => revealLine(line) : undefined}
+            >
+              {message.header && <div>{message.header}</div>}
+              <div>{message.text}</div>
+            </div>
+          );
+          // Only lines that lead somewhere get a tooltip.
+          return line ? (
+            <Tip key={start + offset} label={`Go to line ${line}`}>
+              {row}
+            </Tip>
+          ) : (
+            row
+          );
+        })}
+      </div>
+    );
+  },
+  (previous, next) => {
+    if (previous.start !== next.start) return false;
+    const end = Math.min(next.start + MESSAGE_CHUNK, next.messages.length);
+    if (Math.min(previous.start + MESSAGE_CHUNK, previous.messages.length) !== end) return false;
+    for (let i = next.start; i < end; i++) if (previous.messages[i] !== next.messages[i]) return false;
+    return true;
+  },
+);
 
 /** Fills the output panel while a query runs and nothing has come back yet. */
 function Running() {

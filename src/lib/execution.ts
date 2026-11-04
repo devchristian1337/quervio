@@ -11,6 +11,8 @@ export type ExecutionEvent =
   | { type: "batchStarted"; batch: number; firstLine: number }
   | { type: "message"; text: string; isError: boolean; header: string | null; line: number | null }
   | { type: "rowsAffected"; count: number }
+  /** Message and rowsAffected events gathered by query_execute (src-tauri/src/query.rs). */
+  | { type: "messages"; items: ({ type: "message"; text: string; isError: boolean; header: string | null; line: number | null } | { type: "rowsAffected"; count: number })[] }
   | { type: "resultSetStarted"; index: number; columns: { name: string; kind: ColumnKind }[] }
   | { type: "resultSetRows"; index: number; rows: number }
   | { type: "resultSetFinished"; index: number; rows: number }

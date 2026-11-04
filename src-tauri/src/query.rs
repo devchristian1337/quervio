@@ -36,6 +36,81 @@ const PREVIEW_CHARS: usize = 500;
 
 const GONE: &str = "that result set no longer exists";
 
+/// What `query_execute` sends: an Execution Event, or several Messages and
+/// row counts in one.
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub enum Delivery {
+    Event(ExecutionEvent),
+    Batch(Batch),
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Batch {
+    /// `Message` and `RowsAffected` events, in order.
+    Messages { items: Vec<ExecutionEvent> },
+}
+
+/// How long Messages gather before they are sent together.
+const MESSAGE_BATCH_WINDOW: std::time::Duration = std::time::Duration::from_millis(16);
+/// Messages sent at most in one batch.
+const MESSAGE_BATCH_MAX: usize = 1000;
+
+/// Forwards Execution Events to the page, Messages and row counts gathered
+/// for up to MESSAGE_BATCH_WINDOW. Each Channel send is a script run on the
+/// window's thread: ten thousand PRINTs or INSERTs without NOCOUNT, one send
+/// each, would hold the window for seconds. Order is kept: any other event
+/// first sends the Messages before it. Ends when the sender is dropped.
+fn forward_events(
+    on_event: Channel<Delivery>,
+) -> (
+    tokio::sync::mpsc::UnboundedSender<ExecutionEvent>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<ExecutionEvent>();
+    let task = tokio::spawn(async move {
+        let is_message = |event: &ExecutionEvent| {
+            matches!(
+                event,
+                ExecutionEvent::Message { .. } | ExecutionEvent::RowsAffected { .. }
+            )
+        };
+        let mut pending: Option<ExecutionEvent> = None;
+        loop {
+            let event = match pending.take() {
+                Some(event) => event,
+                None => match receiver.recv().await {
+                    Some(event) => event,
+                    None => break,
+                },
+            };
+            if !is_message(&event) {
+                let _ = on_event.send(Delivery::Event(event));
+                continue;
+            }
+            let mut items = vec![event];
+            let deadline = tokio::time::Instant::now() + MESSAGE_BATCH_WINDOW;
+            while items.len() < MESSAGE_BATCH_MAX {
+                match tokio::time::timeout_at(deadline, receiver.recv()).await {
+                    Ok(Some(next)) if is_message(&next) => items.push(next),
+                    Ok(Some(next)) => {
+                        pending = Some(next);
+                        break;
+                    }
+                    // The window passed, or the Execution ended.
+                    Ok(None) | Err(_) => break,
+                }
+            }
+            let _ = on_event.send(match items.len() {
+                1 => Delivery::Event(items.pop().unwrap()),
+                _ => Delivery::Batch(Batch::Messages { items }),
+            });
+        }
+    });
+    (sender, task)
+}
+
 /// Result data stays in Rust; only the local output path crosses the webview.
 #[tauri::command]
 pub async fn result_export_file(
@@ -572,7 +647,7 @@ pub async fn query_execute(
     base_line: u32,
     options: ExecuteOptions,
     allow_destructive: bool,
-    on_event: Channel<ExecutionEvent>,
+    on_event: Channel<Delivery>,
 ) -> CommandResult<Outcome> {
     let environment = state.environments.lock().unwrap().get(&tab_id).copied();
     if options.plan_mode != "estimated"
@@ -625,6 +700,7 @@ pub async fn query_execute(
         }
     }
     let mut finished = None;
+    let (events, forwarder) = forward_events(on_event.clone());
     let outcome = active
         .execute(
             &script,
@@ -638,10 +714,14 @@ pub async fn query_execute(
                     finished = Some(event);
                     return;
                 }
-                let _ = on_event.send(event);
+                let _ = events.send(event);
             },
         )
         .await;
+    // Every event of the Execution reaches the page before anything below,
+    // and before the command returns.
+    drop(events);
+    let _ = forwarder.await;
     let restored = if let Some((_, restore)) = plan_setup {
         active.command(restore).await.map_err(message)
     } else {
@@ -667,7 +747,7 @@ pub async fn query_execute(
                     .and_then(|n| n.parse().ok())
                     .unwrap_or(0);
             }
-            let _ = on_event.send(event);
+            let _ = on_event.send(Delivery::Event(event));
         }
     }
     drop(active);
@@ -679,9 +759,9 @@ pub async fn query_execute(
         state.sessions.lock().await.remove(&tab_id);
         let reason =
             format!("Plan settings could not be restored; the Session was closed. {error}");
-        let _ = on_event.send(ExecutionEvent::SessionClosed {
+        let _ = on_event.send(Delivery::Event(ExecutionEvent::SessionClosed {
             reason: reason.clone(),
-        });
+        }));
         return Err(reason);
     }
     Ok(outcome)

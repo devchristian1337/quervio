@@ -9,6 +9,8 @@ export const enum CellKind {
 export interface Cell {
   kind: CellKind;
   text: string;
+  /** The grid's one-line form of `text`, kept once worked out (ResultGrid). */
+  display?: string;
 }
 
 const decoder = new TextDecoder();
