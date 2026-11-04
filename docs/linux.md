@@ -7,15 +7,17 @@ librerie. La decisione è descritta nell'[ADR 0007](adr/0007-linux-support.md).
 
 ## Installazione
 
-Scaricare il pacchetto per **Intel/AMD x64** dalla
+Scaricare il pacchetto per la propria architettura, **Intel/AMD x64** o
+**ARM64**, dalla
 [release pubblica più recente](https://github.com/devchristian1337/quervio/releases/latest).
-I file pubblici si chiamano `Quervio-linux-x64.*`; i checksum sono nel file
-`SHA256SUMS-linux-x64.txt` della release. La pipeline ARM64 è predisposta nel
-sorgente, ma i relativi binari non fanno parte della release corrente.
+I file pubblici si chiamano `Quervio-linux-x64.*` e `Quervio-linux-arm64.*`; i
+checksum sono nei file `SHA256SUMS-linux-x64.txt` e `SHA256SUMS-linux-arm64.txt`
+della release. I pacchetti ARM64 sono pubblicati dalla release 0.1.34.
 
 Il formato consigliato per una distribuzione non specificata è Flatpak. Serve
 Flatpak installato sul sistema; aprire il file `.flatpak` con il gestore software.
-Su Intel/AMD, dalla cartella del download si può usare anche:
+Dalla cartella del download si può usare anche il comando seguente (su ARM64
+il file è `Quervio-linux-arm64.flatpak`):
 
 ```bash
 flatpak install --user ./Quervio-linux-x64.flatpak
@@ -40,9 +42,9 @@ della nuova release: le Connessioni salvate rimangono nella cartella dati utente
 | DEB | Ubuntu/Debian e derivate | WebKitGTK 4.1 e dipendenze risolte dal gestore pacchetti |
 | RPM | Distribuzioni con pacchetti RPM | WebKitGTK 4.1 e dipendenze risolte dal gestore pacchetti |
 
-Ogni architettura richiede il proprio pacchetto. La release corrente distribuisce
-x86_64 (Intel/AMD a 64 bit); aarch64 è predisposto nel codice e nel workflow,
-senza un binario pubblico verificato. Non sono previste build a 32 bit o musl
+Ogni architettura richiede il proprio pacchetto. Le release distribuiscono
+x86_64 (Intel/AMD a 64 bit) e aarch64 (ARM64), costruiti e provati nativamente
+dal workflow per ciascuna architettura. Non sono previste build a 32 bit o musl
 native. Flatpak può usare il suo runtime anche su un host con librerie diverse,
 purché Flatpak stesso sia supportato.
 
@@ -55,7 +57,8 @@ verificati nella release GitHub in bozza; la pubblicazione avviene dopo il
 completamento anche dei pacchetti Windows.
 
 La release 0.1.33 usa la compilazione locale verificata su Ubuntu 24.04 x64,
-con caricamento diretto dei pacchetti sulla release.
+con caricamento diretto dei pacchetti sulla release. Dalla 0.1.34 i pacchetti
+pubblici, x64 e ARM64, sono prodotti e caricati dal workflow.
 Flatpak usa il proprio runtime GNOME 50 ed è il formato da preferire su sistemi
 con librerie di base meno recenti. I pacchetti nativi locali non vanno descritti
 come build prodotte sulla base Ubuntu 22.04 del workflow.
@@ -150,7 +153,9 @@ pubblicazione su Flathub.
 
 Windows e Linux condividono versione, commit e release GitHub. Preparare il
 commit con le quattro versioni allineate come descritto in `AGENTS.md`, fare
-push e creare una release in bozza sul commit esatto. Avviare il workflow
+push, creare e pubblicare il tag annotato `v<versione>` su quel commit e poi una
+release in bozza su quel tag: una bozza non crea il tag, e il workflow ne fa il
+checkout. Avviare il workflow
 **Linux packages** indicando quel tag in `release_tag`: costruisce e prova
 AppImage e Flatpak per x64 e ARM64 e carica tutti e quattro i formati per
 ciascuna architettura, con checksum separati. I nomi pubblici sono preparati da
