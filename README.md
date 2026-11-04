@@ -10,7 +10,6 @@ Public installers are available in [GitHub Releases](https://github.com/devchris
 | --- | --- |
 | Windows 11 x64 | [Installer](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio.App-win-Setup.exe) |
 | Linux Intel/AMD x64 | [Flatpak](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-x64.flatpak) · [DEB](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-x64.deb) · [RPM](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-x64.rpm) · [AppImage](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-x64.AppImage) |
-| Linux ARM64 | [Flatpak](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-arm64.flatpak) · [DEB](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-arm64.deb) · [RPM](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-arm64.rpm) · [AppImage](https://github.com/devchristian1337/quervio/releases/latest/download/Quervio-linux-arm64.AppImage) |
 
 On Linux, Flatpak provides a common runtime across distributions; DEB and RPM
 integrate with the system package manager. Install the downloaded Flatpak through
@@ -18,6 +17,9 @@ your software manager, or follow the [Linux installation instructions](docs/linu
 No .NET SDK, Node.js or Rust installation is required to use Quervio. Saved
 passwords use the desktop's unlocked Secret Service keyring. Windows updates
 automatically; Linux updates by installing the newer package.
+
+The current public Linux binaries target Intel/AMD x64. ARM64 build support is
+prepared in the source workflow; ARM64 binaries are not part of this release.
 
 Linux packaging, requirements and the actual verification scope are documented in
 [Linux support](docs/linux.md). Linux support does not imply compatibility with

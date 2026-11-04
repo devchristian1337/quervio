@@ -7,10 +7,11 @@ librerie. La decisione è descritta nell'[ADR 0007](adr/0007-linux-support.md).
 
 ## Installazione
 
-Scaricare il pacchetto per **Intel/AMD x64** oppure **ARM64** dalla
+Scaricare il pacchetto per **Intel/AMD x64** dalla
 [release pubblica più recente](https://github.com/devchristian1337/quervio/releases/latest).
-I file `Quervio-linux-x64.*` sono per Intel/AMD; `Quervio-linux-arm64.*` per ARM64.
-I checksum sono nei corrispondenti file `SHA256SUMS-linux-*.txt` della release.
+I file pubblici si chiamano `Quervio-linux-x64.*`; i checksum sono nel file
+`SHA256SUMS-linux-x64.txt` della release. La pipeline ARM64 è predisposta nel
+sorgente, ma i relativi binari non fanno parte della release corrente.
 
 Il formato consigliato per una distribuzione non specificata è Flatpak. Serve
 Flatpak installato sul sistema; aprire il file `.flatpak` con il gestore software.
@@ -18,12 +19,6 @@ Su Intel/AMD, dalla cartella del download si può usare anche:
 
 ```bash
 flatpak install --user ./Quervio-linux-x64.flatpak
-```
-
-Su ARM64:
-
-```bash
-flatpak install --user ./Quervio-linux-arm64.flatpak
 ```
 
 Terminata l'installazione, avviare **Quervio** dal menu delle applicazioni.
@@ -45,8 +40,9 @@ della nuova release: le Connessioni salvate rimangono nella cartella dati utente
 | DEB | Ubuntu/Debian e derivate | WebKitGTK 4.1 e dipendenze risolte dal gestore pacchetti |
 | RPM | Distribuzioni con pacchetti RPM | WebKitGTK 4.1 e dipendenze risolte dal gestore pacchetti |
 
-Ogni architettura richiede il proprio pacchetto. Distribuiamo x86_64 (Intel/AMD
-a 64 bit) e aarch64 (ARM a 64 bit); non sono previste build a 32 bit o musl
+Ogni architettura richiede il proprio pacchetto. La release corrente distribuisce
+x86_64 (Intel/AMD a 64 bit); aarch64 è predisposto nel codice e nel workflow,
+senza un binario pubblico verificato. Non sono previste build a 32 bit o musl
 native. Flatpak può usare il suo runtime anche su un host con librerie diverse,
 purché Flatpak stesso sia supportato.
 
@@ -57,6 +53,12 @@ non elimina questo vincolo. Senza parametri il workflow conserva gli artefatti
 di verifica. Specificando `release_tag`, costruisce quel tag e carica i pacchetti
 verificati nella release GitHub in bozza; la pubblicazione avviene dopo il
 completamento anche dei pacchetti Windows.
+
+La release 0.1.33 usa la compilazione locale verificata su Ubuntu 24.04 x64,
+con caricamento diretto dei pacchetti sulla release.
+Flatpak usa il proprio runtime GNOME 50 ed è il formato da preferire su sistemi
+con librerie di base meno recenti. I pacchetti nativi locali non vanno descritti
+come build prodotte sulla base Ubuntu 22.04 del workflow.
 
 ## Requisiti e funzioni
 
