@@ -1,5 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
+const documents = new WeakMap<Page, number>();
+
 async function openPalette(page: Page) {
   await page.keyboard.press("Control+Shift+P");
   const dialog = page.getByRole("dialog", { name: "Search commands", exact: true });
@@ -14,6 +16,12 @@ test.beforeEach(async ({ page }) => {
   test.setTimeout(60000);
   await page.goto("/?mock", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("button", { name: "Search commands", exact: true })).toBeVisible({ timeout: 30000 });
+  documents.set(page, await page.evaluate(() => performance.timeOrigin));
+});
+
+test.afterEach(async ({ page }) => {
+  expect(await page.evaluate(() => performance.timeOrigin), "The dev server must not reload the page during an interaction")
+    .toBe(documents.get(page));
 });
 
 test("searches real tools and opens the selected result with Enter", async ({ page }) => {

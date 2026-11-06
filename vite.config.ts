@@ -16,6 +16,11 @@ export default defineConfig(() => ({
       "monaco-esm": path.resolve(import.meta.dirname, "./node_modules/monaco-editor/esm/vs"),
     },
   },
+  // The worker starts only after the lazy editor is opened. Discovering its
+  // entry then would re-bundle shared dependencies and reload every open page.
+  optimizeDeps: {
+    include: ["monaco-esm/editor/editor.worker.js"],
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

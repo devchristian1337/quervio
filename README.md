@@ -70,6 +70,11 @@ matrix are described in [Compatibility verification](docs/compatibility.md).
 The matrix records actual server versions; configured jobs alone are not
 compatibility evidence.
 
+In CI, browser tests start Vite with fresh dependency optimization. The Monaco
+worker is pre-bundled at startup so opening the editor cannot discover it late
+and trigger a full-page reload during another interaction. Command palette tests
+also check that the document is not replaced during each scenario.
+
 ```bash
 cargo test --workspace
 pnpm test
