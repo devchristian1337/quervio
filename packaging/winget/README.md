@@ -14,21 +14,25 @@ a ogni versione.
 
 ## Primo invio
 
-`0.1.35/` contiene il manifest per il primo invio al repository
-[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). Dopo
-l'approvazione la fonte del manifest è winget-pkgs e quella cartella si può
+`0.1.35/` contiene il manifest (schema 1.28.0) del primo invio,
+[microsoft/winget-pkgs#473334](https://github.com/microsoft/winget-pkgs/pull/473334).
+Dopo l'approvazione la fonte del manifest è winget-pkgs e quella cartella si può
 rimuovere.
 
-```powershell
-winget validate --manifest packaging\winget\0.1.35
-winget install Microsoft.WingetCreate
-wingetcreate submit --prtitle "New package: devchristian1337.Quervio version 0.1.35" packaging\winget\0.1.35
-```
+L'invio è partito con `wingetcreate submit`, che ha creato il fork
+`devchristian1337/winget-pkgs`; wingetcreate 1.12.13 accetta manifest fino allo
+schema 1.12.0, quindi lo schema 1.28.0 è stato applicato poi sul branch della
+pull request. La revisione di Microsoft richiede in genere alcuni giorni:
+l'installer non è firmato, quindi può ricevere controlli aggiuntivi.
 
-Senza `--token`, `wingetcreate` apre l'accesso a GitHub nel browser; crea anche
-il fork `devchristian1337/winget-pkgs` da cui parte la pull request. La revisione
-di Microsoft richiede in genere alcuni giorni: l'installer non è firmato, quindi
-può ricevere controlli aggiuntivi.
+Per provare il manifest in locale, `winget install --manifest` richiede
+l'impostazione `LocalManifestFiles`, che si attiva da un terminale amministratore:
+
+```powershell
+winget settings --enable LocalManifestFiles
+winget install --manifest packaging\winget\0.1.35
+winget settings --disable LocalManifestFiles
+```
 
 ## Versioni successive
 
