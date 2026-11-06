@@ -12,7 +12,10 @@ describe("newConnection", () => {
 
 describe("transportWarning", () => {
   it("warns when the certificate is trusted without Strict", () => {
-    expect(transportWarning({ encrypt: "mandatory", trustServerCertificate: true })).toMatch(/not checked/);
+    expect(transportWarning({ encrypt: "mandatory", trustServerCertificate: true })).toMatchObject({
+      label: "Certificate not verified",
+      detail: expect.stringMatching(/not checked/),
+    });
   });
 
   it("does not warn under Strict, which ignores the trust flag", () => {
@@ -20,7 +23,10 @@ describe("transportWarning", () => {
   });
 
   it("warns that Optional encryption can be stripped", () => {
-    expect(transportWarning({ encrypt: "optional", trustServerCertificate: false })).toMatch(/turned off/);
+    expect(transportWarning({ encrypt: "optional", trustServerCertificate: false })).toMatchObject({
+      label: "Encryption can be turned off",
+      detail: expect.stringMatching(/turned off/),
+    });
   });
 });
 

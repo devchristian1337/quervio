@@ -92,13 +92,29 @@ export function newConnection(): SavedConnection {
   };
 }
 
+export type TransportWarning = {
+  /** A few words that fit beside the "Trust server certificate" checkbox. */
+  label: string;
+  /** The full explanation, shown as a tooltip. */
+  detail: string;
+};
+
 /** Why these settings leave the login readable on the network, if they do. */
-export function transportWarning(connection: Pick<SavedConnection, "encrypt" | "trustServerCertificate">): string | null {
+export function transportWarning(
+  connection: Pick<SavedConnection, "encrypt" | "trustServerCertificate">,
+): TransportWarning | null {
   if (connection.encrypt === "optional") {
-    return "Optional encryption can be turned off by anyone on the network path, who can then read the login.";
+    return {
+      label: "Encryption can be turned off",
+      detail: "Optional encryption can be turned off by anyone on the network path, who can then read the login.",
+    };
   }
   if (connection.trustServerCertificate && connection.encrypt !== "strict") {
-    return "The server's certificate and name are not checked, so anyone on the network path can read the login. Use it only for a server you trust with a self-signed certificate.";
+    return {
+      label: "Certificate not verified",
+      detail:
+        "The server's certificate and name are not checked, so anyone on the network path can read the login. Use it only for a server you trust with a self-signed certificate.",
+    };
   }
   return null;
 }

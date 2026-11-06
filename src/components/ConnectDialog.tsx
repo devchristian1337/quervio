@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, TriangleAlert, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/radix-checkbox";
 import {
@@ -238,14 +238,29 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
             </Field>
           </div>
 
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <Checkbox
-              checked={draft.trustServerCertificate}
-              onCheckedChange={(checked) => update({ trustServerCertificate: checked === true })}
-            />
-            Trust server certificate
-          </label>
-          {warning && <p className="-mt-2 text-xs text-amber-500">{warning}</p>}
+          {/* The warning shares the checkbox row, so showing it never changes the dialog height. */}
+          <div className="flex min-w-0 items-center gap-3">
+            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm">
+              <Checkbox
+                checked={draft.trustServerCertificate}
+                onCheckedChange={(checked) => update({ trustServerCertificate: checked === true })}
+              />
+              Trust server certificate
+            </label>
+            <p
+              className="ml-auto flex min-w-0 items-center gap-1.5 text-xs text-amber-500"
+              title={warning?.detail}
+              aria-live="polite"
+            >
+              {warning && (
+                <>
+                  <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">{warning.label}</span>
+                  <span className="sr-only">. {warning.detail}</span>
+                </>
+              )}
+            </p>
+          </div>
 
           {test.status !== "idle" && <TestResult state={test} />}
           {error && <p className="text-sm text-destructive select-text">{error}</p>}
