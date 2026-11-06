@@ -1,0 +1,30 @@
+name: WinGet
+
+# Opens the pull request that adds the published release to winget-pkgs.
+# Runs when a draft is published, so the Windows Setup.exe is already attached.
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Published release tag to submit (for example v0.1.36)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # v2, pinned: the action receives a token that can open pull requests.
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54
+        with:
+          identifier: devchristian1337.Quervio
+          installers-regex: '^Quervio\.App-win-Setup\.exe$'
+          release-tag: ${{ inputs.release_tag || github.event.release.tag_name }}
+          release-notes-url: https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_tag || github.event.release.tag_name }}
+          token: ${{ secrets.WINGET_TOKEN }}
