@@ -3,11 +3,11 @@ import { existsSync } from "node:fs";
 import process from "node:process";
 const executablePath =
   process.env.QUERVIO_BROWSER ??
-  [
+  (process.env.CI ? undefined : [
     "C:/Program Files/Google/Chrome/Application/chrome.exe",
     "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
     "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
-  ].find(existsSync);
+  ].find(existsSync));
 export default defineConfig({
   testDir: "./tests/ui",
   outputDir: "./target/ui-test-results",
@@ -30,7 +30,7 @@ export default defineConfig({
   webServer: {
     command: "node node_modules/vite/bin/vite.js --host 127.0.0.1",
     url: "http://127.0.0.1:1420",
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
     timeout: 30000,
   },
 });

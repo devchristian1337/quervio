@@ -88,7 +88,16 @@ async fn connects_with_sql_login() {
     let ColumnValues::String(text) = version else {
         panic!("@@VERSION is not a string: {version:?}")
     };
-    assert!(text.to_utf8_string().contains("SQL Server 2022"));
+    assert!(text.to_utf8_string().contains("Microsoft SQL Server"));
+    let major = single_value(
+        &mut client,
+        "SELECT CONVERT(nvarchar(128),SERVERPROPERTY('ProductMajorVersion'))",
+    )
+    .await;
+    let ColumnValues::String(major) = major else {
+        panic!("ProductMajorVersion is not a string: {major:?}")
+    };
+    assert_eq!(major.to_utf8_string(), common::expected_major_version());
     assert!(client.is_encrypted());
 }
 

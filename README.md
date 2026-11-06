@@ -65,6 +65,11 @@ keyboard focus inside the tour and blocks workspace shortcuts while open.
 
 ## Test
 
+Automatic Windows/Linux checks and the isolated SQL Server 2019/2022/2025 test
+matrix are described in [Compatibility verification](docs/compatibility.md).
+The matrix records actual server versions; configured jobs alone are not
+compatibility evidence.
+
 ```bash
 cargo test --workspace
 pnpm test
@@ -79,6 +84,23 @@ cargo test --workspace -- --ignored --skip linux_keyring_round_trip_and_profile_
 
 The Linux keyring integration runs separately on a private bus with
 `bash scripts/test-linux-keyring.sh`; see [Linux support](docs/linux.md).
+
+### Query tab recovery
+
+Open query tabs, including unsaved SQL, are saved after a 500 ms editing pause
+and before closing or restarting. Saves run in order. The app data directory
+holds the current `tabs.json` and the previous distinct valid `tabs.json.bak`;
+both are written through flushed temporary files. A damaged or missing current
+snapshot falls back to the backup, with a notification that recent edits may
+be missing. A removed Saved Connection keeps its SQL in a disconnected tab.
+
+Save failures show a warning with Retry. Closing or updating after a failed save
+requires choosing whether to keep working or continue without recovery. If
+neither snapshot can be restored, the recovery files are preserved and new
+snapshots are not written until recovery succeeds; save new SQL explicitly to
+files. Recovery restores editor text and tab options, not running SQL sessions,
+open transactions, temporary tables or query results. Edits made just before an
+abrupt process termination can still be newer than the last completed save.
 
 ## Build the installer
 

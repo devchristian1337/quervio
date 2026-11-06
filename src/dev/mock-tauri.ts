@@ -268,7 +268,7 @@ mockIPC(async (cmd, args) => {
         ? "SELECT TOP (1000)\n      [Id]\n     ,[Name]\n  FROM [dbo].[Customer];\n"
         : "CREATE TABLE [dbo].[Customer] (\n    [Id] int IDENTITY(1, 1) NOT NULL,\n    [Name] nvarchar(100) NOT NULL\n);\n";
     case "tabs_load":
-      return localStorage.getItem("quervio.mock.tabs");
+      return { snapshot: localStorage.getItem("quervio.mock.tabs"), recovered: false };
     case "tabs_save":
       localStorage.setItem("quervio.mock.tabs", a.snapshot as string);
       return null;

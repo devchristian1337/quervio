@@ -1,0 +1,20 @@
+{
+  "requestedVersion": "2022",
+  "image": "mcr.microsoft.com/mssql/server:2022-latest",
+  "startedAt": "2026-11-06T15:11:26.050Z",
+  "status": "passed",
+  "imageId": "sha256:cf8f0ab2ebe61feec2eed2629061a07d247f791c2a8ddda74a4ac9f06a291718",
+  "server": {
+    "client_arch": "x86_64",
+    "client_os": "windows",
+    "probe": "passed",
+    "server": {
+      "auth_scheme": "SQL",
+      "edition": "Developer Edition (64-bit)",
+      "engine_edition": "3",
+      "product_level": "RTM",
+      "product_version": "16.0.4305.5"
+    }
+  },
+  "finishedAt": "2026-11-06T15:12:08.957Z"
+}

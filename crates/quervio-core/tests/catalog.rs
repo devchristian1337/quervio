@@ -80,7 +80,10 @@ async fn walks_the_object_explorer_tree() {
 
     let info = session.server_info().await.unwrap();
     assert_eq!(info.database, "master");
-    assert!(info.version.starts_with("16."), "{}", info.version);
+    assert_eq!(
+        info.version.split('.').next(),
+        Some(common::expected_major_version().as_str())
+    );
 
     let databases = catalog::databases(&mut session).await.unwrap();
     let master = databases.iter().find(|d| d.name == "master").unwrap();
@@ -312,10 +315,8 @@ async fn create_table_quotes_user_defined_types() {
     let _turn = DATABASE_LOCK.lock().await;
     let _database = TestDatabase::create(DATABASE, SETUP).await;
     // A batch cannot use a type it creates, so the table needs its own.
-    run_scripts(&[
-        "USE [Quervio Tests]]Catalog];
-         CREATE TABLE dbo.T (c dbo.[int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int] NOT NULL);",
-    ])
+    run_scripts(&["USE [Quervio Tests]]Catalog];
+         CREATE TABLE dbo.T (c dbo.[int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int] NOT NULL);"])
     .await;
     let mut session = open().await;
     let tables = catalog::objects(&mut session, DATABASE, ObjectFolder::Tables)

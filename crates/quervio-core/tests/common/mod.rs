@@ -62,6 +62,11 @@ pub fn password() -> Option<String> {
     Some(setting("QUERVIO_TEST_PASSWORD"))
 }
 
+/// The Compose fixture is SQL Server 2022 unless the isolated matrix overrides it.
+pub fn expected_major_version() -> String {
+    std::env::var("QUERVIO_TEST_EXPECTED_MAJOR").unwrap_or_else(|_| "16".into())
+}
+
 /// A database created for one test and dropped when this goes out of
 /// scope, also when the test fails, so the server keeps no test leftovers.
 pub struct TestDatabase {

@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { modelText } from "@/lib/editor";
 import { useConnections } from "@/stores/connections";
 import { useQueries } from "@/stores/queries";
+import { toast } from "@/components/ui/basic-toast";
 
 interface SavedTab {
   sqlcmdMode?: boolean;
@@ -42,55 +43,88 @@ function snapshot(): SavedSession {
 
 let timer: number | undefined;
 let restored = false;
+let restoreFailed = false;
+let restoring: Promise<void> | undefined;
+let pendingSave = Promise.resolve(true);
+let saveFailed = false;
 
 /** Saves the open tabs soon; called on every edit and tab change. */
 export function scheduleSave() {
+  if (!restored) return;
   window.clearTimeout(timer);
   timer = window.setTimeout(() => void saveNow(), 500);
 }
 
 /** Saves the open tabs now; awaited before the window closes. */
-export async function saveNow() {
+export async function saveNow(): Promise<boolean> {
   window.clearTimeout(timer);
+  if (restoring) await restoring;
   // Before the restore, an empty store would overwrite last run's tabs.
-  if (!restored) return;
-  try {
-    await api.tabsSave(JSON.stringify(snapshot()));
-  } catch {
-    // Restoring is best effort; a failed save must not block closing.
-  }
+  if (!restored) return !restoreFailed;
+  const text = JSON.stringify(snapshot());
+  // Autosave and closing may overlap. Keep their snapshots in request order.
+  pendingSave = pendingSave.then(async () => {
+    try {
+      await api.tabsSave(text);
+      if (saveFailed) toast.success("Query tab recovery is available again");
+      saveFailed = false;
+      return true;
+    } catch {
+      if (!saveFailed) toast.warning("Query tabs could not be saved", {
+        description: "Save your SQL files before closing. Automatic recovery is temporarily unavailable.",
+        action: { label: "Retry", onClick: () => { void saveNow(); } },
+      });
+      saveFailed = true;
+      return false;
+    }
+  });
+  return pendingSave;
 }
 
 /** Reopens last run's tabs once the Saved Connections are loaded. */
-export async function restoreTabs() {
-  if (restored) return;
-  let saved: SavedSession | null = null;
+export function restoreTabs(): Promise<void> {
+  if (restored) return Promise.resolve();
+  if (restoring) return restoring;
+  restoring = restoreSnapshot().finally(() => { restoring = undefined; });
+  return restoring;
+}
+
+async function restoreSnapshot() {
   try {
-    const text = await api.tabsLoad();
-    saved = text ? JSON.parse(text) : null;
-  } catch {
-    saved = null;
-  }
-  restored = true;
-  if (!saved?.tabs?.length) return;
-  const known = new Set(useConnections.getState().connections.map((c) => c.id));
-  const active = saved.active;
-  const tabs = saved.tabs.filter((t) => known.has(t.connectionId));
-  const { open } = useQueries.getState();
-  // Opened in order so they keep their places; each connects on its own.
-  await Promise.allSettled(
-    tabs.map((tab, index) =>
-      open(tab.connectionId, tab.database, {
+    const { snapshot: text, recovered } = await api.tabsLoad();
+    // The backend validates the snapshot before returning it.
+    const saved: SavedSession | null = text ? JSON.parse(text) : null;
+    if (saved?.tabs.length) {
+      const known = new Set(useConnections.getState().connections.map((c) => c.id));
+      const missing = saved.tabs.some((tab) => !known.has(tab.connectionId));
+      const { open } = useQueries.getState();
+      // Opening an unknown connection keeps the SQL in a disconnected tab.
+      // Never execute restored text or read the original .sql file.
+      await Promise.all(saved.tabs.map((tab, index) => open(tab.connectionId, tab.database, {
         title: tab.title,
         text: tab.text,
         filePath: tab.filePath,
         dirty: tab.dirty,
-        activate: index === active,
+        activate: index === saved.active,
         sqlcmdMode: tab.sqlcmdMode === true,
         planMode: tab.planMode === "estimated" || tab.planMode === "actual" ? tab.planMode : "none",
-      }),
-    ),
-  );
+      })));
+      if (missing) toast.warning("Some Saved Connections are unavailable", {
+        description: "Their SQL has been kept in disconnected query tabs.",
+      });
+    }
+    if (recovered) toast.warning("Query tabs recovered", {
+      description: "The latest snapshot was unavailable. Your tabs were restored from the previous copy; recent edits may be missing.",
+    });
+    restored = true;
+    restoreFailed = false;
+  } catch {
+    restoreFailed = true;
+    toast.warning("Query tabs could not be restored", {
+      description: "Recovery files have been kept. Save any new SQL to files before closing.",
+      action: { label: "Retry recovery", onClick: () => { void restoreTabs(); } },
+    });
+  }
 }
 
 /** Keeps the snapshot current whenever tabs open, close or change database. */
@@ -102,6 +136,7 @@ useQueries.subscribe((state, previous) => {
       (t, i) =>
         t.database !== previous.tabs[i]?.database ||
         t.title !== previous.tabs[i]?.title ||
+        t.filePath !== previous.tabs[i]?.filePath ||
         t.dirty !== previous.tabs[i]?.dirty ||
         t.sqlcmdMode !== previous.tabs[i]?.sqlcmdMode || t.planMode !== previous.tabs[i]?.planMode,
     )

@@ -9,6 +9,7 @@ mod platform;
 mod processes;
 mod query;
 mod settings;
+mod tabs;
 mod updates;
 
 use std::path::Path;

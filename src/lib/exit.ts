@@ -20,7 +20,10 @@ export async function settleBeforeExit(action = "close Quervio"): Promise<boolea
     }))
   )
     return false;
-  await saveNow();
+  if (!(await saveNow()) && !(await ask(
+    "Query tabs could not be saved for recovery. Save your SQL files before closing, or continue without saving the recovery snapshot.",
+    { title: "Query tabs not saved", kind: "warning", okLabel: "Continue without recovery", cancelLabel: "Keep working" },
+  ))) return false;
   if (!(await useQueries.getState().settleAllTransactions())) return false;
   await management.shutdown();
   return true;

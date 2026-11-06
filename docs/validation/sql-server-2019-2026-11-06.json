@@ -1,0 +1,20 @@
+{
+  "requestedVersion": "2019",
+  "image": "mcr.microsoft.com/mssql/server:2019-latest",
+  "startedAt": "2026-11-06T15:04:20.417Z",
+  "status": "passed",
+  "imageId": "sha256:07d7dedecdbfcf6776035dc5eefb5bfd9aa1804b2f6b99f7dedb397d8a599069",
+  "server": {
+    "client_arch": "x86_64",
+    "client_os": "windows",
+    "probe": "passed",
+    "server": {
+      "auth_scheme": "SQL",
+      "edition": "Developer Edition (64-bit)",
+      "engine_edition": "3",
+      "product_level": "RTM",
+      "product_version": "15.0.4500.2"
+    }
+  },
+  "finishedAt": "2026-11-06T15:05:31.506Z"
+}

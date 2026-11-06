@@ -376,7 +376,7 @@ export function override(mode: Mode, cmd: string, a: Args): unknown {
       return { serverName: SERVER, version: "16.0.4305.5", database: (a.database as string | null) ?? LONG_DATABASE };
     // The worst tabs live in memory, so the demo's saved tabs survive.
     case "tabs_load":
-      return mode === "worst" ? (worstTabs ?? tabsSnapshot()) : null;
+      return { snapshot: mode === "worst" ? (worstTabs ?? tabsSnapshot()) : null, recovered: false };
     case "tabs_save":
       worstTabs = a.snapshot as string;
       return null;

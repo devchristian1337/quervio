@@ -26,7 +26,7 @@ pub struct ExplorerState {
     secrets: Box<dyn SecretStore>,
     sessions: tokio::sync::Mutex<HashMap<String, SharedSession>>,
     /// Snapshot of the open Query Tabs, restored on the next start.
-    tabs_path: std::path::PathBuf,
+    tabs: Mutex<crate::tabs::TabSnapshots>,
 }
 
 impl ExplorerState {
@@ -59,7 +59,7 @@ impl ExplorerState {
             connections: Mutex::new(ConnectionStore::open(data_dir.join("connections.json"))?),
             secrets: platform_store(data_dir),
             sessions: tokio::sync::Mutex::new(HashMap::new()),
-            tabs_path: data_dir.join("tabs.json"),
+            tabs: Mutex::new(crate::tabs::TabSnapshots::new(data_dir)),
         })
     }
 
@@ -454,22 +454,15 @@ pub fn file_write(path: std::path::PathBuf, text: String) -> CommandResult<()> {
 
 /// The Query Tabs snapshot saved by the last run, if any.
 #[tauri::command]
-pub fn tabs_load(state: State<'_, ExplorerState>) -> CommandResult<Option<String>> {
-    match std::fs::read_to_string(&state.tabs_path) {
-        // Tolerate a BOM, e.g. if the file was edited with Notepad or PowerShell.
-        Ok(text) => Ok(Some(text.trim_start_matches('\u{feff}').to_string())),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(message(error)),
-    }
+pub fn tabs_load(state: State<'_, ExplorerState>) -> CommandResult<crate::tabs::LoadedTabs> {
+    state.tabs.lock().map_err(message)?.load()
 }
 
 /// Saves the Query Tabs snapshot (JSON written by the frontend), through a
 /// temporary file so a crash never leaves half of it.
 #[tauri::command]
 pub fn tabs_save(state: State<'_, ExplorerState>, snapshot: String) -> CommandResult<()> {
-    let temporary = state.tabs_path.with_extension("json.tmp");
-    std::fs::write(&temporary, snapshot).map_err(message)?;
-    std::fs::rename(&temporary, &state.tabs_path).map_err(message)
+    state.tabs.lock().map_err(message)?.save(&snapshot)
 }
 
 #[cfg(test)]

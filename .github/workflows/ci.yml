@@ -1,0 +1,108 @@
+name: Checks
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.22.0'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Windows script shell
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"npm_config_script_shell=$((Get-Command pwsh -ErrorAction Stop).Source)" >> $env:GITHUB_ENV'
+      - name: Linux prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev libkrb5-dev libodbc2
+      - name: Rust toolchain
+        run: rustup update stable --no-self-update
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Frontend unit tests
+        run: pnpm test
+      - name: Frontend production build
+        run: pnpm build
+      - name: Backend tests
+        run: cargo test --locked --workspace
+      - name: Desktop executable build
+        run: cargo build --locked --workspace
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Browser interaction tests (mock)
+        run: pnpm test:ui
+      - name: Windows Microsoft bridge
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./scripts/build-microsoft.ps1
+          ./src-tauri/resources/microsoft/Quervio.MicrosoftBridge.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Microsoft bridge self-test failed.' }
+      - name: Linux Microsoft bridge
+        if: runner.os == 'Linux'
+        run: |
+          bash scripts/build-microsoft.sh
+          src-tauri/resources/linux/microsoft/Quervio.MicrosoftBridge --self-test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ui-failures-${{ matrix.os }}
+          path: target/ui-test-results/
+          if-no-files-found: ignore
+
+  sql:
+    name: SQL Server ${{ matrix.version }} (SQL authentication)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['2019', '2022', '2025']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Core prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libkrb5-dev
+      - name: Rust toolchain
+        run: rustup update stable --no-self-update
+      - name: Dedicated SQL Server integration tests
+        env:
+          TEST_SQL_VERSION: ${{ matrix.version }}
+        run: node scripts/test-sql-compatibility.mjs --version "$TEST_SQL_VERSION"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sql-compatibility-${{ matrix.version }}
+          path: target/sql-compatibility/
+          if-no-files-found: ignore

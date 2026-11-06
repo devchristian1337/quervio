@@ -148,7 +148,7 @@ export const api = {
     invoke<string>("explorer_script", { id, database, objectId, kind }),
   fileRead: (path: string) => invoke<string>("file_read", { path }),
   fileWrite: (path: string, text: string) => invoke<void>("file_write", { path, text }),
-  tabsLoad: () => invoke<string | null>("tabs_load"),
+  tabsLoad: () => invoke<{ snapshot: string | null; recovered: boolean }>("tabs_load"),
   settingsLoad: () => invoke<string | null>("settings_load"),
   settingsSave: (settings: string) => invoke<void>("settings_save", { settings }),
   dataDir: () => invoke<string>("settings_data_dir"),
