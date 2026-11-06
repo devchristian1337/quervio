@@ -3539,7 +3539,7 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "quervio"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "libc",
  "quervio-core",
@@ -3559,7 +3559,7 @@ dependencies = [
 
 [[package]]
 name = "quervio-core"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "base64 0.23.1",
  "encoding_rs",
