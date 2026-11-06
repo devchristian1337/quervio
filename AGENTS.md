@@ -30,7 +30,7 @@ Queste istruzioni valgono per il repository Quervio e sono condivise da Codex e 
 
 L'ambiente di riferimento è Windows 11 con PowerShell. I prerequisiti aggiornati sono nel README.
 
-Per gli script npm/pnpm usa PowerShell 7 (`pwsh`). Nella sola sessione di lavoro imposta:
+Gli script npm/pnpm funzionano con la shell predefinita. Quando PowerShell 7 (`pwsh`) è installato, allinea la sessione alla CI Windows impostando:
 
 ```powershell
 $env:npm_config_script_shell = (Get-Command pwsh -ErrorAction Stop).Source
