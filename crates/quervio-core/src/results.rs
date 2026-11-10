@@ -236,6 +236,15 @@ impl ResultSet {
         // rows sorted by it. The row number breaks ties: the Server's order
         // is kept, as a stable sort would, without its extra copying.
         let mut order: Vec<u32> = match kind {
+            ColumnKind::Number if values.iter().all(|(text, _)| Decimal::parse(text).is_some()) => {
+                // Exact: bigint beyond 2^53 and decimal(38, s) would tie as f64.
+                let mut keyed: Vec<(Decimal, u32)> = values
+                    .into_iter()
+                    .map(|(text, row)| (Decimal::parse(text).expect("checked above"), row))
+                    .collect();
+                keyed.sort_unstable_by(|a, b| directed(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
+                keyed.into_iter().map(|(_, row)| row).collect()
+            }
             ColumnKind::Number => {
                 // Numbers compare as numbers; text that does not parse goes after them, by text.
                 let mut keyed: Vec<(Option<f64>, &str, u32)> = values
@@ -252,6 +261,15 @@ impl ResultSet {
                     directed(ordering).then(a.2.cmp(&b.2))
                 });
                 keyed.into_iter().map(|(_, _, row)| row).collect()
+            }
+            ColumnKind::Date if values.iter().all(|(text, _)| offset_instant(text).is_some()) => {
+                // datetimeoffset shows local time and offset: order by the instant.
+                let mut keyed: Vec<((i64, &str), u32)> = values
+                    .into_iter()
+                    .map(|(text, row)| (offset_instant(text).expect("checked above"), row))
+                    .collect();
+                keyed.sort_unstable_by(|a, b| directed(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
+                keyed.into_iter().map(|(_, row)| row).collect()
             }
             ColumnKind::Date | ColumnKind::Binary => {
                 values.sort_unstable_by(|a, b| directed(a.0.cmp(b.0)).then(a.1.cmp(&b.1)));
@@ -611,6 +629,103 @@ fn fold_case(text: &str) -> Cow<'_, str> {
 pub struct SortOrder {
     set: u64,
     order: Option<Vec<u32>>,
+}
+
+/// A number as the grid shows it (`-12.3400`), compared exactly.
+#[derive(Debug, PartialEq, Eq)]
+struct Decimal<'a> {
+    negative: bool,
+    /// Without leading zeros.
+    integer: &'a str,
+    /// Without trailing zeros.
+    fraction: &'a str,
+}
+
+impl<'a> Decimal<'a> {
+    fn parse(text: &'a str) -> Option<Self> {
+        let (negative, digits) = match text.as_bytes().first()? {
+            b'-' => (true, &text[1..]),
+            b'+' => (false, &text[1..]),
+            _ => (false, text),
+        };
+        let (integer, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+        let all_digits = |part: &str| part.bytes().all(|b| b.is_ascii_digit());
+        if integer.is_empty() || !all_digits(integer) || !all_digits(fraction) {
+            return None;
+        }
+        let integer = integer.trim_start_matches('0');
+        let fraction = fraction.trim_end_matches('0');
+        // -0 and 0 are the same number.
+        let negative = negative && !(integer.is_empty() && fraction.is_empty());
+        Some(Self { negative, integer, fraction })
+    }
+
+    fn magnitude(&self, other: &Self) -> Ordering {
+        self.integer
+            .len()
+            .cmp(&other.integer.len())
+            .then_with(|| self.integer.cmp(other.integer))
+            .then_with(|| self.fraction.cmp(other.fraction))
+    }
+}
+
+impl Ord for Decimal<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.negative, other.negative) {
+            (false, false) => self.magnitude(other),
+            (true, true) => other.magnitude(self),
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+        }
+    }
+}
+
+impl PartialOrd for Decimal<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// The UTC instant of a datetimeoffset as `format` writes it
+/// (`2024-01-01 10:00:00.1234567 +02:00`): whole seconds from a fixed epoch
+/// and the fraction digits, which share one scale within a column.
+fn offset_instant(text: &str) -> Option<(i64, &str)> {
+    let (local, offset) = text.rsplit_once(' ')?;
+    let (date, time) = local.split_once(' ')?;
+    let number = |part: &str| -> Option<i64> {
+        (!part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())).then(|| part.parse().ok())?
+    };
+    let sign = match offset.as_bytes().first()? {
+        b'+' => 1,
+        b'-' => -1,
+        _ => return None,
+    };
+    let (offset_hours, offset_minutes) = offset[1..].split_once(':')?;
+    let offset = sign * (number(offset_hours)? * 60 + number(offset_minutes)?);
+    let mut date = date.split('-');
+    let (year, month, day) = (number(date.next()?)?, number(date.next()?)?, number(date.next()?)?);
+    if date.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let (clock, fraction) = time.split_once('.').unwrap_or((time, ""));
+    if !fraction.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let mut clock = clock.split(':');
+    let (hours, minutes, seconds) = (number(clock.next()?)?, number(clock.next()?)?, number(clock.next()?)?);
+    if clock.next().is_some() {
+        return None;
+    }
+    // Days from civil (Howard Hinnant), counted from 0000-03-01.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe;
+    let local = days * 86_400 + hours * 3_600 + minutes * 60 + seconds;
+    Some((local - offset * 60, fraction))
 }
 
 /// Rows decoded straight from the wire into display text, with no
@@ -1057,6 +1172,79 @@ mod tests {
         assert_eq!(data.selection(&[], &[0..2]).copy_text(false), "");
         assert_eq!(data.selection(&[0..3], &[]).copy_text(true), "");
         assert_eq!(data.selection(&[0..3], &[]).markdown(), "");
+    }
+
+    fn sorted_numbers(values: &[&str], direction: SortDirection) -> Vec<String> {
+        let mut data = ResultSet::new(vec![ResultColumn {
+            name: "N".into(),
+            kind: ColumnKind::Number,
+        }]);
+        for value in values {
+            data.push_row(
+                &[ColumnValues::String(SqlString::from_utf8_string((*value).into()))],
+                100,
+            );
+        }
+        data.sort(Some((0, direction)));
+        (0..values.len())
+            .map(|row| data.copy_text(row..row + 1, 0..1, false).trim_end().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn large_and_precise_numbers_sort_exactly() {
+        assert_eq!(
+            sorted_numbers(
+                &["1234567890123456790", "1234567890123456789", "1234567890123456788"],
+                SortDirection::Ascending
+            ),
+            ["1234567890123456788", "1234567890123456789", "1234567890123456790"]
+        );
+        assert_eq!(
+            sorted_numbers(
+                &["0.10000000000000000000000000000000000002", "0.1", "-0.5", "-12", "0", "-0.00", "007.50"],
+                SortDirection::Ascending
+            ),
+            ["-12", "-0.5", "0", "-0.00", "0.1", "0.10000000000000000000000000000000000002", "007.50"]
+        );
+        assert_eq!(
+            sorted_numbers(&["2", "10", "-3"], SortDirection::Descending),
+            ["10", "2", "-3"]
+        );
+    }
+
+    #[test]
+    fn datetimeoffset_sorts_by_instant() {
+        let mut data = ResultSet::new(vec![ResultColumn {
+            name: "At".into(),
+            kind: ColumnKind::Date,
+        }]);
+        for value in [
+            "2024-01-01 09:00:00.0000000 +00:00",
+            "2024-01-01 10:00:00.0000000 +02:00",
+            "2023-12-31 23:30:00.5000000 -09:00",
+            "2024-01-01 08:00:00.1000000 +00:00",
+        ] {
+            data.push_row(
+                &[ColumnValues::String(SqlString::from_utf8_string(value.into()))],
+                100,
+            );
+        }
+        data.sort(Some((0, SortDirection::Ascending)));
+        assert_eq!(
+            data.copy_text(0..4, 0..1, false),
+            "2024-01-01 10:00:00.0000000 +02:00\r\n2024-01-01 08:00:00.1000000 +00:00\r\n2023-12-31 23:30:00.5000000 -09:00\r\n2024-01-01 09:00:00.0000000 +00:00\r\n"
+        );
+        assert_eq!(offset_instant("2024-01-01 10:00:00"), None);
+        let instant = |text| offset_instant(text).unwrap().0;
+        assert_eq!(
+            instant("2024-03-01 00:00:00 +00:00") - instant("2024-02-28 00:00:00 +00:00"),
+            2 * 86_400
+        );
+        assert_eq!(
+            instant("2024-01-01 01:30:00 +01:30"),
+            instant("2024-01-01 00:00:00 +00:00")
+        );
     }
 
     #[test]
