@@ -26,7 +26,11 @@ pub fn local_shell(text: &str) -> tokio::process::Command {
         // cmd.exe parses its own command line and misreads argv[0] when it
         // contains a forward slash. Build the path with native separators.
         let mut command = tokio::process::Command::new(root.join("System32").join("cmd.exe"));
-        command.args(["/D", "/S", "/C", text]);
+        // cmd.exe reads its command line itself. Passed as an argument, the
+        // text would be quoted for CommandLineToArgvW and every `"` would
+        // become `\"`, which cmd.exe does not undo. With /S it removes only
+        // the outer quotes added here and runs the rest exactly as written.
+        command.args(["/D", "/S", "/C"]).raw_arg(format!("\"{text}\""));
         command
     };
     #[cfg(not(windows))]
@@ -56,5 +60,15 @@ mod tests {
         assert!(result.status.success(), "status={} stderr={}", result.status, String::from_utf8_lossy(&result.stderr));
         assert!(String::from_utf8_lossy(&result.stdout).contains("quervio-shell"));
         assert!(!super::local_shell("exit 7").status().await.unwrap().success());
+    }
+
+    #[tokio::test]
+    async fn local_shell_runs_quotes_as_written() {
+        // The previewed SQLCMD `!!` text is what runs: quotes stay quotes.
+        let result = super::local_shell(r#"echo "quervio shell""#).output().await.unwrap();
+        assert!(result.status.success());
+        let text = String::from_utf8_lossy(&result.stdout);
+        assert!(!text.contains('\\'), "{text}");
+        assert!(text.contains("quervio shell"), "{text}");
     }
 }
