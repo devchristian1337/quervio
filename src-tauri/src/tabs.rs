@@ -63,7 +63,14 @@ impl TabSnapshots {
                 // backup with the damaged primary after a recovery.
                 atomic_write(&self.backup, previous.as_bytes())?;
             }
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            // A primary that is not UTF-8 is damaged like invalid JSON: replace
+            // it, keeping the backup, instead of failing every later save.
+            Err(error)
+                if !matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidData
+                ) =>
+            {
                 return Err(error.to_string());
             }
             _ => {
@@ -168,6 +175,21 @@ mod tests {
         store.save(&snapshot("SELECT 3;")).unwrap();
         assert_eq!(fs::read_to_string(&store.backup).unwrap(), first);
         assert!(!store.load().unwrap().recovered);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_primary_that_is_not_utf8_is_replaced_by_the_next_save() {
+        let (dir, store) = setup();
+        let first = snapshot("SELECT 1;");
+        store.save(&first).unwrap();
+        store.save(&snapshot("SELECT 2;")).unwrap();
+        fs::write(&store.path, [0xff, 0xfe, 0x00, 0x7b]).unwrap();
+        assert!(store.load().unwrap().recovered);
+        let next = snapshot("SELECT 3;");
+        store.save(&next).unwrap();
+        assert_eq!(fs::read_to_string(&store.path).unwrap(), next);
+        assert_eq!(fs::read_to_string(&store.backup).unwrap(), first);
         fs::remove_dir_all(dir).unwrap();
     }
 
