@@ -473,6 +473,11 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   const drawHeader = useCallback<DrawHeaderCallback>(
     (args, drawContent) => {
       const { ctx, rect, column, columnIndex, isHovered, isSelected, theme: headerTheme } = args;
+      // Glide also calls this for the row-number corner (index -1), whose title is empty.
+      if (columnIndex < 0) {
+        drawContent();
+        return;
+      }
       // A number column's title ends where its right-aligned figures end, so
       // its sort arrow takes the left edge instead.
       const numeric = set.kinds[columnIndex] === "number";
