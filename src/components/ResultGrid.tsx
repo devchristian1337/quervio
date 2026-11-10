@@ -34,7 +34,7 @@ import {
 import { ValueViewer } from "@/components/ValueViewer";
 import { api, errorMessage, type CopyFormat, type SortDirection } from "@/lib/api";
 import { mix, withAlpha } from "@/lib/color";
-import { CellKind, decodeWindow, firstBlock, forgetFirstBlock, ROW_BLOCK as BLOCK, type Cell } from "@/lib/results";
+import { CellKind, decodeWindow, firstBlock, forgetFirstBlock, rememberSort, ROW_BLOCK as BLOCK, sortOf, type Cell } from "@/lib/results";
 import {
   displayCellText,
   fitText,
@@ -269,7 +269,12 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   const [widths, setWidths] = useState<Record<number, number>>({});
   const [measuredWidths, setMeasuredWidths] = useState<number[]>([]);
   const [viewer, setViewer] = useState<{ row: number; column: number } | null>(null);
-  const [sort, setSort] = useState<Sort>(null);
+  // A grid mounted again shows the sort its rows still have in Rust.
+  const [sort, setShownSort] = useState<Sort>(() => sortOf(tabId, runId, set.index));
+  const setSort = useCallback((next: Sort) => {
+    rememberSort(tabId, runId, set.index, next);
+    setShownSort(next);
+  }, [tabId, runId, set.index]);
   // Bumped after a sort so every cell is read again in the new order.
   const [order, setOrder] = useState(0);
 
@@ -310,17 +315,18 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   );
 
   // A new Execution's rows, widths and sort replace the last run's before the
-  // frame is drawn: the grid stays, so nothing blinks out in between.
-  const shownRun = useRef(runId);
+  // frame is drawn: the grid stays, so nothing blinks out in between. The
+  // run counts per tab, so the tab is part of what is shown, too.
+  const shownRun = useRef(`${tabId}\u0000${runId}`);
   useLayoutEffect(() => {
-    if (shownRun.current === runId) return;
-    shownRun.current = runId;
+    if (shownRun.current === `${tabId}\u0000${runId}`) return;
+    shownRun.current = `${tabId}\u0000${runId}`;
     blocks.current = startingBlocks(tabId, runId, set.index);
     pending.current = new Set();
     setSelection(emptySelection);
     setWidths({});
     setViewer(null);
-    setSort(null);
+    setShownSort(sortOf(tabId, runId, set.index));
     setOrder((value) => value + 1);
     setMeasuredWidths(minimumColumnWidths(set.columns, set.kinds, [...blocks.current.values()].flat(), base.cellHorizontalPadding!, measure));
     gridRef.current?.scrollTo(0, 0, "both", 0, 0, { hAlign: "start", vAlign: "start" });

@@ -60,4 +60,20 @@ export function forgetFirstBlock(tabId: string, index: number) {
 
 export function forgetFirstBlocks(tabId: string) {
   for (const k of firstBlocks.keys()) if (k.startsWith(`${tabId}\u0000`)) firstBlocks.delete(k);
+  for (const k of sorts.keys()) if (k.startsWith(`${tabId}\u0000`)) sorts.delete(k);
+}
+
+// The sort the Session applied to a Result Set of one run. The grid can be
+// mounted again (another tab, the Messages view); its rows stay sorted in
+// Rust, so the header must keep showing that sort.
+export type ResultSort = { column: number; direction: "ascending" | "descending" } | null;
+const sorts = new Map<string, { run: number; sort: ResultSort }>();
+
+export function rememberSort(tabId: string, run: number, index: number, sort: ResultSort) {
+  sorts.set(key(tabId, index), { run, sort });
+}
+
+export function sortOf(tabId: string, run: number, index: number): ResultSort {
+  const entry = sorts.get(key(tabId, index));
+  return entry?.run === run ? entry.sort : null;
 }

@@ -594,10 +594,11 @@ function Results({ tab }: { tab: QueryTab }) {
       {tab.resultSets.map((set, i) => {
         const fill = big === 1 && heights[i] > BIG_SET_HEIGHT;
         return (
-          // Keyed by index, not run: a new Execution reuses the grid (see ResultGrid).
-          // The same element for one set or many, so a second set arriving keeps the first grid.
+          // Keyed by tab and index, not run: a new Execution reuses the grid (see
+          // ResultGrid), another tab gets its own. The same element for one set
+          // or many, so a second set arriving keeps the first grid.
           <NearViewport
-            key={set.index}
+            key={`${tab.id}:${set.index}`}
             root={scroller}
             className={single ? "min-h-44 flex-1" : fill ? "flex-1" : "shrink-0"}
             style={single ? undefined : fill ? { minHeight: BIG_SET_HEIGHT } : { height: Math.min(heights[i], BIG_SET_HEIGHT) }}
