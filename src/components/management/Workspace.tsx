@@ -263,7 +263,14 @@ const ToolFrame = memo(function ToolFrame({ tab, active = true }: { tab: ToolTab
     database: database || capabilities?.database || null,
     active,
   };
-  const current: ToolTab = { ...tab, ...context };
+  // An object id names an object only in the database it was opened from:
+  // elsewhere the tool works on no object rather than on whatever has that id.
+  const objectScope = connectionId === tab.connectionId && database === (tab.database ?? "");
+  const current: ToolTab = objectScope
+    ? { ...tab, ...context }
+    : { ...tab, ...context, objectId: undefined, schema: undefined, name: undefined };
+  // Designers read their object once: mount them again when it comes or goes.
+  const objectKey = tab.objectId ? String(objectScope) : undefined;
   const feature =
     tab.kind === "activity"
       ? "monitor"
@@ -292,13 +299,13 @@ const ToolFrame = memo(function ToolFrame({ tab, active = true }: { tab: ToolTab
       case "events":
         return <Diagnostics.events context={context} azure={azure} />;
       case "table":
-        return <Table tab={current} />;
+        return <Table key={objectKey} tab={current} />;
       case "view":
-        return <View tab={current} />;
+        return <View key={objectKey} tab={current} />;
       case "diagram":
         return <Diagram context={context} />;
       case "properties":
-        return <Properties tab={current} />;
+        return <Properties key={objectKey} tab={current} />;
       case "backup":
         return <Backup context={context} azure={azure} />;
       case "agent":
@@ -328,8 +335,8 @@ const ToolFrame = memo(function ToolFrame({ tab, active = true }: { tab: ToolTab
         {/* Takes the row beside the selects, and wraps above them only below 15rem. */}
         <div className="min-w-60 flex-1">
           <h1 className="text-lg font-semibold wrap-anywhere">
-            {tab.name
-              ? `${TOOL_NAMES[tab.kind]} · ${tab.schema ?? "dbo"}.${tab.name}`
+            {current.name
+              ? `${TOOL_NAMES[tab.kind]} · ${current.schema ?? "dbo"}.${current.name}`
               : TOOL_NAMES[tab.kind]}
           </h1>
           {capabilities && (
