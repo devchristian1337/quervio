@@ -16,7 +16,7 @@ stessi; non usiamo Wine e non cambiamo le Sessioni dedicate delle Schede query.
   un desktop grafico e un'architettura corrispondente. Nessun formato garantisce
   il funzionamento su qualsiasi distribuzione, kernel o hardware mai esistito.
 - Windows mantiene DPAPI e il formato di `secrets.json` dell'ADR 0003. Linux
-  usa Secret Service tramite il crate `keyring` 3.6.3, con cifratura sul bus.
+  usa Secret Service tramite il crate `keyring` 4.2.0 (backend zbus), con cifratura sul bus.
   Serve un provider sbloccato nella sessione desktop, come GNOME Keyring o
   KWallet con Secret Service abilitato. Non esiste un ripiego su file in chiaro.
   Le voci sono separate per cartella dati e id della Connessione salvata.
@@ -58,7 +58,7 @@ stessi; non usiamo Wine e non cambiamo le Sessioni dedicate delle Schede query.
 
 - [Tauri: limiti delle AppImage](https://v2.tauri.app/distribute/appimage/)
 - [Tauri: Flatpak](https://v2.tauri.app/distribute/flatpak/)
-- [Keyring 3.6.3: backend Secret Service](https://docs.rs/keyring/3.6.3/keyring/)
+- [Keyring 4.2.0: backend Secret Service](https://docs.rs/keyring/4.2.0/keyring/)
 - [.NET: provider nativi per ETW/LTTng](https://github.com/dotnet/designs/blob/main/accepted/2020/single-file/design.md)
 
 Per build, distribuzione e verifiche effettivamente eseguite vedere
