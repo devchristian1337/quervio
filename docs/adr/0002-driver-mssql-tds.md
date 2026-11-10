@@ -18,3 +18,4 @@ Il backend parla con SQL Server tramite `mssql-tds` (github.com/microsoft/mssql-
   - `money` e `decimal(38)` arrivano esatti.
   - `USE` aggiorna il database corrente.
 - Restano da verificare su un server reale: l'autenticazione Windows (SSPI) e le istanze con nome tramite SQL Browser.
+- Il 2026-11-10 il driver è passato a `mssql-tds` 0.4.0. Le feature predefinite su Windows e Linux non cambiano; la 0.4.0 aggiunge solo un motore TLS per macOS. Con `scripts/test-sql-compatibility.mjs` passano i test di integrazione di `quervio-core` su SQL Server 2019, 2022 e 2025 in Docker (Linux). Non sono stati provati con questa versione la build Windows, l'autenticazione SSPI e le istanze con nome.
