@@ -298,7 +298,16 @@ fn scan(tokens: &[Token], line_offset: u32, findings: &mut Vec<Finding>) {
             if next_word(2) == Some("IF") && next_word(3) == Some("EXISTS") {
                 at += 2;
             }
-            report(DestructiveKind::Drop, name_after(tokens, at));
+            // `DROP TABLE #a, dbo.b` drops every listed object: a temp table
+            // first in the list must not hide the ones after it.
+            loop {
+                let (target, end) = name_span(tokens, at);
+                report(DestructiveKind::Drop, target);
+                if !tokens.get(end).is_some_and(|t| t.is_symbol(',')) {
+                    break;
+                }
+                at = end + 1;
+            }
         } else if token.is_word("ALTER") && next_word(1) == Some("TABLE") {
             report(DestructiveKind::AlterTable, name_after(tokens, i + 2));
             // Its DROP COLUMN / DROP CONSTRAINT is part of this finding.
@@ -338,7 +347,12 @@ fn skip_top(tokens: &[Token], mut at: usize) -> usize {
 
 /// The (possibly qualified) name starting at `at`; `None` for temp tables
 /// and table variables, which are private to the Session.
-fn name_after(tokens: &[Token], mut at: usize) -> Option<String> {
+fn name_after(tokens: &[Token], at: usize) -> Option<String> {
+    name_span(tokens, at).0
+}
+
+/// Like [`name_after`], with the index just past the name.
+fn name_span(tokens: &[Token], mut at: usize) -> (Option<String>, usize) {
     let mut parts = Vec::new();
     loop {
         match tokens.get(at) {
@@ -360,12 +374,14 @@ fn name_after(tokens: &[Token], mut at: usize) -> Option<String> {
         parts.push(String::new());
     }
     let parts: Vec<_> = parts.into_iter().filter(|p| !p.is_empty()).collect();
-    let last = parts.last()?;
+    let Some(last) = parts.last() else {
+        return (None, at);
+    };
     let bare = last.trim_start_matches(['[', '"']);
     if bare.starts_with('#') || bare.starts_with('@') {
-        return None;
+        return (None, at);
     }
-    Some(parts.join("."))
+    (Some(parts.join(".")), at)
 }
 
 /// Whether the statement starting at `from` has a top-level WHERE before it
@@ -389,6 +405,8 @@ fn has_where(tokens: &[Token], from: usize, belongs: &[&str]) -> bool {
 /// ALTER TABLE).
 fn statement_end(tokens: &[Token], from: usize, belongs: &[&str]) -> usize {
     let mut depth = 0;
+    // ELSE and END of a CASE expression belong to the statement around it.
+    let mut cases = 0;
     for (offset, token) in tokens[from..].iter().enumerate() {
         let at = from + offset;
         if token.is_symbol('(') {
@@ -401,6 +419,16 @@ fn statement_end(tokens: &[Token], from: usize, belongs: &[&str]) -> usize {
         }
         if token.is_symbol(';') {
             return at;
+        }
+        if token.is_word("CASE") {
+            cases += 1;
+            continue;
+        }
+        if cases > 0 {
+            if token.is_word("END") {
+                cases -= 1;
+            }
+            continue;
         }
         if let Kind::Word(word) = &token.kind {
             let starts =
@@ -661,6 +689,38 @@ mod tests {
         assert_eq!(
             kinds("ALTER TABLE #t DROP COLUMN x\nSET NOCOUNT ON\nDELETE FROM dbo.Log").len(),
             1
+        );
+    }
+
+    #[test]
+    fn every_object_of_a_drop_list_is_found() {
+        assert_eq!(
+            kinds("DROP TABLE #a, dbo.Orders"),
+            [(Drop, "dbo.Orders".into(), 1)]
+        );
+        assert_eq!(
+            kinds("DROP TABLE IF EXISTS #tmp, dbo.Customers, [Sales].[Old]"),
+            [
+                (Drop, "dbo.Customers".into(), 1),
+                (Drop, "[Sales].[Old]".into(), 1)
+            ]
+        );
+        assert!(kinds("DROP TABLE #a, #b").is_empty());
+    }
+
+    #[test]
+    fn case_expressions_do_not_end_the_statement() {
+        assert!(
+            kinds("UPDATE dbo.Orders SET s = CASE WHEN x = 1 THEN 2 ELSE 3 END WHERE Id = 5")
+                .is_empty()
+        );
+        assert!(
+            kinds("UPDATE t SET s = CASE WHEN a = 1 THEN CASE WHEN b = 1 THEN 1 ELSE 2 END ELSE 3 END WHERE id = 1")
+                .is_empty()
+        );
+        assert_eq!(
+            kinds("UPDATE dbo.Orders SET s = CASE WHEN x = 1 THEN 2 ELSE 3 END\nSELECT * FROM t WHERE 1 = 1"),
+            [(UpdateWithoutWhere, "dbo.Orders".into(), 1)]
         );
     }
 
