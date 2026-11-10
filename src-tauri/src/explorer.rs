@@ -25,6 +25,9 @@ pub struct ExplorerState {
     connections: Mutex<ConnectionStore>,
     secrets: Box<dyn SecretStore>,
     sessions: tokio::sync::Mutex<HashMap<String, SharedSession>>,
+    /// Bumped when a Saved Connection is saved or deleted, so a Session opened
+    /// with its previous settings is not kept.
+    revisions: Mutex<HashMap<String, u64>>,
     /// Snapshot of the open Query Tabs, restored on the next start.
     tabs: Mutex<crate::tabs::TabSnapshots>,
 }
@@ -45,6 +48,11 @@ impl ExplorerState {
                     // The saved name describes the saved server: without it,
                     // the tab and the Production guard name the real target.
                     c.name.clear();
+                    // TLS trust was chosen for the saved server too: an unsaved
+                    // target gets the defaults of a new Saved Connection.
+                    c.encrypt = quervio_core::connection::Encrypt::Mandatory;
+                    c.trust_server_certificate = false;
+                    c.group = None;
                     // The saved password belongs to the saved server. Without
                     // the id, a later reconnect of the tab (an Azure database
                     // switch) cannot send it to the server the script named.
@@ -62,6 +70,7 @@ impl ExplorerState {
             connections: Mutex::new(ConnectionStore::open(data_dir.join("connections.json"))?),
             secrets: platform_store(data_dir),
             sessions: tokio::sync::Mutex::new(HashMap::new()),
+            revisions: Mutex::new(HashMap::new()),
             tabs: Mutex::new(crate::tabs::TabSnapshots::new(data_dir)),
         })
     }
@@ -122,7 +131,12 @@ impl ExplorerState {
         self.connect(id).await.map(|(session, _)| session)
     }
 
+    fn revision(&self, id: &str) -> u64 {
+        self.revisions.lock().unwrap().get(id).copied().unwrap_or(0)
+    }
+
     async fn connect(&self, id: &str) -> CommandResult<(SharedSession, ServerInfo)> {
+        let revision = self.revision(id);
         let connection = self.connection(id)?;
         let password = self.credential(&connection, None).await?;
         let mut session = Session::open(&connection, password, APPLICATION_NAME)
@@ -130,17 +144,25 @@ impl ExplorerState {
             .map_err(message)?;
         let info = session.server_info().await.map_err(message)?;
         let session = Arc::new(tokio::sync::Mutex::new(session));
-        let previous = self
-            .sessions
-            .lock()
-            .await
-            .insert(id.to_string(), Arc::clone(&session));
+        let mut sessions = self.sessions.lock().await;
+        // Saved, deleted or disconnected while logging in: never keep a
+        // Session made with settings that no longer apply.
+        if self.revision(id) != revision {
+            drop(sessions);
+            close(Some(session)).await;
+            return Err("The connection changed while connecting. Connect again.".into());
+        }
+        let previous = sessions.insert(id.to_string(), Arc::clone(&session));
+        drop(sessions);
         close(previous).await;
         Ok((session, info))
     }
 
     async fn disconnect(&self, id: &str) {
-        let session = self.sessions.lock().await.remove(id);
+        let mut sessions = self.sessions.lock().await;
+        *self.revisions.lock().unwrap().entry(id.to_string()).or_default() += 1;
+        let session = sessions.remove(id);
+        drop(sessions);
         close(session).await;
     }
 }
@@ -491,8 +513,8 @@ mod tests {
                 },
                 default_database: Some("H2O".into()),
                 environment: Environment::Test,
-                encrypt: Encrypt::Mandatory,
-                trust_server_certificate: false,
+                encrypt: Encrypt::Optional,
+                trust_server_certificate: true,
             })
             .unwrap();
 
@@ -501,6 +523,8 @@ mod tests {
         assert!(other.id.is_empty());
         assert_eq!(other.environment, Environment::Production);
         assert!(other.name.is_empty());
+        assert_eq!(other.encrypt, Encrypt::Mandatory);
+        assert!(!other.trust_server_certificate);
         assert_eq!(state.password(&other.id, None).unwrap(), None);
 
         let _ = std::fs::remove_dir_all(dir);
