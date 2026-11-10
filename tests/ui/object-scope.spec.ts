@@ -62,3 +62,35 @@ test("an object tool forgets its object when another database is chosen", async 
   await page.getByRole("option", { name: "master", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Object Properties · dbo.Customer" })).toBeVisible();
 });
+
+test("rows of another scope are not shown or acted on after a failed read", async ({ page }) => {
+  await page.goto("/?mock");
+  await expect(page.getByRole("button", { name: "Tools", exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const w = window as unknown as IpcWindow;
+    const invoke = w.__TAURI_INTERNALS__.invoke;
+    w.__TAURI_INTERNALS__.invoke = (command, args) => {
+      const resource = args.resource as { kind?: string; server?: boolean } | undefined;
+      if (command === "management_read" && resource?.kind === "principals" && resource.server) {
+        return Promise.reject("The SELECT permission was denied (mock).");
+      }
+      return invoke(command, args);
+    };
+  });
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Security / Audit", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "SQL_USER" })).toBeVisible();
+  await page.getByRole("cell", { name: "dbo", exact: true }).click();
+
+  await page.getByRole("combobox", { name: "Scope", exact: true }).click();
+  await page.getByRole("option", { name: "Server", exact: true }).click();
+  await expect(page.getByText("permission was denied", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
+  // Checked once the failed read has settled, not retried until a redraw.
+  expect(await page.getByRole("cell", { name: "SQL_USER" }).count()).toBe(0);
+  expect(await page.getByRole("cell", { name: "dbo", exact: true }).count()).toBe(0);
+  // The database user picked before is not carried over as a login name.
+  await page.getByRole("combobox", { name: "Operation", exact: true }).click();
+  await page.getByRole("option", { name: "delete", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Preview security changes", exact: true })).toHaveCount(0);
+});

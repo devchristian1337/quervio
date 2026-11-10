@@ -473,15 +473,21 @@ export function useRead(
   resource: Resource | null,
   refreshSeconds = 0,
 ) {
-  const [data, setData] = useState<DataTable | null>(null),
-    [error, setError] = useState<string | null>(null),
-    [loading, setLoading] = useState(false),
-    [updated, setUpdated] = useState<Date | null>(null),
-    [revision, revise] = useState(0);
   const resourceKey = JSON.stringify(resource);
+  // What the data was read from. Rows of another server, database or resource
+  // are never returned, not even while the new read is pending or failed:
+  // an action on them would name objects that are not there.
+  const scope = `${context.connectionId}\u0000${context.database ?? ""}\u0000${resourceKey}`;
+  const [read, setRead] = useState<{ scope: string; table: DataTable; updated: Date } | null>(null),
+    [failure, setFailure] = useState<{ scope: string; message: string } | null>(null),
+    [loading, setLoading] = useState(false),
+    [revision, revise] = useState(0);
+  const data = read?.scope === scope ? read.table : null;
+  const updated = read?.scope === scope ? read.updated : null;
+  const error = failure?.scope === scope ? failure.message : null;
   useEffect(() => {
     if (!resource) {
-      setData(null);
+      setRead(null);
       return;
     }
     if (context.active === false) return;
@@ -494,12 +500,11 @@ export function useRead(
       try {
         const table = await management.read(context, JSON.parse(resourceKey));
         if (!disposed) {
-          setData(table);
-          setError(null);
-          setUpdated(new Date());
+          setRead({ scope, table, updated: new Date() });
+          setFailure(null);
         }
       } catch (e) {
-        if (!disposed) setError(errorMessage(e));
+        if (!disposed) setFailure({ scope, message: errorMessage(e) });
       } finally {
         busy = false;
         if (!disposed) setLoading(false);

@@ -128,6 +128,10 @@ export function Security({ context }: { context: Context }) {
                 : "DATABASE_OBJECT_ACCESS_GROUP",
             );
             setOperation("create");
+            // A user picked in the database is not a login of the server.
+            setName("");
+            setRole("");
+            setMember("");
           }}
           options={[
             ["database", "Current database"],
