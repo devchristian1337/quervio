@@ -8,7 +8,16 @@ export type SortDirection = "ascending" | "descending";
 
 export type SqlcmdPreview =
   | { kind: "fileAccessRequired" }
-  | { kind: "ready"; token: string; script: string; hasLocalCommands: boolean };
+  | {
+      kind: "ready";
+      token: string;
+      script: string;
+      hasLocalCommands: boolean;
+      /** Destructive Statements of the expanded script, at editor lines. */
+      destructive: ScriptCheck;
+      /** True on Production, or when the script uses :connect. */
+      needsConfirmation: boolean;
+    };
 
 /** Mirrors ExecuteOptions in src-tauri/src/query.rs. */
 export interface ExecuteOptions {
@@ -131,7 +140,8 @@ export const api = {
     onEvent: Channel<ExecutionEvent>,
   ) => invoke<Outcome>("query_execute", { tabId, script, baseLine, options, allowDestructive, onEvent }),
   sqlcmdPrepare: (tabId: string, script: string, filePath: string | null, baseLine: number, allowFileReads = false) => invoke<SqlcmdPreview>("query_sqlcmd_prepare", {tabId, script, filePath, baseLine, allowFileReads}),
-  sqlcmdExecute: (tabId: string, token: string, options: ExecuteOptions, onEvent: Channel<ExecutionEvent>) => invoke<Outcome>("query_sqlcmd_execute", {tabId, token, confirmed: true, options, onEvent}),
+  sqlcmdExecute: (tabId: string, token: string, allowDestructive: boolean, options: ExecuteOptions, onEvent: Channel<ExecutionEvent>) => invoke<Outcome>("query_sqlcmd_execute", {tabId, token, confirmed: true, allowDestructive, options, onEvent}),
+  sqlcmdDiscard: (tabId: string, token: string) => invoke<void>("query_sqlcmd_discard", {tabId, token}),
   cancelQuery: (tabId: string) => invoke<void>("query_cancel", { tabId }),
 
   resultRows: (tabId: string, set: number, start: number, count: number) =>

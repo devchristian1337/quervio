@@ -160,6 +160,9 @@ or database. Query tabs keep their dedicated Rust sessions.
   any path is resolved or opened, including network paths, mapped drives, links
   and nested includes. The final review includes local commands, output paths
   and server switches. Local commands require that explicit confirmation.
+  Destructive Statements of the expanded script need the same confirmation as
+  in a normal query on Production, and after any `:connect`, which may reach
+  another server. A declined review discards its preview.
 - Administrative SQL previews are tied to the opened destination session, expire
   after five minutes and can be used once. Microsoft operations also validate the
   destination and approved arguments. Long operations can be cancelled.

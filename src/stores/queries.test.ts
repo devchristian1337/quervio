@@ -17,6 +17,7 @@ vi.mock("@/lib/api", async (original) => ({
     executeQuery: vi.fn(async () => "succeeded"),
     sqlcmdPrepare: vi.fn<(...args: Parameters<typeof import("@/lib/api").api.sqlcmdPrepare>) => Promise<SqlcmdPreview>>(),
     sqlcmdExecute: vi.fn(async () => "succeeded"),
+    sqlcmdDiscard: vi.fn(async () => {}),
     resultRows: vi.fn(async () => window1x1("a")),
   },
 }));
@@ -127,7 +128,10 @@ describe("closing a Query Tab while its Session opens", () => {
 describe("SQLCMD include consent", () => {
   const ask = vi.fn(async () => false);
   const input = { text: ':r "include.sql"', baseLine: 0 };
-  const preview: SqlcmdPreview = { kind: "ready", token: "approved-script", script: "SELECT 1;", hasLocalCommands: false };
+  const preview = {
+    kind: "ready", token: "approved-script", script: "SELECT 1;", hasLocalCommands: false,
+    destructive: { findings: [], uncertain: false }, needsConfirmation: false,
+  } as const satisfies SqlcmdPreview;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -167,7 +171,7 @@ describe("SQLCMD include consent", () => {
     vi.mocked(api.sqlcmdPrepare).mockResolvedValueOnce({ kind: "fileAccessRequired" }).mockResolvedValueOnce(preview);
     ask.mockResolvedValue(true);
     await useQueries.getState().execute(id, input);
-    expect(api.sqlcmdExecute).toHaveBeenCalledWith(id, preview.token, expect.anything(), expect.anything());
+    expect(api.sqlcmdExecute).toHaveBeenCalledWith(id, preview.token, false, expect.anything(), expect.anything());
     expect(api.executeQuery).not.toHaveBeenCalled();
   });
 
@@ -177,6 +181,31 @@ describe("SQLCMD include consent", () => {
     await useQueries.getState().execute(id, { text: "SELECT 1;", baseLine: 0 });
     expect(ask).toHaveBeenCalledExactlyOnceWith(preview.script, false);
     expect(api.sqlcmdPrepare).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards a preview the user declines, so it does not stay pending", async () => {
+    const id = await sqlcmdTab();
+    vi.mocked(api.sqlcmdPrepare).mockResolvedValueOnce(preview);
+    await useQueries.getState().execute(id, { text: "SELECT 1;", baseLine: 0 });
+    expect(api.sqlcmdDiscard).toHaveBeenCalledExactlyOnceWith(id, preview.token);
+    expect(api.sqlcmdExecute).not.toHaveBeenCalled();
+  });
+
+  it("asks about Destructive Statements of the expanded script and tells the Session", async () => {
+    const id = await sqlcmdTab();
+    const destructive = { findings: [{ kind: "drop" as const, target: "dbo.t", line: 3 }], uncertain: false };
+    useDialogs.setState({ confirmDestructive });
+    vi.mocked(api.sqlcmdPrepare).mockResolvedValue({ ...preview, destructive, needsConfirmation: true });
+    ask.mockResolvedValue(true);
+
+    await useQueries.getState().execute(id, { text: "DROP TABLE dbo.t", baseLine: 0 });
+    expect(confirmDestructive).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ check: destructive }));
+    expect(api.sqlcmdExecute).not.toHaveBeenCalled();
+    expect(api.sqlcmdDiscard).toHaveBeenCalledExactlyOnceWith(id, preview.token);
+
+    confirmDestructive.mockResolvedValueOnce(true);
+    await useQueries.getState().execute(id, { text: "DROP TABLE dbo.t", baseLine: 0 });
+    expect(api.sqlcmdExecute).toHaveBeenCalledWith(id, preview.token, true, expect.anything(), expect.anything());
   });
 });
 
@@ -208,6 +237,20 @@ describe("the Production guard of a Query Tab", () => {
     useConnections.setState({ connections: [production] });
     await useQueries.getState().execute(id, drop);
     expect(confirmDestructive).toHaveBeenCalledOnce();
+  });
+
+  it("starts one Execution when Execute is pressed twice during the check", async () => {
+    const id = await openTab(production);
+    let finishCheck!: () => void;
+    vi.mocked(api.checkScript).mockImplementationOnce(() => new Promise((resolve) => {
+      finishCheck = () => resolve({ findings: [], uncertain: false });
+    }));
+    const first = useQueries.getState().execute(id, { text: "SELECT 1", baseLine: 0 });
+    const second = useQueries.getState().execute(id, { text: "SELECT 1", baseLine: 0 });
+    finishCheck();
+    await Promise.all([first, second]);
+    expect(api.checkScript).toHaveBeenCalledOnce();
+    expect(api.executeQuery).toHaveBeenCalledOnce();
   });
 
   it("tells the Session whether the user confirmed", async () => {

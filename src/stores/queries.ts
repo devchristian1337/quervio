@@ -3,7 +3,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { create } from "zustand";
 import { toast } from "@/components/ui/basic-toast";
-import { api, displayName, errorMessage, type Environment, type SavedConnection, type ServerInfo } from "@/lib/api";
+import { api, displayName, errorMessage, type Environment, type SavedConnection, type ScriptCheck, type ServerInfo } from "@/lib/api";
 import { useConnections } from "@/stores/connections";
 import { useDialogs } from "@/stores/dialogs";
 import { executeOptions, useSettings } from "@/stores/settings";
@@ -173,6 +173,71 @@ async function readFirstBlocks(id: string, sets: ResultSetSummary[]) {
   );
 }
 
+/** Tabs whose Execute is past its "ready" check and still being prepared. */
+const starting = new Set<string>();
+
+type Prepared = { allowDestructive: boolean; sqlcmdToken: string | null };
+
+/**
+ * The approvals an Execution needs before it runs: the expanded SQLCMD
+ * script, and on Production its Destructive Statements. Null when the user
+ * declines or preparing fails. Without anything to ask it answers at once,
+ * so a plain Execution shows itself running in the same tick.
+ */
+function prepareExecution(tab: QueryTab, script: { text: string; baseLine: number }): Prepared | null | Promise<Prepared | null> {
+  // On Production, Destructive Statements need an explicit go-ahead.
+  // The Session checks it again on its own side unless allowed here.
+  const confirm = useSettings.getState().settings.query.confirmDestructive;
+  if (tab.sqlcmdMode) return prepareSqlcmd(tab, script, confirm);
+  if (tab.planMode !== "estimated" && confirm && tabEnvironment(tab, useConnections.getState().connections) === "production") {
+    return confirmProduction(tab, script);
+  }
+  return { allowDestructive: !confirm, sqlcmdToken: null };
+}
+
+function confirmDestructive(tab: QueryTab, check: ScriptCheck) {
+  return useDialogs.getState().confirmDestructive({
+    tabTitle: tab.title,
+    connectionName: tab.connectionName || tab.server?.serverName || tab.title,
+    check,
+  });
+}
+
+async function confirmProduction(tab: QueryTab, script: { text: string; baseLine: number }): Promise<Prepared | null> {
+  const check = await api.checkScript(script.text, script.baseLine);
+  if (check.findings.length === 0 && !check.uncertain) return { allowDestructive: false, sqlcmdToken: null };
+  return await confirmDestructive(tab, check) ? { allowDestructive: true, sqlcmdToken: null } : null;
+}
+
+/** Reviews the expanded script; a preview left unused is discarded at once. */
+async function prepareSqlcmd(tab: QueryTab, script: { text: string; baseLine: number }, confirm: boolean): Promise<Prepared | null> {
+  const id = tab.id;
+  let token: string | null = null;
+  const discard = () => {
+    if (token) void api.sqlcmdDiscard(id, token).catch(() => {});
+    return null;
+  };
+  try {
+    let preview = await api.sqlcmdPrepare(id, script.text, tab.filePath, script.baseLine);
+    if (preview.kind === "fileAccessRequired") {
+      if (!await useSqlcmdConfirmation.getState().ask(script.text, false, "fileAccess")) return null;
+      preview = await api.sqlcmdPrepare(id, script.text, tab.filePath, script.baseLine, true);
+    }
+    if (preview.kind !== "ready") throw new Error("SQLCMD file access was not authorized.");
+    token = preview.token;
+    if (!await useSqlcmdConfirmation.getState().ask(preview.script, preview.hasLocalCommands)) return discard();
+    // Production, or a :connect that may reach any server.
+    if (confirm && preview.needsConfirmation) {
+      return await confirmDestructive(tab, preview.destructive) ? { allowDestructive: true, sqlcmdToken: token } : discard();
+    }
+    return { allowDestructive: !confirm, sqlcmdToken: token };
+  } catch (error) {
+    discard();
+    toast.error("SQLCMD preparation failed", { description: errorMessage(error) });
+    return null;
+  }
+}
+
 export const useQueries = create<QueriesState>((set, get) => {
   const patch = (id: string, change: Partial<QueryTab> | ((tab: QueryTab) => Partial<QueryTab>)) =>
     set((s) => ({
@@ -275,37 +340,21 @@ export const useQueries = create<QueriesState>((set, get) => {
     execute: async (id, script) => {
       const tab = get().tabs.find((t) => t.id === id);
       if (!tab || tab.status !== "ready" || script.text.trim() === "") return;
-
-      // On Production, Destructive Statements need an explicit go-ahead.
-      // The Session checks it again on its own side unless allowed here.
-      const connections = useConnections.getState().connections;
-      const confirm = useSettings.getState().settings.query.confirmDestructive;
-      let allowDestructive = !confirm;
-      let sqlcmdToken: string | null = null;
-      if (tab.sqlcmdMode) {
-        try {
-          let preview = await api.sqlcmdPrepare(id, script.text, tab.filePath, script.baseLine);
-          if (preview.kind === "fileAccessRequired") {
-            if (!await useSqlcmdConfirmation.getState().ask(script.text, false, "fileAccess")) return;
-            preview = await api.sqlcmdPrepare(id, script.text, tab.filePath, script.baseLine, true);
-          }
-          if (preview.kind !== "ready") throw new Error("SQLCMD file access was not authorized.");
-          if (!await useSqlcmdConfirmation.getState().ask(preview.script, preview.hasLocalCommands)) return;
-          sqlcmdToken = preview.token;
-        } catch (error) {toast.error("SQLCMD preparation failed", {description: errorMessage(error)});return;}
+      // The checks below await the backend and dialogs while the tab is still
+      // "ready": a second Execute meanwhile must not start another run.
+      if (starting.has(id)) return;
+      starting.add(id);
+      let prepared: Prepared | null;
+      try {
+        const pending = prepareExecution(tab, script);
+        prepared = pending instanceof Promise ? await pending : pending;
+        // Executing from here on, before another Execute can see "ready".
+        if (prepared) patch(id, { status: "executing", longRunning: false, error: null });
+      } finally {
+        starting.delete(id);
       }
-      if (!tab.sqlcmdMode && tab.planMode !== "estimated" && confirm && tabEnvironment(tab, connections) === "production") {
-        const check = await api.checkScript(script.text, script.baseLine);
-        if (check.findings.length > 0 || check.uncertain) {
-          const run = await useDialogs.getState().confirmDestructive({
-            tabTitle: tab.title,
-            connectionName: tab.connectionName || tab.server?.serverName || tab.title,
-            check,
-          });
-          if (!run) return;
-          allowDestructive = true;
-        }
-      }
+      if (!prepared) return;
+      const { allowDestructive, sqlcmdToken } = prepared;
       // A quick Execution replaces the last output in one step, with its
       // grids' first rows already read: nothing in between is drawn. Past
       // LONG_RUN_MS the UI shows it running and its output streams in.
@@ -325,7 +374,6 @@ export const useQueries = create<QueriesState>((set, get) => {
         // The outcome and time stay until this run's own replace them.
         patch(id, (t) => ({ ...shown, runId: t.runId + 1, startedAt }));
       };
-      patch(id, { status: "executing", longRunning: false, error: null });
       const longRun = setTimeout(() => {
         const finished = staged?.outcome != null;
         show();
@@ -433,7 +481,7 @@ export const useQueries = create<QueriesState>((set, get) => {
         }
       };
       try {
-        if (sqlcmdToken) await api.sqlcmdExecute(id, sqlcmdToken, executeOptions(), channel);
+        if (sqlcmdToken) await api.sqlcmdExecute(id, sqlcmdToken, allowDestructive, executeOptions(), channel);
         else await api.executeQuery(id, script.text, script.baseLine, { ...executeOptions(), planMode: tab.planMode ?? "none" }, allowDestructive, channel);
       } catch (error) {
         flushMessages();

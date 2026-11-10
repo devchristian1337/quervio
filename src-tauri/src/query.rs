@@ -45,7 +45,7 @@ impl SessionTarget {
 #[derive(Default)]
 pub struct QueryState {
     connections: Mutex<HashMap<String, SessionTarget>>,
-    sqlcmd: Mutex<HashMap<String, (String, std::time::Instant, quervio_core::sqlcmd::Script)>>,
+    sqlcmd: Mutex<HashMap<String, PendingSqlcmd>>,
     sessions: tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<Session>>>>,
     // The Environment each Session was opened with: the Production guard
     // follows the Server a tab is on, not what its Saved Connection says now.
@@ -193,6 +193,17 @@ pub async fn result_export_file(
     }).await.map_err(message)?
 }
 
+/// An expanded SQLCMD script waiting for its review.
+struct PendingSqlcmd {
+    tab_id: String,
+    created: std::time::Instant,
+    script: quervio_core::sqlcmd::Script,
+    /// Destructive Statements that a Production target must confirm.
+    needs_confirmation: bool,
+}
+
+const SQLCMD_PREVIEW_LIFETIME: std::time::Duration = std::time::Duration::from_secs(300);
+
 #[derive(serde::Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SqlcmdPreview {
@@ -201,7 +212,43 @@ pub enum SqlcmdPreview {
         token: String,
         script: String,
         has_local_commands: bool,
+        /// Destructive Statements in the expanded script, with editor lines.
+        destructive: quervio_core::guard::Check,
+        /// Whether they need confirmation: on Production, or after a
+        /// :connect, which may reach any server.
+        needs_confirmation: bool,
     },
+}
+
+/// Destructive Statements of every SQL step, at their editor (or :r file) lines.
+fn sqlcmd_check(script: &quervio_core::sqlcmd::Script) -> quervio_core::guard::Check {
+    let mut check = quervio_core::guard::Check::default();
+    for step in &script.steps {
+        if let quervio_core::sqlcmd::Step::Sql { sql, lines, .. } = step {
+            let found = quervio_core::guard::check(sql, 0);
+            check.uncertain |= found.uncertain;
+            check.findings.extend(found.findings.into_iter().map(|mut finding| {
+                if let Some(source) = finding.line.checked_sub(1).and_then(|l| lines.get(l as usize)) {
+                    finding.line = source.line;
+                }
+                finding
+            }));
+        }
+    }
+    check
+}
+
+fn sqlcmd_needs_confirmation(
+    environment: Option<Environment>,
+    script: &quervio_core::sqlcmd::Script,
+    check: &quervio_core::guard::Check,
+) -> bool {
+    let connects = script
+        .steps
+        .iter()
+        .any(|step| matches!(step, quervio_core::sqlcmd::Step::Connect { .. }));
+    check.needs_confirmation()
+        && (connects || !matches!(environment, Some(Environment::Test | Environment::Development)))
 }
 
 #[tauri::command]
@@ -233,18 +280,42 @@ pub async fn query_sqlcmd_prepare(
             quervio_core::sqlcmd::Step::Shell(_) | quervio_core::sqlcmd::Step::Output { .. }
         )
     });
+    let destructive = sqlcmd_check(&script);
+    let environment = state.environments.lock().unwrap().get(&tab_id).copied();
+    let needs_confirmation = sqlcmd_needs_confirmation(environment, &script, &destructive);
     let token = uuid::Uuid::new_v4().to_string();
     let mut pending = state.sqlcmd.lock().unwrap();
-    pending.retain(|_, (_, created, _)| created.elapsed() < std::time::Duration::from_secs(300));
+    pending.retain(|_, entry| entry.created.elapsed() < SQLCMD_PREVIEW_LIFETIME);
+    // A tab reviews one script at a time: a new preview replaces its last one.
+    pending.retain(|_, entry| entry.tab_id != tab_id);
     if pending.len() >= 16 {
         return Err("Too many SQLCMD previews. Wait for earlier previews to expire.".into());
     }
-    pending.insert(token.clone(), (tab_id, std::time::Instant::now(), script));
+    pending.insert(
+        token.clone(),
+        PendingSqlcmd {
+            tab_id,
+            created: std::time::Instant::now(),
+            script,
+            needs_confirmation,
+        },
+    );
     Ok(SqlcmdPreview::Ready {
         token,
         script: preview,
         has_local_commands,
+        destructive,
+        needs_confirmation,
     })
+}
+
+/// Forgets a preview the user declined, so it no longer counts as pending.
+#[tauri::command]
+pub fn query_sqlcmd_discard(state: State<'_, QueryState>, tab_id: String, token: String) {
+    let mut pending = state.sqlcmd.lock().unwrap();
+    if pending.get(&token).is_some_and(|entry| entry.tab_id == tab_id) {
+        pending.remove(&token);
+    }
 }
 
 /// The SSMS header of a message from an expanded SQLCMD step, with the line
@@ -279,6 +350,7 @@ pub async fn query_sqlcmd_execute(
     tab_id: String,
     token: String,
     confirmed: bool,
+    allow_destructive: bool,
     options: ExecuteOptions,
     on_event: Channel<ExecutionEvent>,
 ) -> CommandResult<Outcome> {
@@ -287,15 +359,19 @@ pub async fn query_sqlcmd_execute(
     if !confirmed {
         return Err("The expanded SQLCMD script was not confirmed.".into());
     }
-    let (owner, created, script) = state
+    let pending = state
         .sqlcmd
         .lock()
         .unwrap()
         .remove(&token)
         .ok_or("SQLCMD preview expired or already used.")?;
-    if owner != tab_id || created.elapsed() >= std::time::Duration::from_secs(300) {
+    if pending.tab_id != tab_id || pending.created.elapsed() >= SQLCMD_PREVIEW_LIFETIME {
         return Err("SQLCMD preview does not match this Query Tab or has expired.".into());
     }
+    if pending.needs_confirmation && !allow_destructive {
+        return Err(UNCONFIRMED.into());
+    }
+    let script = pending.script;
     let session = state.session(&tab_id).await?;
     let cancel = CancelToken::new();
     {
@@ -694,7 +770,7 @@ pub async fn query_close(state: State<'_, QueryState>, tab_id: String) -> Comman
         .sqlcmd
         .lock()
         .unwrap()
-        .retain(|_, (id, _, _)| id != &tab_id);
+        .retain(|_, entry| entry.tab_id != tab_id);
     if let Some(cancel) = state.running.lock().unwrap().remove(&tab_id) {
         cancel.cancel();
     }
@@ -1090,6 +1166,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sqlcmd_destructive_statements_are_found_at_editor_lines() {
+        let script = quervio_core::sqlcmd::prepare(
+            "SELECT 1\nGO\n:setvar T dbo.Orders\nDELETE FROM $(T)",
+            None,
+            10,
+            false,
+        )
+        .unwrap();
+        let check = sqlcmd_check(&script);
+        assert_eq!(check.findings.len(), 1);
+        assert_eq!(check.findings[0].target, "dbo.Orders");
+        assert_eq!(check.findings[0].line, 14);
+        assert!(sqlcmd_needs_confirmation(Some(Environment::Production), &script, &check));
+        assert!(sqlcmd_needs_confirmation(None, &script, &check));
+        assert!(!sqlcmd_needs_confirmation(Some(Environment::Test), &script, &check));
+
+        // :connect may reach any server, so the tab's Environment does not decide.
+        let connected = quervio_core::sqlcmd::prepare(
+            ":connect elsewhere\nTRUNCATE TABLE dbo.Log",
+            None,
+            0,
+            false,
+        )
+        .unwrap();
+        let check = sqlcmd_check(&connected);
+        assert!(sqlcmd_needs_confirmation(Some(Environment::Development), &connected, &check));
+
+        let safe = quervio_core::sqlcmd::prepare("SELECT 1", None, 0, false).unwrap();
+        assert!(!sqlcmd_needs_confirmation(None, &safe, &sqlcmd_check(&safe)));
+    }
+
+    #[test]
     fn sqlcmd_headers_count_lines_in_the_editor_or_the_included_file() {
         use quervio_core::sqlcmd::SourceLine;
         let editor = SourceLine { file: None, line: 3 };
@@ -1149,9 +1257,12 @@ mod tests {
             token: "one-use-token".into(),
             script: "SELECT 1".into(),
             has_local_commands: false,
+            destructive: quervio_core::guard::Check::default(),
+            needs_confirmation: false,
         }).unwrap();
         assert_eq!(ready, serde_json::json!({
             "kind": "ready", "token": "one-use-token", "script": "SELECT 1", "hasLocalCommands": false,
+            "destructive": {"findings": [], "uncertain": false}, "needsConfirmation": false,
         }));
     }
 

@@ -84,6 +84,7 @@ pub fn run() {
             query::query_databases,
             query::query_sqlcmd_prepare,
             query::query_sqlcmd_execute,
+            query::query_sqlcmd_discard,
             query::query_close,
             query::query_execute,
             query::query_cancel,

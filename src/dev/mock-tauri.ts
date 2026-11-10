@@ -154,7 +154,8 @@ mockIPC(async (cmd, args) => {
       if(request.action==="encryptedQuery")return {sets:[table(["Id","Name"],[["1","Rossi"]])]};
       return {mock: true, message: "No Microsoft operation was executed in browser mock mode."};
     }
-    case "query_sqlcmd_prepare":return /:r\b/i.test(String(a.script)) && a.allowFileReads !== true ? {kind: "fileAccessRequired"} : {kind: "ready", token: "mock-sqlcmd", script: a.script, hasLocalCommands: /!!|:out|:error/i.test(String(a.script))};
+    case "query_sqlcmd_prepare":return /:r\b/i.test(String(a.script)) && a.allowFileReads !== true ? {kind: "fileAccessRequired"} : {kind: "ready", token: "mock-sqlcmd", script: a.script, hasLocalCommands: /!!|:out|:error/i.test(String(a.script)), destructive: {findings: [], uncertain: false}, needsConfirmation: false};
+    case "query_sqlcmd_discard":return null;
     case "language_request":return {result: null};
     // Copies, as IPC hands over: the page must not share the mock's objects.
     case "list_connections":
