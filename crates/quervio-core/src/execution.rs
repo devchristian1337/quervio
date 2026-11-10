@@ -196,10 +196,9 @@ impl Session {
                             }
                         }
                         Ok(StatementResult::Rows) => {
-                            let is_plan = self.client.get_metadata().iter().any(|c| {
-                                c.column_name.contains("Showplan")
-                                    || c.column_name == "Microsoft SQL Server 2005 XML Showplan"
-                            });
+                            let is_plan = is_plan_result(
+                                self.client.get_metadata().iter().map(|c| c.column_name.as_str()),
+                            );
                             if is_plan {
                                 loop {
                                     match self.client.next_row().await {
@@ -235,7 +234,8 @@ impl Session {
                                     kind: column_kind(column.data_type),
                                 })
                                 .collect();
-                            let mut chunk = RowChunk::new(columns.len(), limits.max_cell_bytes);
+                            let width = columns.len();
+                            let mut chunk = RowChunk::new(width, limits.max_cell_bytes);
                             results
                                 .write()
                                 .unwrap()
@@ -254,8 +254,17 @@ impl Session {
                                     Ok(true) => {
                                         rows += 1;
                                         if rows as usize >= limits.max_rows {
-                                            limited = true;
-                                            break Ok(());
+                                            // Exactly max_rows rows is a complete result:
+                                            // stop only when the Server has another row.
+                                            let mut next = RowChunk::new(width, limits.max_cell_bytes);
+                                            match self.client.next_row_into(&mut next).await {
+                                                Ok(true) => {
+                                                    limited = true;
+                                                    break Ok(());
+                                                }
+                                                Ok(false) => break Ok(()),
+                                                Err(error) => break Err(error),
+                                            }
                                         }
                                         let progress = rows.is_multiple_of(1024)
                                             && last_progress.elapsed() >= PROGRESS_EVERY;
@@ -397,6 +406,15 @@ impl Session {
     }
 }
 
+/// A Showplan result set: the single XML column that SET SHOWPLAN_XML and
+/// SET STATISTICS XML return. A user column merely named "Showplan…" is data.
+fn is_plan_result<'a>(mut names: impl Iterator<Item = &'a str>) -> bool {
+    matches!(
+        (names.next(), names.next()),
+        (Some(name), None) if name.starts_with("Microsoft SQL Server") && name.ends_with("XML Showplan")
+    )
+}
+
 fn message(text: &str, is_error: bool) -> ExecutionEvent {
     ExecutionEvent::Message {
         text: text.to_string(),
@@ -436,5 +454,21 @@ fn column_kind(data_type: mssql_tds::datatypes::sqldatatypes::TdsDataType) -> Co
         | T::DateTimeN => ColumnKind::Date,
         T::Binary | T::VarBinary | T::BigBinary | T::BigVarBinary | T::Image => ColumnKind::Binary,
         _ => ColumnKind::Text,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_showplan_xml_column_is_a_plan() {
+        assert!(is_plan_result(["Microsoft SQL Server 2005 XML Showplan"].into_iter()));
+        assert!(!is_plan_result(["ShowplanFlag", "Id"].into_iter()));
+        assert!(!is_plan_result(["Showplan"].into_iter()));
+        assert!(!is_plan_result(
+            ["Microsoft SQL Server 2005 XML Showplan", "Other"].into_iter()
+        ));
+        assert!(!is_plan_result(std::iter::empty()));
     }
 }
