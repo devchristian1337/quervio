@@ -17,6 +17,8 @@ async function newConnection(page: Page) {
 }
 
 async function delayTests(page: Page) {
+  // In ?mock __TAURI_INTERNALS__ esiste solo dopo il caricamento dei moduli dell'app.
+  await page.getByRole("button", { name: "New connection", exact: true }).first().waitFor();
   await page.evaluate(() => {
     const target = window as unknown as TestWindow;
     const invoke = target.__TAURI_INTERNALS__.invoke;
