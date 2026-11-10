@@ -77,15 +77,20 @@ export function Security({ context }: { context: Context }) {
   }
   if (section === "audits" && name)
     script =
-      operation === "create" && path
-        ? `CREATE SERVER AUDIT ${n(name)} TO FILE(FILEPATH=${l(path)}) WITH(QUEUE_DELAY=1000,ON_FAILURE=CONTINUE);\nALTER SERVER AUDIT ${n(name)} WITH(STATE=ON);`
+      // "create" without a path builds nothing: never another operation instead.
+      operation === "create"
+        ? path
+          ? `CREATE SERVER AUDIT ${n(name)} TO FILE(FILEPATH=${l(path)}) WITH(QUEUE_DELAY=1000,ON_FAILURE=CONTINUE);\nALTER SERVER AUDIT ${n(name)} WITH(STATE=ON);`
+          : ""
         : operation === "delete"
           ? `ALTER SERVER AUDIT ${n(name)} WITH(STATE=OFF);\nDROP SERVER AUDIT ${n(name)};`
           : `ALTER SERVER AUDIT ${n(name)} WITH(STATE=${operation === "disable" ? "OFF" : "ON"});`;
   if (section === "auditSpecifications" && name)
     script =
-      operation === "create" && audit
-        ? `CREATE ${server ? "SERVER" : "DATABASE"} AUDIT SPECIFICATION ${n(name)} FOR SERVER AUDIT ${n(audit)} ADD(${auditAction}) WITH(STATE=ON);`
+      operation === "create"
+        ? audit
+          ? `CREATE ${server ? "SERVER" : "DATABASE"} AUDIT SPECIFICATION ${n(name)} FOR SERVER AUDIT ${n(audit)} ADD(${auditAction}) WITH(STATE=ON);`
+          : ""
         : operation === "delete"
           ? `ALTER ${server ? "SERVER" : "DATABASE"} AUDIT SPECIFICATION ${n(name)} WITH(STATE=OFF);\nDROP ${server ? "SERVER" : "DATABASE"} AUDIT SPECIFICATION ${n(name)};`
           : `ALTER ${server ? "SERVER" : "DATABASE"} AUDIT SPECIFICATION ${n(name)} WITH(STATE=${operation === "disable" ? "OFF" : "ON"});`;

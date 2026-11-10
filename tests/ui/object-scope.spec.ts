@@ -92,5 +92,18 @@ test("rows of another scope are not shown or acted on after a failed read", asyn
   // The database user picked before is not carried over as a login name.
   await page.getByRole("combobox", { name: "Operation", exact: true }).click();
   await page.getByRole("option", { name: "delete", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Preview security changes", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Preview security changes", exact: true })).toBeDisabled();
+});
+
+test("creating an audit without its directory builds no other operation", async ({ page }) => {
+  await page.goto("/?mock");
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Security / Audit", exact: true }).click();
+  await page.getByRole("tab", { name: "SQL Server Audit", exact: true }).click();
+  await page.getByLabel("Name", { exact: true }).fill("Nightly");
+  const preview = page.getByRole("button", { name: "Preview security changes", exact: true });
+  // "create" is the default operation; without a directory there is nothing to create.
+  await expect(preview).toBeDisabled();
+  await page.getByLabel("Server-side audit directory (trailing slash)", { exact: true }).fill("D:\\Audit\\");
+  await expect(preview).toBeEnabled();
 });
