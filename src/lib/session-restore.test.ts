@@ -92,18 +92,30 @@ describe("query tab recovery", () => {
     expect(mocks.warning).toHaveBeenCalled();
   });
 
-  it("waits for all restored tabs before saving a new snapshot", async () => {
+  it("waits for the restored tabs before saving a new snapshot", async () => {
     mocks.load.mockResolvedValue(loaded());
-    let finish!: () => void;
-    mocks.open.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    let finishLoad!: (value: unknown) => void;
+    mocks.load.mockImplementationOnce(() => new Promise((resolve) => { finishLoad = resolve; }));
     const session = await import("./session-restore");
     const restore = session.restoreTabs();
-    await vi.waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(1));
     const save = session.saveNow();
     await Promise.resolve();
     expect(mocks.save).not.toHaveBeenCalled();
-    finish();
+    finishLoad(loaded());
     await restore;
     expect(await save).toBe(true);
+  });
+
+  it("saves and closes without waiting for restored tabs to connect", async () => {
+    mocks.load.mockResolvedValue(loaded());
+    // Like the store: the tab is added at once, then its Session never opens.
+    mocks.open.mockImplementation((connectionId: string, database: string, options: { text: string }) => {
+      mocks.state = { tabs: [{ ...savedTab(connectionId), database, id: "q", initialText: options.text }], activeId: "q" };
+      return new Promise<void>(() => {});
+    });
+    const session = await import("./session-restore");
+    await session.restoreTabs();
+    expect(await session.saveNow()).toBe(true);
+    expect(JSON.parse(mocks.save.mock.calls[0][0]).tabs[0].text).toBe("SELECT N'unsaved';");
   });
 });

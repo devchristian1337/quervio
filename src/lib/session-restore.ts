@@ -100,7 +100,10 @@ async function restoreSnapshot() {
       const { open } = useQueries.getState();
       // Opening an unknown connection keeps the SQL in a disconnected tab.
       // Never execute restored text or read the original .sql file.
-      await Promise.all(saved.tabs.map((tab, index) => open(tab.connectionId, tab.database, {
+      // open() adds its tab at once and then logs in. Only the tabs need to be
+      // in place: autosave and closing must not wait for a slow or unreachable
+      // server, and open() reports its own connection errors in the tab.
+      void Promise.allSettled(saved.tabs.map((tab, index) => open(tab.connectionId, tab.database, {
         title: tab.title,
         text: tab.text,
         filePath: tab.filePath,
