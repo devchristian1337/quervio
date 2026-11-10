@@ -247,6 +247,22 @@ pub async fn query_sqlcmd_prepare(
     })
 }
 
+/// The SSMS header of a message from an expanded SQLCMD step, with the line
+/// counted in the editor or, for a :r include, in that file.
+fn sqlcmd_header(header: Option<&str>, source: &quervio_core::sqlcmd::SourceLine) -> String {
+    let prefix = header
+        .and_then(|header| header.rsplit_once(", Line ").map(|(prefix, _)| prefix))
+        .filter(|prefix| !prefix.is_empty());
+    let place = match &source.file {
+        Some(file) => format!("Line {} of {file}", source.line),
+        None => format!("Line {}", source.line),
+    };
+    match prefix {
+        Some(prefix) => format!("{prefix}, {place}"),
+        None => place,
+    }
+}
+
 fn sqlcmd_message(text: String, is_error: bool) -> ExecutionEvent {
     ExecutionEvent::Message {
         text,
@@ -335,12 +351,8 @@ pub async fn query_sqlcmd_execute(
                                             .checked_sub(1)
                                             .and_then(|line| lines.get(line as usize))
                                         {
-                                            if let Some(file) = &source.file {
-                                                *header = Some(format!("{file}:{}", source.line));
-                                                *line = 0;
-                                            } else {
-                                                *line = source.line;
-                                            }
+                                            *header = Some(sqlcmd_header(header.as_deref(), source));
+                                            *line = if source.file.is_some() { 0 } else { source.line };
                                         }
                                     }
                                     match &event {
@@ -1076,6 +1088,41 @@ pub async fn query_end_transactions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sqlcmd_headers_count_lines_in_the_editor_or_the_included_file() {
+        use quervio_core::sqlcmd::SourceLine;
+        let editor = SourceLine { file: None, line: 3 };
+        assert_eq!(
+            sqlcmd_header(Some("Msg 208, Level 16, State 1, Line 1"), &editor),
+            "Msg 208, Level 16, State 1, Line 3"
+        );
+        let included = SourceLine { file: Some("C:/work/part.sql".into()), line: 7 };
+        assert_eq!(
+            sqlcmd_header(Some("Msg 208, Level 16, State 1, Line 2"), &included),
+            "Msg 208, Level 16, State 1, Line 7 of C:/work/part.sql"
+        );
+        assert_eq!(sqlcmd_header(None, &editor), "Line 3");
+
+        let script = quervio_core::sqlcmd::prepare(
+            "SELECT 1\nGO\nSELECT * FROM missing",
+            Some(std::path::Path::new("C:/work/report.sql")),
+            0,
+            false,
+        )
+        .unwrap();
+        let lines: Vec<_> = script
+            .steps
+            .iter()
+            .filter_map(|step| match step {
+                quervio_core::sqlcmd::Step::Sql { lines, .. } => Some(lines.clone()),
+                _ => None,
+            })
+            .flatten()
+            .map(|line| (line.file, line.line))
+            .collect();
+        assert_eq!(lines, [(None, 1), (None, 3)]);
+    }
 
     #[test]
     fn query_session_info_exposes_display_context_without_credentials() {

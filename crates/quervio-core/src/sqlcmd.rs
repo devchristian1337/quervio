@@ -354,7 +354,9 @@ impl Parser {
             self.sql.push_str(&expanded);
             self.sql.push('\n');
             self.lines.push(SourceLine {
-                file: file.map(|f| f.display().to_string()),
+                // Only :r includes name a file; the editor's own lines, saved
+                // or not, are editor lines that a message can jump to.
+                file: (!self.stack.is_empty()).then(|| file.map(|f| f.display().to_string())).flatten(),
                 line: base_line + index as u32 + 1,
             });
         }
