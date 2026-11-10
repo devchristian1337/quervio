@@ -42,6 +42,9 @@ impl ExplorerState {
                 if !c.server.eq_ignore_ascii_case(server) {
                     c.environment = quervio_core::connection::Environment::Production;
                     c.default_database = None;
+                    // The saved name describes the saved server: without it,
+                    // the tab and the Production guard name the real target.
+                    c.name.clear();
                     // The saved password belongs to the saved server. Without
                     // the id, a later reconnect of the tab (an Azure database
                     // switch) cannot send it to the server the script named.
@@ -480,7 +483,7 @@ mod tests {
             .unwrap()
             .save(SavedConnection {
                 id: String::new(),
-                name: String::new(),
+                name: "Production H2O".into(),
                 group: None,
                 server: "srv01".into(),
                 authentication: Authentication::Sql {
@@ -497,6 +500,7 @@ mod tests {
         let other = state.connection_from_server("elsewhere").unwrap();
         assert!(other.id.is_empty());
         assert_eq!(other.environment, Environment::Production);
+        assert!(other.name.is_empty());
         assert_eq!(state.password(&other.id, None).unwrap(), None);
 
         let _ = std::fs::remove_dir_all(dir);
