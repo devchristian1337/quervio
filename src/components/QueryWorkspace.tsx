@@ -442,8 +442,10 @@ function OutputPanel({ tab }: { tab: QueryTab }) {
         onTabChange={(view) => setView(tab.id, view as QueryTab["view"])}
         tabs={tabs}
       />
+      {/* A .sqlplan opened from file, the plan shown and its selected operator
+          belong to one tab and run: another tab or a new Execution starts over. */}
       <div ref={output} className={cn("min-h-0 flex-1", tab.view === "messages" && "overflow-auto")}>
-        {tab.view === "plans" ? <div className="flex h-full flex-col p-2"><PlanViewer plans={tab.plans} /></div> : tab.view === "messages" ? <Messages tab={tab} /> : <Results tab={tab} />}
+        {tab.view === "plans" ? <div className="flex h-full flex-col p-2"><PlanViewer key={`${tab.id}:${tab.runId}`} plans={tab.plans} /></div> : tab.view === "messages" ? <Messages tab={tab} /> : <Results tab={tab} />}
       </div>
     </div>
   );
