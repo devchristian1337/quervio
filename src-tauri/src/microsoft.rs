@@ -153,8 +153,23 @@ pub async fn run(
     drop(stdin);
     let mut lines = BufReader::new(child.stdout.take().ok_or("Bridge stdout unavailable")?).lines();
     let mut output = None;
+    // A steady tick, not a sleep restarted by every line: frequent progress
+    // lines must not keep a cancel from being seen.
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(200));
     loop {
-        let line = tokio::select! {line=lines.next_line()=>line.map_err(message)?,_=tokio::time::sleep(std::time::Duration::from_millis(200))=>{if cancel.is_cancelled(){if let Some(pid)=child.id(){crate::processes::terminate_tree(pid).await;}let _=child.kill().await;let _=child.wait().await;remove_partial_files(&request.arguments);return Err("Microsoft operation cancelled. Server and Azure changes may remain or continue.".into());}continue;}};
+        if cancel.is_cancelled() {
+            if let Some(pid) = child.id() {
+                crate::processes::terminate_tree(pid).await;
+            }
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            remove_partial_files(&request.arguments);
+            return Err("Microsoft operation cancelled. Server and Azure changes may remain or continue.".into());
+        }
+        let line = tokio::select! {
+            line = lines.next_line() => line.map_err(message)?,
+            _ = tick.tick() => continue,
+        };
         let Some(line) = line else {
             break;
         };
