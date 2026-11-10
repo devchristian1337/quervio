@@ -82,6 +82,7 @@ pub enum ExecutionEvent {
     SessionChanged {
         server: crate::session::ServerInfo,
         connection_id: Option<String>,
+        connection_name: String,
     },
     #[serde(rename_all = "camelCase")]
     Plan { xml: String },

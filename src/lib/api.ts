@@ -63,6 +63,12 @@ export interface ServerInfo {
   serverName: string;
   version: string;
   database: string;
+  /** Authenticated login reported by the Server, rather than a mutable saved profile. */
+  login?: string;
+}
+
+export interface QuerySessionInfo extends ServerInfo {
+  connectionName?: string;
 }
 
 export interface CatalogItem {
@@ -113,7 +119,8 @@ export const api = {
     invoke<CatalogItem[]>("explorer_table_children", { id, database, objectId, folder }),
 
   openQuery: (tabId: string, connectionId: string, database: string | null) =>
-    invoke<ServerInfo>("query_open", { tabId, connectionId, database }),
+    invoke<QuerySessionInfo>("query_open", { tabId, connectionId, database }),
+  queryDatabases: (tabId: string) => invoke<CatalogItem[]>("query_databases", { tabId }),
   closeQuery: (tabId: string) => invoke<void>("query_close", { tabId }).then(()=>{void invoke("language_close",{tabId}).catch(()=>{});}),
   executeQuery: (
     tabId: string,
@@ -136,8 +143,8 @@ export const api = {
   resultCopy: (
     tabId: string,
     set: number,
-    rows: [number, number],
-    columns: [number, number],
+    rows: readonly (readonly [number, number])[],
+    columns: readonly (readonly [number, number])[],
     format: CopyFormat,
   ) => invoke<{ rows: number; columns: number }>("result_copy", { tabId, set, rows, columns, format }),
   resultExportMarkdown: (tabId: string, set: number, path: string) =>

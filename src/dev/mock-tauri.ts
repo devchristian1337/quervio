@@ -53,7 +53,7 @@ const item = (name: string, extra: Partial<CatalogItem> = {}): CatalogItem => ({
   ...extra,
 });
 
-const server = { serverName: "mock", version: "16.0.0.0", database: "master" };
+const server = { serverName: "mock", version: "16.0.0.0", database: "master", login: "sa" };
 
 const MOCK_ROWS = 1_000_000;
 const table = (columns: string[], rows: (string | null)[][] = []) => ({columns, rows, truncated: false});
@@ -201,6 +201,7 @@ mockIPC(async (cmd, args) => {
     case "test_connection":
       return server;
     case "explorer_databases":
+    case "query_databases":
     case "connection_databases":
       return [item("master", { system: true }), item("Sales")];
     case "explorer_objects":
@@ -250,8 +251,8 @@ mockIPC(async (cmd, args) => {
     }
     case "result_copy":
       return {
-        rows: (a.rows as number[])[1] - (a.rows as number[])[0],
-        columns: (a.columns as number[])[1] - (a.columns as number[])[0],
+        rows: (a.rows as [number, number][]).reduce((total, [start, end]) => total + end - start, 0),
+        columns: (a.columns as [number, number][]).reduce((total, [start, end]) => total + end - start, 0),
       };
     case "query_check": {
       // Rough stand-in for the Rust check: any DELETE counts.

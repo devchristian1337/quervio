@@ -34,6 +34,11 @@ export interface QueryTab {
   id: string;
   title: string;
   connectionId: string;
+  /** Display context captured when this Session opened; editing its Saved Connection leaves it unchanged. */
+  connectionName: string;
+  login: string | null;
+  /** Changes when SQLCMD replaces the Session, invalidating its database menu. */
+  sessionRevision: number;
   /** The Environment of the Saved Connection when the Session was opened. */
   environment: Environment | null;
   status: TabStatus;
@@ -95,7 +100,7 @@ interface QueriesState {
   /** Activates the next (1) or previous (-1) tab. */
   cycle: (step: 1 | -1) => void;
   setDirty: (id: string, dirty: boolean) => void;
-  markSaved: (id: string, filePath: string) => void;
+  markSaved: (id: string, filePath: string, dirty: boolean) => void;
   close: (id: string) => Promise<void>;
   activate: (id: string) => void;
   setView: (id: string, view: QueryTab["view"]) => void;
@@ -105,7 +110,7 @@ interface QueriesState {
   cancel: (id: string) => Promise<void>;
   useDatabase: (id: string, database: string) => Promise<void>;
   /** Closes the tab, first asking what to do with open transactions. */
-  closeSafely: (id: string) => Promise<boolean>;
+  closeSafely: (id: string, canClose?: () => boolean) => Promise<boolean>;
   /** Ends open transactions in every tab, asking once; false if the user cancels. */
   settleAllTransactions: () => Promise<boolean>;
 }
@@ -192,7 +197,7 @@ export const useQueries = create<QueriesState>((set, get) => {
       if (get().tabs.find((t) => t.id === id)?.dirty !== dirty) patch(id, { dirty });
     },
 
-    markSaved: (id, filePath) => patch(id, { filePath, dirty: false, title: fileName(filePath) }),
+    markSaved: (id, filePath, dirty) => patch(id, { filePath, dirty, title: fileName(filePath) }),
 
     open: async (connectionId, database = null, options = {}) => {
       // Restored "Query 7" keeps new tabs numbering after it.
@@ -200,11 +205,16 @@ export const useQueries = create<QueriesState>((set, get) => {
       counter = number ? Math.max(counter, Number(number[1])) : counter + 1;
       const id = crypto.randomUUID();
       const text = options.text ?? "";
+      const connection = useConnections.getState().connections.find((c) => c.id === connectionId);
       const tab: QueryTab = {
         id,
         title: options.title ?? (options.filePath ? fileName(options.filePath) : `Query ${counter}`),
         connectionId,
-        environment: useConnections.getState().connections.find((c) => c.id === connectionId)?.environment ?? null,
+        connectionName: connection ? displayName(connection) : "",
+        login: connection?.authentication.kind === "sql" ? connection.authentication.userName
+          : connection?.authentication.kind === "entra" ? "Microsoft Entra" : connection ? "Windows" : null,
+        sessionRevision: 0,
+        environment: connection?.environment ?? null,
         status: "connecting",
         error: null,
         server: null,
@@ -227,7 +237,16 @@ export const useQueries = create<QueriesState>((set, get) => {
       set((s) => ({ tabs: [...s.tabs, tab], activeId: options.activate === false ? s.activeId : id }));
       try {
         const server = await api.openQuery(id, connectionId, database);
-        patch(id, { status: "ready", server, database: server.database });
+        if (!get().tabs.some((t) => t.id === id)) {
+          // The first close may have reached Rust before query_open registered
+          // its Session. Close again after that registration has completed.
+          try { await api.closeQuery(id); }
+          catch (error) { toast.error("Could not close the completed connection", { description: errorMessage(error) }); }
+          return;
+        }
+        patch(id, { status: "ready", server, database: server.database,
+          connectionName: server.connectionName ?? tab.connectionName,
+          login: server.login ?? tab.login });
       } catch (error) {
         patch(id, { status: "disconnected", error: errorMessage(error) });
         return;
@@ -278,10 +297,9 @@ export const useQueries = create<QueriesState>((set, get) => {
       if (!tab.sqlcmdMode && tab.planMode !== "estimated" && confirm && tabEnvironment(tab, connections) === "production") {
         const check = await api.checkScript(script.text, script.baseLine);
         if (check.findings.length > 0 || check.uncertain) {
-          const connection = connections.find((c) => c.id === tab.connectionId);
           const run = await useDialogs.getState().confirmDestructive({
             tabTitle: tab.title,
-            connectionName: connection ? displayName(connection) : (tab.server?.serverName ?? tab.title),
+            connectionName: tab.connectionName || tab.server?.serverName || tab.title,
             check,
           });
           if (!run) return;
@@ -353,7 +371,10 @@ export const useQueries = create<QueriesState>((set, get) => {
             patch(id,{status:"disconnected",error:event.reason,openTransactions:0});
             break;
           case "sessionChanged":
-            patch(id, {server: event.server, database: event.server.database, environment: "production", metadataAvailable: !!event.connectionId, ...(event.connectionId ? {connectionId: event.connectionId} : {})});
+            patch(id, (current) => ({server: event.server, database: event.server.database,
+              connectionName: event.connectionName ?? event.server.serverName, login: event.server.login ?? null,
+              sessionRevision: current.sessionRevision + 1, environment: "production", metadataAvailable: !!event.connectionId,
+              ...(event.connectionId ? {connectionId: event.connectionId} : {})}));
             break;
           case "plan":
             output((t) => ({ plans: [...(t.plans ?? []), event.xml], view: "plans" }));
@@ -447,13 +468,14 @@ export const useQueries = create<QueriesState>((set, get) => {
       }
     },
 
-    closeSafely: async (id) => {
+    closeSafely: async (id, canClose = () => true) => {
       const tab = get().tabs.find((t) => t.id === id);
       if (!tab) return true;
       if (tab.openTransactions > 0) {
         const choice = await useDialogs.getState().confirmTransactions([tab]);
         if (choice === "cancel" || !(await endTransactions([tab], choice === "commit"))) return false;
       }
+      if (!canClose()) return false;
       await get().close(id);
       return true;
     },

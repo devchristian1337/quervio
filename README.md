@@ -51,6 +51,18 @@ On Windows, WebView2's browser shortcuts (page search, reload, print, zoom and
 DevTools) are disabled. Quervio commands, Monaco editing shortcuts and ordinary
 text editing keep their own keyboard handling.
 
+Query tabs keep the display name and authenticated login of their actual Session.
+Editing or deleting a Saved Connection leaves existing Sessions and their display
+context unchanged. The database picker reads the tab's original destination over
+a separate metadata connection, keeping SQL password context only in Rust memory
+until the tab closes. It does not run discovery queries on the query Session.
+Closing a tab while it connects also closes any Session that finishes opening
+after the tab has gone; an automatic Execution is skipped in that case.
+
+Connection tests belong to the dialog values and opening that requested them.
+Changing the fields clears the result; late responses from previous tests or a
+closed dialog cannot replace the current result.
+
 **Search commands** in the top bar (Ctrl+Shift+P, configurable in Settings →
 Shortcuts) searches quick actions, management tools, open tabs and saved
 connections. Use the arrow keys and Enter to select, or Esc to return to the
@@ -91,6 +103,11 @@ The Linux keyring integration runs separately on a private bus with
 `bash scripts/test-linux-keyring.sh`; see [Linux support](docs/linux.md).
 
 ### Query tab recovery
+
+Saving a `.sql` file writes the text captured when Save was requested. The
+editor stays usable: changes made while saving remain marked as unsaved. Save
+requests for a tab run in order, including Save As. Closing a tab after choosing Save
+keeps it open if more edits were made during the save or transaction prompt.
 
 Open query tabs, including unsaved SQL, are saved after a 500 ms editing pause
 and before closing or restarting. Saves run in order. The app data directory
@@ -150,6 +167,9 @@ or database. Query tabs keep their dedicated Rust sessions.
   success/failure routing. They run with Quervio closed. They are Quervio flows,
   not SSIS Maintenance Plans.
 - CSV/Excel export is available from the results grid and the transfer wizard.
+  Copy, Copy with Headers and Copy as Markdown include only the selected rows
+  or columns, including separate Ctrl+click selections, in their displayed order.
+  Copy all as Markdown and file exports use the whole Result set.
   Large exports stream on the backend. Truncated cell values cannot be exported
   as complete data. Excel uses text cells to retain numeric/date precision.
   CSV rejects formula-like text in cells and column names (including formulas

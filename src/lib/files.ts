@@ -12,6 +12,20 @@ const FILTERS = [
   { name: "All files", extensions: ["*"] },
 ];
 
+// Keep Save/Save As requests in order, including their dialogs. Different tabs
+// can share a file, so writes to that destination also have their own queue.
+const saves = new Map<string, Promise<unknown>>();
+const writes = new Map<string, Promise<unknown>>();
+
+function inOrder<T>(queue: Map<string, Promise<unknown>>, key: string, action: () => Promise<T>): Promise<T> {
+  const previous = queue.get(key) ?? Promise.resolve();
+  const pending = previous.catch(() => {}).then(action).finally(() => {
+    if (queue.get(key) === pending) queue.delete(key);
+  });
+  queue.set(key, pending);
+  return pending;
+}
+
 /**
  * Opens a .sql file in a new tab on `target` (a start screen row), else on the
  * selected server, or the active tab's.
@@ -42,20 +56,35 @@ export async function openFile(target?: { connectionId: string; database: string
 export async function saveTab(id: string, saveAs = false): Promise<boolean> {
   const tab = useQueries.getState().tabs.find((t) => t.id === id);
   if (!tab) return false;
-  let path = saveAs ? null : tab.filePath;
-  if (!path) {
-    path = await save({ defaultPath: tab.filePath ?? `${tab.title}.sql`, filters: FILTERS });
-    if (!path) return false;
-  }
-  try {
-    await api.fileWrite(path, modelText(id) ?? tab.initialText);
-    useQueries.getState().markSaved(id, path);
-    toast.success(`Saved ${fileName(path)}`);
-    return true;
-  } catch (error) {
-    toast.error(`Could not save ${fileName(path)}`, { description: errorMessage(error) });
-    return false;
-  }
+  // Capture the text requested by this Save, not a later edit made while a
+  // preceding save or the file dialog is still pending.
+  const text = modelText(id) ?? tab.initialText;
+  return inOrder(saves, id, async () => {
+    const current = useQueries.getState().tabs.find((t) => t.id === id);
+    if (!current) return false;
+    let path = saveAs ? null : current.filePath;
+    try {
+      if (!path) {
+        path = await save({ defaultPath: current.filePath ?? `${current.title}.sql`, filters: FILTERS });
+        if (!path) return false;
+      }
+      const destination = path;
+      // Windows paths are case-insensitive; keep Unix paths case-sensitive.
+      const key = /^(?:[a-z]:[\\/]|\\\\)/i.test(destination)
+        ? destination.replace(/\\/g, "/").toLowerCase() : destination;
+      await inOrder(writes, key, () => api.fileWrite(destination, text));
+      const latest = useQueries.getState().tabs.find((t) => t.id === id);
+      if (latest) {
+        const dirty = (modelText(id) ?? latest.initialText) !== text;
+        useQueries.getState().markSaved(id, destination, dirty);
+      }
+      toast.success(`Saved ${fileName(destination)}`);
+      return true;
+    } catch (error) {
+      toast.error(`Could not save ${fileName(path ?? current.title)}`, { description: errorMessage(error) });
+      return false;
+    }
+  });
 }
 
 /**
@@ -66,11 +95,24 @@ export async function closeTab(id: string): Promise<boolean> {
   const tab = useQueries.getState().tabs.find((t) => t.id === id);
   if (!tab) return true;
   const text = modelText(id) ?? tab.initialText;
+  let acceptedText = text;
+  const keepOpen = () => {
+    toast.info("Tab kept open", { description: "The script has changes that were not saved. Save again to close it." });
+    return false;
+  };
   if (tab.dirty && (tab.filePath || text.trim() !== "")) {
     const choice = await useDialogs.getState().confirmUnsaved(tab.title);
     if (choice === "cancel" || (choice === "save" && !(await saveTab(id)))) return false;
+    const current = useQueries.getState().tabs.find((t) => t.id === id);
+    if (choice === "save" && current?.dirty) return keepOpen();
+    acceptedText = modelText(id) ?? current?.initialText ?? text;
   }
-  if (!(await useQueries.getState().closeSafely(id))) return false;
+  // A transaction prompt can also take time: check immediately before the
+  // store removes the tab, not only before asking about transactions.
+  if (!(await useQueries.getState().closeSafely(id, () => {
+    const current = useQueries.getState().tabs.find((t) => t.id === id);
+    return !current || (modelText(id) ?? current.initialText) === acceptedText || keepOpen();
+  }))) return false;
   disposeModel(id);
   return true;
 }

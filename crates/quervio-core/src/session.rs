@@ -26,6 +26,7 @@ pub struct ServerInfo {
     pub server_name: String,
     pub version: String,
     pub database: String,
+    pub login: String,
 }
 
 impl Session {
@@ -198,7 +199,7 @@ impl Session {
 
     pub async fn server_info(&mut self) -> Result<ServerInfo> {
         let rows = self
-            .query("SELECT CAST(SERVERPROPERTY('ServerName') AS nvarchar(256)), CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)), DB_NAME()")
+            .query("SELECT CAST(SERVERPROPERTY('ServerName') AS nvarchar(256)), CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)), DB_NAME(), ORIGINAL_LOGIN()")
             .await?;
         let row = rows.first().ok_or(Error::UnexpectedValue {
             column: 0,
@@ -208,6 +209,7 @@ impl Session {
             server_name: text(row, 0)?,
             version: text(row, 1)?,
             database: text(row, 2)?,
+            login: text(row, 3)?,
         })
     }
 

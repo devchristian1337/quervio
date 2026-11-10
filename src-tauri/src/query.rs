@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use quervio_core::connection::Environment;
+use quervio_core::connection::{Authentication, Environment, SavedConnection};
 use quervio_core::execution::{CancelToken, ExecutionEvent, Outcome};
 use quervio_core::results::{CellValue, ResultLimits, SharedResults, SortDirection};
 use quervio_core::session::{ServerInfo, Session};
@@ -16,9 +16,35 @@ use crate::explorer::{CommandResult, ExplorerState, message};
 
 const APPLICATION_NAME: &str = "Quervio - Query";
 
+// Private, in-memory connection context. Metadata must not switch to a saved
+// profile's new server/login/password, or run SELECTs on the user's Session.
+// Deliberately neither Debug nor Serialize: credentials never cross the IPC.
+#[derive(Clone)]
+struct SessionTarget {
+    connection: SavedConnection,
+    password: Option<String>,
+}
+
+impl SessionTarget {
+    fn new(connection: SavedConnection, credential: Option<String>) -> Self {
+        let password = matches!(connection.authentication, Authentication::Sql { .. })
+            .then_some(credential).flatten();
+        Self { connection, password }
+    }
+
+    async fn credential(&self, explorer: &ExplorerState) -> CommandResult<Option<String>> {
+        if self.connection.authentication == Authentication::Entra {
+            // Refresh an expiring Entra token against the captured target.
+            explorer.credential(&self.connection, None).await
+        } else {
+            Ok(self.password.clone())
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct QueryState {
-    connections: Mutex<HashMap<String, quervio_core::connection::SavedConnection>>,
+    connections: Mutex<HashMap<String, SessionTarget>>,
     sqlcmd: Mutex<HashMap<String, (String, std::time::Instant, quervio_core::sqlcmd::Script)>>,
     sessions: tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<Session>>>>,
     // The Environment each Session was opened with: the Production guard
@@ -464,6 +490,7 @@ pub async fn query_sqlcmd_execute(
                             quervio_core::connection::Authentication::Windows;
                         None
                     };
+                    let target = SessionTarget::new(connection.clone(), password.clone());
                     let opening=Session::open_with_timeout(&connection,password,"Quervio - SQLCMD",timeout);
                     let cancelled=async{loop{if cancel.is_cancelled(){break;}tokio::time::sleep(std::time::Duration::from_millis(100)).await;}};
                     let next=tokio::select!{next=opening=>next.map_err(message)?,_=cancelled=>{outcome=Outcome::Cancelled;let _=on_event.send(sqlcmd_message(cancel.cancellation_message().into(),cancel.is_timed_out()));break 'steps;}};
@@ -472,9 +499,9 @@ pub async fn query_sqlcmd_execute(
                         .connections
                         .lock()
                         .unwrap()
-                        .insert(tab_id.clone(), connection.clone());
+                        .insert(tab_id.clone(), target);
                     let info=active.server_info().await.map_err(message)?;
-                    let _=on_event.send(ExecutionEvent::SessionChanged{server:info,connection_id:known_target.then_some(connection.id.clone())});
+                    let _=on_event.send(ExecutionEvent::SessionChanged{server:info,connection_id:known_target.then_some(connection.id.clone()),connection_name:connection.display_name().to_string()});
                     state
                         .environments
                         .lock()
@@ -577,6 +604,14 @@ impl QueryState {
 }
 
 /// Opens the Session of a Query Tab, optionally switching to `database`.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuerySessionInfo {
+    #[serde(flatten)]
+    server: ServerInfo,
+    connection_name: String,
+}
+
 #[tauri::command]
 pub async fn query_open(
     explorer: State<'_, ExplorerState>,
@@ -584,12 +619,13 @@ pub async fn query_open(
     tab_id: String,
     connection_id: String,
     database: Option<String>,
-) -> CommandResult<ServerInfo> {
+) -> CommandResult<QuerySessionInfo> {
     let mut connection = explorer.connection(&connection_id)?;
     if let Some(database) = &database {
         connection.default_database = Some(database.clone());
     }
     let password = explorer.credential(&connection, None).await?;
+    let target = SessionTarget::new(connection.clone(), password.clone());
     let mut session = Session::open(&connection, password, APPLICATION_NAME)
         .await
         .map_err(message)?;
@@ -601,7 +637,7 @@ pub async fn query_open(
         .connections
         .lock()
         .unwrap()
-        .insert(tab_id.clone(), connection.clone());
+        .insert(tab_id.clone(), target);
     state
         .environments
         .lock()
@@ -613,7 +649,30 @@ pub async fn query_open(
         .await
         .insert(tab_id, Arc::new(tokio::sync::Mutex::new(session)));
     drop(previous);
-    Ok(info)
+    Ok(QuerySessionInfo { server: info, connection_name: connection.display_name().to_string() })
+}
+
+/// Reads the captured Session destination using a temporary metadata Session,
+/// preserving the query's transactions, temp tables and SET state.
+#[tauri::command]
+pub async fn query_databases(
+    explorer: State<'_, ExplorerState>,
+    state: State<'_, QueryState>,
+    tab_id: String,
+) -> CommandResult<Vec<quervio_core::catalog::CatalogItem>> {
+    let target = state.connections.lock().unwrap().get(&tab_id).cloned()
+        .ok_or("this Query Tab is not connected")?;
+    let credential = target.credential(&explorer).await?;
+    // Keep the database used for login too: contained users may have no access
+    // to master, while this destination already accepted the query Session.
+    let connection = target.connection;
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        let mut session = Session::open(&connection, credential, "Quervio - Query Metadata")
+            .await.map_err(message)?;
+        let result = quervio_core::catalog::databases(&mut session).await.map_err(message);
+        let _ = session.close().await;
+        result
+    }).await.map_err(|_| "Timed out loading databases.".to_string())?
 }
 
 #[tauri::command]
@@ -892,7 +951,7 @@ pub struct CopySummary {
     columns: usize,
 }
 
-/// Puts a block of cells on the Windows clipboard. Written from Rust so large
+/// Puts selected cells on the clipboard. Written from Rust so large
 /// copies never cross into the webview and do not depend on its focus.
 #[tauri::command]
 pub async fn result_copy(
@@ -900,22 +959,23 @@ pub async fn result_copy(
     state: State<'_, QueryState>,
     tab_id: String,
     set: usize,
-    rows: (usize, usize),
-    columns: (usize, usize),
+    rows: Vec<(usize, usize)>,
+    columns: Vec<(usize, usize)>,
     format: CopyFormat,
 ) -> CommandResult<CopySummary> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
     let (text, summary) = state.read_set(&tab_id, set, move |set| {
-        let rows = rows.0.min(set.row_count())..rows.1.min(set.row_count());
-        let columns = columns.0.min(set.columns().len())..columns.1.min(set.columns().len());
+        let rows: Vec<_> = rows.into_iter().map(|(start, end)| start..end).collect();
+        let columns: Vec<_> = columns.into_iter().map(|(start, end)| start..end).collect();
+        let selection = set.selection(&rows, &columns);
         let summary = CopySummary {
-            rows: rows.len(),
-            columns: columns.len(),
+            rows: selection.row_count(),
+            columns: selection.column_count(),
         };
         let text = match format {
-            CopyFormat::Text => set.copy_text(rows, columns, false),
-            CopyFormat::TextWithHeaders => set.copy_text(rows, columns, true),
-            CopyFormat::Markdown => set.markdown(rows, columns),
+            CopyFormat::Text => selection.copy_text(false),
+            CopyFormat::TextWithHeaders => selection.copy_text(true),
+            CopyFormat::Markdown => selection.markdown(),
         };
         (text, summary)
     })
@@ -977,23 +1037,23 @@ pub async fn query_use_database(
         if engine.rows.first().and_then(|row| row[1].as_deref()) != Some("0") {
             return Err("End the transaction before switching Azure SQL databases.".into());
         }
-        let mut connection = state
+        let mut target = state
             .connections
             .lock()
             .unwrap()
             .get(&tab_id)
             .cloned()
             .ok_or("Query connection is unavailable.")?;
-        connection.default_database = Some(database.clone());
-        let credential = explorer.credential(&connection, None).await?;
-        *session = Session::open(&connection, credential, APPLICATION_NAME)
+        target.connection.default_database = Some(database.clone());
+        let credential = target.credential(&explorer).await?;
+        *session = Session::open(&target.connection, credential, APPLICATION_NAME)
             .await
             .map_err(message)?;
         state
             .connections
             .lock()
             .unwrap()
-            .insert(tab_id.clone(), connection);
+            .insert(tab_id.clone(), target);
         return Ok(database);
     }
     session.use_database(&database).await.map_err(message)?;
@@ -1016,6 +1076,23 @@ pub async fn query_end_transactions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn query_session_info_exposes_display_context_without_credentials() {
+        let info = QuerySessionInfo {
+            server: ServerInfo {
+                server_name: "actual-server".into(),
+                version: "16.0".into(),
+                database: "Sales".into(),
+                login: "actual-login".into(),
+            },
+            connection_name: "Original target".into(),
+        };
+        assert_eq!(serde_json::to_value(info).unwrap(), serde_json::json!({
+            "serverName": "actual-server", "version": "16.0", "database": "Sales",
+            "login": "actual-login", "connectionName": "Original target",
+        }));
+    }
 
     #[test]
     fn sqlcmd_file_consent_response_cannot_be_used_as_an_execution_token() {

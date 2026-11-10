@@ -191,20 +191,17 @@ const emptySelection: GridSelection = {
   rows: CompactSelection.empty(),
 };
 
-/** The selected block as [start, end) row and column ranges. */
+/** Selected [start, end) ranges: keep Ctrl-click gaps without enumerating rows. */
 function selectedBlock(selection: GridSelection, rows: number, columns: number) {
   const range = selection.current?.range;
   if (range) {
-    return { rows: [range.y, range.y + range.height], columns: [range.x, range.x + range.width] } as const;
+    return { rows: [[range.y, range.y + range.height]], columns: [[range.x, range.x + range.width]] } as const;
   }
-  // Sorted ranges: the ends are the bounds. Spreading a million selected rows overflows the stack.
-  const firstColumn = selection.columns.first();
-  if (firstColumn !== undefined) {
-    return { rows: [0, rows], columns: [firstColumn, selection.columns.last()! + 1] } as const;
+  if (selection.columns.length > 0) {
+    return { rows: [[0, rows]], columns: selection.columns.items } as const;
   }
-  const firstRow = selection.rows.first();
-  if (firstRow !== undefined) {
-    return { rows: [firstRow, selection.rows.last()! + 1], columns: [0, columns] } as const;
+  if (selection.rows.length > 0) {
+    return { rows: selection.rows.items, columns: [[0, columns]] } as const;
   }
   return null;
 }
@@ -515,7 +512,7 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   const onCellActivated = useCallback(([column, row]: Item) => setViewer({ row, column }), []);
 
   const block = selectedBlock(selection, set.rows, set.columns.length);
-  const all = { rows: [0, set.rows], columns: [0, set.columns.length] } as const;
+  const all = { rows: [[0, set.rows]], columns: [[0, set.columns.length]] } as const;
   const selectedRows = selection.rows.length;
 
   async function copy(format: CopyFormat, range = block ?? all) {
@@ -523,8 +520,8 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
       const copied = await api.resultCopy(
         tabId,
         set.index,
-        [range.rows[0], range.rows[1]],
-        [range.columns[0], range.columns[1]],
+        range.rows,
+        range.columns,
         format,
       );
       const what = `${plural(copied.rows, "row")} × ${plural(copied.columns, "column")}`;

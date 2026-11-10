@@ -81,6 +81,7 @@ pub fn run() {
             explorer::tabs_load,
             explorer::tabs_save,
             query::query_open,
+            query::query_databases,
             query::query_sqlcmd_prepare,
             query::query_sqlcmd_execute,
             query::query_close,

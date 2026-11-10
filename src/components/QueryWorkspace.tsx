@@ -33,7 +33,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { api, displayName, errorMessage } from "@/lib/api";
+import { api, errorMessage } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/interfaces-select";
 import { scriptForExecution, focusEditor, revealLine } from "@/lib/editor";
 import { ENVIRONMENTS } from "@/lib/environment";
@@ -145,7 +145,8 @@ const TabItem = memo(function TabItem({ id, selected }: { id: string; selected: 
         ? {
             id: t.id,
             title: t.title,
-            connectionId: t.connectionId,
+            connectionName: t.connectionName,
+            server: t.server,
             database: t.database,
             filePath: t.filePath,
             dirty: t.dirty,
@@ -155,10 +156,10 @@ const TabItem = memo(function TabItem({ id, selected }: { id: string; selected: 
         : null;
     }),
   );
-  const connection = useConnections((s) => (tab ? s.connections.find((c) => c.id === tab.connectionId) : undefined));
   const activate = useQueries((s) => s.activate);
   if (!tab) return null;
-  const where = connection ? `${displayName(connection)}${tab.database ? ` · ${tab.database}` : ""}` : undefined;
+  const connectionName = tab.connectionName || tab.server?.serverName;
+  const where = connectionName ? `${connectionName}${tab.database ? ` · ${tab.database}` : ""}` : undefined;
   return (
     <Tip
       side="bottom"
@@ -201,7 +202,7 @@ const TabItem = memo(function TabItem({ id, selected }: { id: string; selected: 
         {tab.dirty && <span className="shrink-0">*</span>}
       </span>
       {/* The title keeps up to 10rem; the server gives way, so a long name never cuts the title to "Q…". */}
-      {connection && <span className="min-w-0 truncate text-xs text-muted-foreground">{displayName(connection)}</span>}
+      {connectionName && <span className="min-w-0 truncate text-xs text-muted-foreground">{connectionName}</span>}
       <button
         aria-label="Close"
         // A 20 px target; -mr-1 keeps the tab's right padding where it was.
@@ -223,20 +224,25 @@ function DatabaseSelector({ tab }: { tab: QueryTab }) {
   const useDatabase = useQueries((s) => s.useDatabase);
   const [databases, setDatabases] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const request = useRef(0);
+  useEffect(() => () => { ++request.current; }, []);
 
   // Listed when the menu opens, so new databases show up without a refresh.
   async function load(open: boolean) {
+    const revision = ++request.current;
     if (!open) return;
+    setDatabases(null);
+    setError(null);
     try {
-      setDatabases((await api.databases(tab.connectionId)).map((d) => d.name));
-      setError(null);
+      const names = (await api.queryDatabases(tab.id)).map((d) => d.name);
+      if (revision === request.current) setDatabases(names);
     } catch (e) {
-      setError(errorMessage(e));
+      if (revision === request.current) setError(errorMessage(e));
     }
   }
 
   const current = tab.database ?? "";
-  const options = databases ?? (current ? [current] : []);
+  const options = databases?.includes(current) ? databases : [...(current ? [current] : []), ...(databases ?? [])];
   return (
     <Select
       value={current}
@@ -345,7 +351,7 @@ function Toolbar({ tab }: { tab: QueryTab }) {
         </Button>
       </Tip>
       <div className="mx-1 h-5 w-px bg-border" />
-      <DatabaseSelector tab={tab} />
+      <DatabaseSelector key={`${tab.id}:${tab.sessionRevision}`} tab={tab} />
       <Select
         value={tab.planMode ?? "none"}
         disabled={executing || tab.sqlcmdMode}
@@ -675,7 +681,6 @@ function formatElapsed(ms: number | null) {
 }
 
 function StatusBar({ tab }: { tab: QueryTab }) {
-  const connection = useConnections((s) => s.connections.find((c) => c.id === tab.connectionId));
   const elapsed = useElapsed(tab);
   const rows = tab.resultSets.reduce((sum, set) => sum + set.rows, 0);
 
@@ -712,13 +717,7 @@ function StatusBar({ tab }: { tab: QueryTab }) {
     status = "Connected.";
   }
 
-  const login = connection
-    ? connection.authentication.kind === "sql"
-      ? connection.authentication.userName
-      : connection.authentication.kind === "entra"
-        ? "Microsoft Entra"
-        : "Windows"
-    : null;
+  const login = tab.login;
   // Long names give way, cut with their full text on hover; the time and row count never do.
   return (
     <footer className="flex h-6 shrink-0 items-center gap-4 overflow-hidden border-t bg-panel px-3 text-xs text-muted-foreground">

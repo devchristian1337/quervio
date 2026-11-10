@@ -430,24 +430,99 @@ impl ResultSet {
 
     /// Tab-separated text of a block of cells, as SSMS copies it.
     pub fn copy_text(&self, rows: Range<usize>, columns: Range<usize>, headers: bool) -> String {
-        let rows = rows.start.min(self.row_count())..rows.end.min(self.row_count());
-        let columns = columns.start.min(self.columns.len())..columns.end.min(self.columns.len());
+        self.selection(&[rows], &[columns]).copy_text(headers)
+    }
+
+    /// A selection in displayed order. Keep ranges compact even for millions
+    /// of selected rows; clamp and merge them before accessing stored cells.
+    pub fn selection(&self, rows: &[Range<usize>], columns: &[Range<usize>]) -> ResultSelection<'_> {
+        ResultSelection {
+            set: self,
+            rows: selection_ranges(rows, self.row_count()),
+            columns: selection_ranges(columns, self.columns.len()),
+        }
+    }
+
+    /// A block of cells as a GitHub-flavoured Markdown table.
+    pub fn write_markdown(
+        &self,
+        out: &mut impl Write,
+        rows: Range<usize>,
+        columns: Range<usize>,
+    ) -> io::Result<()> {
+        self.selection(&[rows], &[columns]).write_markdown(out)
+    }
+
+    pub fn markdown(&self, rows: Range<usize>, columns: Range<usize>) -> String {
+        self.selection(&[rows], &[columns]).markdown()
+    }
+}
+
+/// Selected rows and columns of one Result Set, including gaps between them.
+/// Row indices refer to the current sort order, not to physical storage.
+pub struct ResultSelection<'a> {
+    set: &'a ResultSet,
+    rows: Vec<Range<usize>>,
+    columns: Vec<Range<usize>>,
+}
+
+fn selection_ranges(ranges: &[Range<usize>], bound: usize) -> Vec<Range<usize>> {
+    let mut ranges: Vec<_> = ranges
+        .iter()
+        .map(|range| range.start.min(bound)..range.end.min(bound))
+        .filter(|range| !range.is_empty())
+        .collect();
+    ranges.sort_unstable_by_key(|range| (range.start, range.end));
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for range in ranges {
+        if let Some(last) = merged.last_mut()
+            && range.start <= last.end
+        {
+            last.end = last.end.max(range.end);
+        } else {
+            merged.push(range);
+        }
+    }
+    merged
+}
+
+impl ResultSelection<'_> {
+    pub fn row_count(&self) -> usize {
+        self.rows.iter().map(|range| range.len()).sum()
+    }
+
+    pub fn column_count(&self) -> usize {
+        self.columns.iter().map(|range| range.len()).sum()
+    }
+
+    fn rows(&self) -> impl Iterator<Item = usize> + '_ {
+        self.rows.iter().flat_map(|range| range.clone())
+    }
+
+    fn columns(&self) -> impl Iterator<Item = usize> + '_ {
+        self.columns.iter().flat_map(|range| range.clone())
+    }
+
+    pub fn copy_text(&self, headers: bool) -> String {
         let mut out = String::new();
+        if self.columns.is_empty() {
+            return out;
+        }
         if headers {
-            let names: Vec<_> = self.columns[columns.clone()]
-                .iter()
-                .map(|c| c.name.as_str())
+            let names: Vec<_> = self
+                .columns()
+                .map(|column| self.set.columns[column].name.as_str())
                 .collect();
             out.push_str(&names.join("\t"));
             out.push_str("\r\n");
         }
-        for row in rows {
-            let row = self.stored(row);
-            for (i, column) in columns.clone().enumerate() {
+        for row in self.rows() {
+            let row = self.set.stored(row);
+            for (i, column) in self.columns().enumerate() {
                 if i > 0 {
                     out.push('\t');
                 }
-                out.push_str(self.cell_text(row, column).unwrap_or("NULL"));
+                out.push_str(self.set.cell_text(row, column).unwrap_or("NULL"));
             }
             out.push_str("\r\n");
         }
@@ -457,15 +532,12 @@ impl ResultSet {
     /// A block of cells as a GitHub-flavoured Markdown table, kept compact
     /// for LLM prompts: no padding, `|` escaped, line breaks as `<br>`, and
     /// NULL spelled out so it differs from an empty string.
-    pub fn write_markdown(
-        &self,
-        out: &mut impl Write,
-        rows: Range<usize>,
-        columns: Range<usize>,
-    ) -> io::Result<()> {
-        let rows = rows.start.min(self.row_count())..rows.end.min(self.row_count());
-        let columns = columns.start.min(self.columns.len())..columns.end.min(self.columns.len());
-        let names = self.columns[columns.clone()].iter().map(|c| {
+    pub fn write_markdown(&self, out: &mut impl Write) -> io::Result<()> {
+        if self.columns.is_empty() {
+            return Ok(());
+        }
+        let names = self.columns().map(|column| {
+            let c = &self.set.columns[column];
             if c.name.is_empty() {
                 "(No column name)".to_string()
             } else {
@@ -473,13 +545,13 @@ impl ResultSet {
             }
         });
         writeln!(out, "| {} |", names.collect::<Vec<_>>().join(" | "))?;
-        writeln!(out, "|{}", "---|".repeat(columns.len()))?;
-        for row in rows {
-            let row = self.stored(row);
-            let cells: Vec<_> = columns
-                .clone()
+        writeln!(out, "|{}", "---|".repeat(self.column_count()))?;
+        for row in self.rows() {
+            let row = self.set.stored(row);
+            let cells: Vec<_> = self
+                .columns()
                 .map(|column| {
-                    self.cell_text(row, column)
+                    self.set.cell_text(row, column)
                         .map_or_else(|| "NULL".to_string(), markdown_cell)
                 })
                 .collect();
@@ -488,9 +560,9 @@ impl ResultSet {
         Ok(())
     }
 
-    pub fn markdown(&self, rows: Range<usize>, columns: Range<usize>) -> String {
+    pub fn markdown(&self) -> String {
         let mut out = Vec::new();
-        self.write_markdown(&mut out, rows, columns)
+        self.write_markdown(&mut out)
             .expect("writing to memory cannot fail");
         String::from_utf8(out).expect("cells are UTF-8")
     }
@@ -930,6 +1002,61 @@ mod tests {
             "Id\tName\r\n1\tRossi\r\n2\tNULL\r\n"
         );
         assert_eq!(set().copy_text(2..9, 1..2, false), "Bianchi, \"Gino\"\r\n");
+    }
+
+    #[test]
+    fn copies_only_selected_rows_and_columns_in_display_order() {
+        let mut data = ResultSet::new(
+            ["A", "B", "C"]
+                .into_iter()
+                .map(|name| ResultColumn {
+                    name: name.into(),
+                    kind: ColumnKind::Number,
+                })
+                .collect(),
+        );
+        for row in 0..3 {
+            data.push_row(
+                &[
+                    ColumnValues::Int(row * 3 + 1),
+                    ColumnValues::Int(row * 3 + 2),
+                    ColumnValues::Int(row * 3 + 3),
+                ],
+                100,
+            );
+        }
+        let selected = data.selection(&[0..1, 2..3], &[0..1, 2..3]);
+        assert_eq!((selected.row_count(), selected.column_count()), (2, 2));
+        assert_eq!(selected.copy_text(false), "1\t3\r\n7\t9\r\n");
+        assert_eq!(selected.copy_text(true), "A\tC\r\n1\t3\r\n7\t9\r\n");
+        assert_eq!(
+            selected.markdown(),
+            "| A | C |\n|---|---|\n| 1 | 3 |\n| 7 | 9 |\n"
+        );
+
+        data.sort(Some((0, SortDirection::Descending)));
+        assert_eq!(
+            data.selection(&[0..1, 2..3], &[0..1, 2..3]).copy_text(false),
+            "7\t9\r\n1\t3\r\n"
+        );
+    }
+
+    #[test]
+    fn copy_selections_merge_duplicates_and_ignore_invalid_ranges() {
+        let data = set();
+        let reversed = Range { start: 2, end: 1 };
+        let selected = data.selection(
+            &[2..99, 0..1, 0..1, reversed, 9..10],
+            &[1..99, 0..1, 1..2],
+        );
+        assert_eq!((selected.row_count(), selected.column_count()), (2, 2));
+        assert_eq!(
+            selected.copy_text(true),
+            "Id\tName\r\n1\tRossi\r\n3\tBianchi, \"Gino\"\r\n"
+        );
+        assert_eq!(data.selection(&[], &[0..2]).copy_text(false), "");
+        assert_eq!(data.selection(&[0..3], &[]).copy_text(true), "");
+        assert_eq!(data.selection(&[0..3], &[]).markdown(), "");
     }
 
     #[test]

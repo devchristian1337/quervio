@@ -63,6 +63,67 @@ async function openTab(connection: SavedConnection) {
 
 const drop = { text: "DROP TABLE dbo.t", baseLine: 0 };
 
+describe("closing a Query Tab while its Session opens", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useQueries.setState({ tabs: [], activeId: null });
+  });
+
+  it("closes a Session that finishes opening after its tab was removed", async () => {
+    const sessions = new Set<string>();
+    let finish!: () => void;
+    vi.mocked(api.openQuery).mockImplementationOnce((id) => new Promise((resolve) => {
+      finish = () => {
+        sessions.add(id);
+        resolve({ serverName: "prod1", version: "16.0", database: "master" });
+      };
+    }));
+    vi.mocked(api.closeQuery).mockImplementation(async (id) => { sessions.delete(id); });
+    const opening = useQueries.getState().open(production.id, null, { execute: true, text: "SELECT 1" });
+    const id = useQueries.getState().activeId!;
+    await useQueries.getState().close(id);
+    finish();
+    await opening;
+    expect(sessions.size).toBe(0);
+    expect(api.closeQuery).toHaveBeenCalledTimes(2);
+    expect(api.executeQuery).not.toHaveBeenCalled();
+    expect(useQueries.getState().tabs).toEqual([]);
+    vi.mocked(api.closeQuery).mockReset().mockResolvedValue(undefined);
+  });
+
+  it("keeps the original connection name and login when the Saved Connection changes", async () => {
+    const id = await openTab(production);
+    useConnections.setState({ connections: [{ ...production, name: "Other", server: "other", authentication: { kind: "sql", userName: "other-user" } }] });
+    const current = useQueries.getState().tabs.find((tab) => tab.id === id);
+    expect(current).toMatchObject({ connectionName: "Prod", login: "u" });
+  });
+
+  it("uses the name and authenticated login returned by the opened Session", async () => {
+    vi.mocked(api.openQuery).mockResolvedValueOnce({
+      serverName: "actual-server", version: "16.0", database: "master",
+      connectionName: "Actual target", login: "authenticated-login",
+    });
+    const id = await openTab(production);
+    useConnections.setState({ connections: [] });
+    expect(useQueries.getState().tabs.find((tab) => tab.id === id))
+      .toMatchObject({ connectionName: "Actual target", login: "authenticated-login" });
+  });
+
+  it("replaces display context and invalidates database lists when SQLCMD changes Session", async () => {
+    const id = await openTab({ ...production, environment: "development" });
+    vi.mocked(api.executeQuery).mockImplementationOnce(async (...args) => {
+      args[5].onmessage({ type: "sessionChanged", connectionId: null, connectionName: "SQLCMD target",
+        server: { serverName: "actual-server", version: "16.0", database: "other", login: "actual-user" } });
+      return "succeeded";
+    });
+    await useQueries.getState().execute(id, { text: "SELECT 1", baseLine: 0 });
+    expect(useQueries.getState().tabs.find((tab) => tab.id === id)).toMatchObject({
+      connectionName: "SQLCMD target", login: "actual-user", database: "other", sessionRevision: 1,
+      metadataAvailable: false, environment: "production",
+    });
+  });
+});
+
 describe("SQLCMD include consent", () => {
   const ask = vi.fn(async () => false);
   const input = { text: ':r "include.sql"', baseLine: 0 };

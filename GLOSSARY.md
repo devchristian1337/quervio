@@ -38,6 +38,10 @@ _Avoid_: run, lancio
 Una tabella di righe restituita da una singola istruzione durante un'Esecuzione.
 _Avoid_: risultato, griglia, tabella
 
+**Selezione dei risultati** (Result Selection):
+Il sottoinsieme di celle scelto in un Result set, definito da righe e colonne anche non contigue.
+_Avoid_: selezione SQL, blocco (se la selezione non è contigua)
+
 **Messaggio** (Message):
 Un output del Server che non è un Result set: testo di `PRINT`, conteggio delle righe interessate, avvisi ed errori.
 _Avoid_: log, output

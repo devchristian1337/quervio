@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Loader2, TriangleAlert, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/radix-checkbox";
@@ -51,17 +51,27 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
   const [test, setTest] = useState<TestState>({ status: "idle" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const testRevision = useRef(0);
 
   useEffect(() => {
+    ++testRevision.current;
+    setTest({ status: "idle" });
     if (!open) return;
     setDraft(editing ?? { ...newConnection(), ...preset });
     setPassword("");
-    setTest({ status: "idle" });
     setError(null);
-    // The preset belongs to this opening only.
+    // The preset belongs to this opening only. Pending tests belong to it too.
+    return () => { ++testRevision.current; };
   }, [open, editing]);
 
-  const update = (patch: Partial<SavedConnection>) => setDraft((d) => ({ ...d, ...patch }));
+  const invalidateTest = () => {
+    ++testRevision.current;
+    setTest({ status: "idle" });
+  };
+  const update = (patch: Partial<SavedConnection>) => {
+    invalidateTest();
+    setDraft((d) => ({ ...d, ...patch }));
+  };
   const isSql = draft.authentication.kind === "sql";
   const userName = draft.authentication.kind === "sql" ? draft.authentication.userName : "";
   // Editing a SQL login keeps the stored password unless a new one is typed.
@@ -87,12 +97,13 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
   });
 
   async function runTest() {
+    const revision = ++testRevision.current;
     setTest({ status: "running" });
     try {
       const info = await api.testConnection(cleaned(), password || null);
-      setTest({ status: "ok", text: `Connected to ${info.serverName} (SQL Server ${info.version})` });
+      if (revision === testRevision.current) setTest({ status: "ok", text: `Connected to ${info.serverName} (SQL Server ${info.version})` });
     } catch (e) {
-      setTest({ status: "failed", text: errorMessage(e) });
+      if (revision === testRevision.current) setTest({ status: "failed", text: errorMessage(e) });
     }
   }
 
@@ -171,7 +182,7 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
                   type="password"
                   placeholder={keepsPassword ? "Unchanged" : ""}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { invalidateTest(); setPassword(e.target.value); }}
                 />
               </Field>
             </div>
