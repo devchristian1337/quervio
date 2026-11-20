@@ -85,46 +85,77 @@ impl Session {
         Ok(())
     }
     /// Bounded metadata read, with exact text conversion and untruncated XML.
+    ///
+    /// Keeps the first row-returning result set (skipping leading `NoRows` such
+    /// as `PRINT`). At `limit`, peeks one more row before marking truncated —
+    /// same rule as Query Tab execution — then
+    /// [`abandon_query`](TdsClient::abandon_query) discards the unread tail
+    /// instead of draining it through `close_query`.
     pub async fn query_table(
         &mut self,
         sql: &str,
         limit: usize,
     ) -> Result<crate::management::DataTable> {
-        let first = self.client.execute(sql.to_string(), ()).await;
         let mut table = crate::management::DataTable {
             columns: Vec::new(),
             rows: Vec::new(),
             truncated: false,
         };
         let outcome: Result<()> = async {
-            if matches!(first?, StatementResult::Rows) {
-                table.columns = self
-                    .client
-                    .get_metadata()
-                    .iter()
-                    .map(|c| c.column_name.clone())
-                    .collect();
-                while let Some(row) = self.client.next_row().await? {
-                    if table.rows.len() >= limit {
-                        table.truncated = true;
-                        break;
+            let mut step = self.client.execute(sql.to_string(), ()).await?;
+            loop {
+                match step {
+                    StatementResult::End => break,
+                    StatementResult::Rows => {
+                        if !table.columns.is_empty() {
+                            while self.client.next_row().await?.is_some() {}
+                        } else {
+                            table.columns = self
+                                .client
+                                .get_metadata()
+                                .iter()
+                                .map(|c| c.column_name.clone())
+                                .collect();
+                            while let Some(row) = self.client.next_row().await? {
+                                table.rows.push(
+                                    row.iter()
+                                        .map(|v| {
+                                            let mut s = String::new();
+                                            crate::format::write_value(v, &mut s).map(|()| s)
+                                        })
+                                        .collect(),
+                                );
+                                if table.rows.len() < limit {
+                                    continue;
+                                }
+                                // Exactly `limit` rows is complete; stop only when
+                                // the Server has another row (see execution.rs).
+                                if self.client.next_row().await?.is_some() {
+                                    table.truncated = true;
+                                }
+                                break;
+                            }
+                        }
                     }
-                    table.rows.push(
-                        row.iter()
-                            .map(|v| {
-                                let mut s = String::new();
-                                crate::format::write_value(v, &mut s).map(|()| s)
-                            })
-                            .collect(),
-                    );
+                    StatementResult::NoRows { .. } => {}
                 }
+                if table.truncated {
+                    break;
+                }
+                step = self.client.advance().await?;
             }
             Ok(())
         }
         .await;
-        let closed = self.client.close_query().await;
-        outcome?;
-        closed?;
+        if table.truncated {
+            let abandoned = self.client.abandon_query(0).await;
+            outcome?;
+            abandoned?;
+        } else {
+            let closed = self.client.close_query().await;
+            outcome?;
+            closed?;
+        }
         Ok(table)
     }
     /// Logs in to the Server of `connection`. `password` is required for SQL
