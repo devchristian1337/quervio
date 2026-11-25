@@ -581,10 +581,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[derive(Default)]
+    struct MemorySecretStore {
+        secrets: Mutex<HashMap<String, String>>,
+    }
+
+    impl SecretStore for MemorySecretStore {
+        fn get(&self, connection_id: &str) -> quervio_core::Result<Option<String>> {
+            Ok(self.secrets.lock().unwrap().get(connection_id).cloned())
+        }
+
+        fn set(&self, connection_id: &str, secret: &str) -> quervio_core::Result<()> {
+            self.secrets
+                .lock()
+                .unwrap()
+                .insert(connection_id.to_string(), secret.to_string());
+            Ok(())
+        }
+
+        fn delete(&self, connection_id: &str) -> quervio_core::Result<()> {
+            self.secrets.lock().unwrap().remove(connection_id);
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn saved_password_is_not_reused_for_modified_server_login_or_weakened_tls() {
         let dir = std::env::temp_dir().join(format!("quervio-cred-guard-{}", uuid::Uuid::new_v4()));
-        let state = ExplorerState::open(&dir, &dir).unwrap();
+        let mut state = ExplorerState::open(&dir, &dir).unwrap();
+        state.secrets = Box::new(MemorySecretStore::default());
         let saved = state
             .connections
             .lock()
