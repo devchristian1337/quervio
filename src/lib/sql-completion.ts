@@ -97,13 +97,19 @@ export function tableReferences(text: string): TableReference[] {
     "gi",
   );
   const references: TableReference[] = [];
-  for (const m of text.matchAll(pattern)) {
+  let m: RegExpExecArray | null;
+  while ((m = pattern.exec(text)) !== null) {
     const parts = [unbracket(m[1], m[2]), unbracket(m[3], m[4]), unbracket(m[5], m[6])].filter(Boolean);
     // db.schema.name, schema.name or name.
     const name = parts[parts.length - 1];
     const schema = parts.length > 1 ? parts[parts.length - 2] : null;
     const aliasText = unbracket(m[7], m[8]);
-    const alias = aliasText && !(m[8] && NOT_ALIAS.has(aliasText.toUpperCase())) ? aliasText : null;
+    const isKeywordNotAlias = Boolean(m[8] && NOT_ALIAS.has(aliasText.toUpperCase()));
+    const alias = aliasText && !isKeywordNotAlias ? aliasText : null;
+    if (isKeywordNotAlias) {
+      // Do not consume a following clause keyword (e.g. JOIN/USING/UPDATE) as an alias.
+      pattern.lastIndex = m.index + m[0].length - m[8].length;
+    }
     if (name.startsWith("@") || name.startsWith("#")) continue;
     references.push({ schema, name, alias });
   }

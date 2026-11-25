@@ -103,15 +103,18 @@ async function restoreSnapshot() {
       // open() adds its tab at once and then logs in. Only the tabs need to be
       // in place: autosave and closing must not wait for a slow or unreachable
       // server, and open() reports its own connection errors in the tab.
-      void Promise.allSettled(saved.tabs.map((tab, index) => open(tab.connectionId, tab.database, {
-        title: tab.title,
-        text: tab.text,
-        filePath: tab.filePath,
-        dirty: tab.dirty,
-        activate: index === saved.active,
-        sqlcmdMode: tab.sqlcmdMode === true,
-        planMode: tab.planMode === "estimated" || tab.planMode === "actual" ? tab.planMode : "none",
-      })));
+      void Promise.allSettled(saved.tabs.map((tab, index) => {
+        const sqlcmdMode = tab.sqlcmdMode === true;
+        return open(tab.connectionId, tab.database, {
+          title: tab.title,
+          text: tab.text,
+          filePath: tab.filePath,
+          dirty: tab.dirty,
+          activate: index === saved.active,
+          sqlcmdMode,
+          planMode: !sqlcmdMode && (tab.planMode === "estimated" || tab.planMode === "actual") ? tab.planMode : "none",
+        });
+      }));
       if (missing) toast.warning("Some Saved Connections are unavailable", {
         description: "Their SQL has been kept in disconnected query tabs.",
       });

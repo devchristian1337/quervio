@@ -124,10 +124,16 @@ export function PlanViewer({
   plans?: string[];
 }) {
   const [loaded, setLoaded] = useState<string | null>(null),
+    [lastSupplied, setLastSupplied] = useState(supplied),
     [index, setIndex] = useState(0),
     [selected, setSelected] = useState<number | null>(null),
     [error, setError] = useState<string | null>(null),
     [zoom, setZoom] = useState(1);
+  if (supplied !== lastSupplied) {
+    setLastSupplied(supplied);
+    setLoaded(null);
+    setSelected(null);
+  }
   const xml =
     loaded ??
     supplied ??

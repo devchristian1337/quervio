@@ -2,6 +2,7 @@
 //! never go in this file; they live in a [`crate::secrets::SecretStore`].
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -110,25 +111,29 @@ impl ConnectionStore {
 
     /// Groups have their own lifetime, including when their last server is deleted.
     pub fn list_groups(&self) -> Vec<String> {
-        let mut groups = self.groups.clone();
-        groups.extend(self.connections.iter().filter_map(|c| c.group.clone()));
-        groups.sort();
-        groups.dedup();
-        groups
+        merged_groups(&self.groups, &self.connections)
     }
 
     /// Renames a group (even an empty one), or explicitly ungroups its servers.
     pub fn update_group(&mut self, name: &str, new_name: Option<&str>) -> Result<()> {
         let new_name = new_name.map(str::trim).filter(|s| !s.is_empty());
-        self.groups.retain(|g| g != name);
-        for connection in self.connections.iter_mut().filter(|c| c.group.as_deref() == Some(name)) {
+        let mut next_groups = self.groups.clone();
+        next_groups.retain(|g| g != name);
+        let mut next_connections = self.connections.clone();
+        for connection in next_connections
+            .iter_mut()
+            .filter(|c| c.group.as_deref() == Some(name))
+        {
             connection.group = new_name.map(str::to_string);
         }
         if let Some(name) = new_name {
-            self.groups.push(name.to_string());
+            next_groups.push(name.to_string());
         }
-        self.groups = self.list_groups();
-        self.write()
+        next_groups = merged_groups(&next_groups, &next_connections);
+        self.write_data(&next_connections, &next_groups)?;
+        self.connections = next_connections;
+        self.groups = next_groups;
+        Ok(())
     }
 
     pub fn get(&self, id: &str) -> Result<&SavedConnection> {
@@ -143,50 +148,91 @@ impl ConnectionStore {
         if connection.id.is_empty() {
             connection.id = uuid::Uuid::new_v4().to_string();
         }
-        match self.connections.iter_mut().find(|c| c.id == connection.id) {
+        let mut next_connections = self.connections.clone();
+        match next_connections.iter_mut().find(|c| c.id == connection.id) {
             Some(existing) => *existing = connection.clone(),
-            None => self.connections.push(connection.clone()),
+            None => next_connections.push(connection.clone()),
         }
-        self.groups = self.list_groups();
-        self.write()?;
+        let next_groups = merged_groups(&self.groups, &next_connections);
+        self.write_data(&next_connections, &next_groups)?;
+        self.connections = next_connections;
+        self.groups = next_groups;
         Ok(connection)
     }
 
     /// Moves connections into a group, or out of any with None, in one write.
     pub fn set_group(&mut self, ids: &[String], group: Option<&str>) -> Result<Vec<SavedConnection>> {
-        let group = group.map(str::trim).filter(|name| !name.is_empty()).map(str::to_string);
+        let group = group
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string);
+        let mut next_connections = self.connections.clone();
         let mut moved = Vec::new();
-        for connection in self.connections.iter_mut().filter(|c| ids.contains(&c.id)) {
+        for connection in next_connections.iter_mut().filter(|c| ids.contains(&c.id)) {
             connection.group = group.clone();
             moved.push(connection.clone());
         }
-        self.groups = self.list_groups();
-        self.write()?;
+        let next_groups = merged_groups(&self.groups, &next_connections);
+        self.write_data(&next_connections, &next_groups)?;
+        self.connections = next_connections;
+        self.groups = next_groups;
         Ok(moved)
     }
 
     pub fn remove(&mut self, id: &str) -> Result<()> {
-        self.groups = self.list_groups();
-        self.connections.retain(|connection| connection.id != id);
-        self.write()
+        let next_groups = merged_groups(&self.groups, &self.connections);
+        let mut next_connections = self.connections.clone();
+        next_connections.retain(|connection| connection.id != id);
+        self.write_data(&next_connections, &next_groups)?;
+        self.connections = next_connections;
+        self.groups = next_groups;
+        Ok(())
     }
 
-    /// Writes through a temporary file so a crash never leaves half a file.
-    fn write(&self) -> Result<()> {
+    /// Writes through a unique flushed temporary file so a crash never leaves
+    /// half a file and a failure leaves existing state untouched.
+    fn write_data(&self, connections: &[SavedConnection], groups: &[String]) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
         let temporary = temporary_path(&self.path);
-        let data = StoredConnections { connections: self.connections.clone(), groups: self.groups.clone() };
-        fs::write(&temporary, serde_json::to_vec_pretty(&data)?)?;
-        fs::rename(&temporary, &self.path)?;
+        let data = StoredConnections {
+            connections: connections.to_vec(),
+            groups: groups.to_vec(),
+        };
+        let bytes = serde_json::to_vec_pretty(&data)?;
+        let write_result = (|| -> std::io::Result<()> {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)?;
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&temporary);
+            return Err(error.into());
+        }
+        if let Err(error) = fs::rename(&temporary, &self.path) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error.into());
+        }
         Ok(())
     }
 }
 
+fn merged_groups(explicit: &[String], connections: &[SavedConnection]) -> Vec<String> {
+    let mut groups = explicit.to_vec();
+    groups.extend(connections.iter().filter_map(|c| c.group.clone()));
+    groups.sort();
+    groups.dedup();
+    groups
+}
+
 fn temporary_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(".tmp");
+    name.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
     path.with_file_name(name)
 }
 
@@ -332,5 +378,22 @@ mod tests {
         let mut connection = sample();
         connection.name = "  ".into();
         assert_eq!(connection.display_name(), r"srv01\SQL2022");
+    }
+
+    #[test]
+    fn failed_write_leaves_in_memory_state_unchanged_and_cleans_up_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let mut store = ConnectionStore::open(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(store.save(sample()).is_err());
+        assert!(store.list().is_empty());
+        assert!(store.list_groups().is_empty());
+        let leftover: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftover.is_empty(), "leftover temp files: {leftover:?}");
     }
 }

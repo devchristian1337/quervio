@@ -60,6 +60,7 @@ export function tableScript(
   identifier(table.name);
   if (!table.columns.length)
     throw new Error("A table needs at least one column.");
+  for (const c of table.columns) identifier(c.name);
   if (
     new Set(table.columns.map((c) => c.name.toLowerCase())).size !==
     table.columns.length
@@ -340,7 +341,11 @@ export function maintenanceScript(
     minute > 59
   )
     throw new Error("Invalid schedule time.");
+  if (tasks.some((t) => !t.id || typeof t.id !== "string"))
+    throw new Error("Each maintenance task needs an id.");
   const ids = new Map(tasks.map((task, index) => [task.id, index + 1]));
+  if (ids.size !== tasks.length)
+    throw new Error("Maintenance task IDs must be unique.");
   const visited = new Set<string>(),
     active = new Set<string>();
   function visit(id: string) {
@@ -351,7 +356,8 @@ export function maintenanceScript(
     const t = tasks.find((t) => t.id === id);
     if (!t) throw new Error("A flow target does not exist.");
     const defaultNext = tasks[tasks.indexOf(t) + 1]?.id;
-    for (const edge of [t.nextSuccess ?? defaultNext, t.nextFailure])
+    // Empty string means default next step, matching SQL generation below.
+    for (const edge of [t.nextSuccess || defaultNext, t.nextFailure])
       if (edge) visit(edge);
     active.delete(id);
     visited.add(id);
@@ -392,10 +398,14 @@ export function maintenanceScript(
         `EXEC msdb.dbo.sp_add_jobstep @job_id=@job, @step_id=${i + 1}, @step_name=${l(`${i + 1}. ${t.kind}`)}, @subsystem=N'TSQL', @database_name=${l(database)}, @command=${l(taskSql(t))}, @on_success_action=${t.nextSuccess ? 4 : i === tasks.length - 1 ? 1 : 3}${t.nextSuccess ? `, @on_success_step_id=${ids.get(t.nextSuccess)}` : ""}, @on_fail_action=${t.nextFailure ? 4 : 2}${t.nextFailure ? `, @on_fail_step_id=${ids.get(t.nextFailure)}` : ""};`,
     )
     .join("\n");
+  const scheduleBase =
+    name.length > 122
+      ? name.slice(0, name.charCodeAt(121) >= 0xd800 && name.charCodeAt(121) <= 0xdbff ? 121 : 122)
+      : name;
   // msdb procedures report failures with RAISERROR, which XACT_ABORT does not
   // turn into a rollback; TRY/CATCH does, so a failed step leaves no half job.
   return transactional(
-    `DECLARE @job uniqueidentifier;\nEXEC msdb.dbo.sp_add_job @job_name=${l(name)}, @enabled=1, @description=N'Quervio maintenance flow', @job_id=@job OUTPUT;\n${steps}\nEXEC msdb.dbo.sp_add_jobschedule @job_id=@job, @name=${l(name + " daily")}, @freq_type=4, @freq_interval=1, @active_start_time=${hour * 10000 + minute * 100};\nEXEC msdb.dbo.sp_add_jobserver @job_id=@job;`,
+    `DECLARE @job uniqueidentifier;\nEXEC msdb.dbo.sp_add_job @job_name=${l(name)}, @enabled=1, @description=N'Quervio maintenance flow', @job_id=@job OUTPUT;\n${steps}\nEXEC msdb.dbo.sp_add_jobschedule @job_id=@job, @name=${l(scheduleBase + " daily")}, @freq_type=4, @freq_interval=1, @active_start_time=${hour * 10000 + minute * 100};\nEXEC msdb.dbo.sp_add_jobserver @job_id=@job;`,
   );
 }
 

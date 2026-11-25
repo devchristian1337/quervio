@@ -250,14 +250,22 @@ const ToolFrame = memo(function ToolFrame({ tab, active = true }: { tab: ToolTab
         (value) => !disposed && setCapabilities(value),
         (e) => !disposed && setError(errorMessage(e)),
       );
-    void api.databases(connectionId).then(
-      (values) => !disposed && setDatabases(values.map((d) => d.name)),
-      () => {},
-    );
     return () => {
       disposed = true;
     };
   }, [connectionId, database]);
+  useEffect(() => {
+    setDatabases([]);
+    if (!connectionId) return;
+    let disposed = false;
+    void api.databases(connectionId).then(
+      (values) => !disposed && setDatabases(values.map((d) => d.name)),
+      () => !disposed && setDatabases([]),
+    );
+    return () => {
+      disposed = true;
+    };
+  }, [connectionId]);
   const context = {
     connectionId,
     database: database || capabilities?.database || null,
@@ -357,6 +365,7 @@ const ToolFrame = memo(function ToolFrame({ tab, active = true }: { tab: ToolTab
               onChange={(id) => {
                 setConnectionId(id);
                 setDatabase("");
+                setDatabases([]);
               }}
               options={connections.map((c) => [c.id, displayName(c)] as const)}
             />

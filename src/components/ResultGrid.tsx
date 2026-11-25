@@ -318,9 +318,11 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   // frame is drawn: the grid stays, so nothing blinks out in between. The
   // run counts per tab, so the tab is part of what is shown, too.
   const shownRun = useRef(`${tabId}\u0000${runId}`);
+  const sortRevision = useRef(0);
   useLayoutEffect(() => {
     if (shownRun.current === `${tabId}\u0000${runId}`) return;
     shownRun.current = `${tabId}\u0000${runId}`;
+    ++sortRevision.current;
     blocks.current = startingBlocks(tabId, runId, set.index);
     pending.current = new Set();
     setSelection(emptySelection);
@@ -414,6 +416,23 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
     [fetchBlock, nullTheme, set.kinds, order],
   );
 
+  async function applySort(next: Sort) {
+    const expectedRun = shownRun.current;
+    const revision = ++sortRevision.current;
+    try {
+      await api.resultSort(tabId, set.index, next?.column ?? null, next?.direction ?? "ascending");
+      if (shownRun.current !== expectedRun || sortRevision.current !== revision) return;
+      forgetFirstBlock(tabId, set.index);
+      blocks.current = new Map();
+      pending.current = new Set();
+      setSort(next);
+      setOrder((value) => value + 1);
+    } catch (error) {
+      if (shownRun.current !== expectedRun || sortRevision.current !== revision) return;
+      toast.error("Sort failed", { description: errorMessage(error) });
+    }
+  }
+
   async function sortBy(column: number) {
     if (!set.done) {
       toast.info("Wait for the query to finish to sort");
@@ -426,16 +445,7 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
         : sort.direction === "ascending"
           ? { column, direction: "descending" }
           : null;
-    try {
-      await api.resultSort(tabId, set.index, next?.column ?? null, next?.direction ?? "ascending");
-      forgetFirstBlock(tabId, set.index);
-      blocks.current = new Map();
-      pending.current = new Set();
-      setSort(next);
-      setOrder((value) => value + 1);
-    } catch (error) {
-      toast.error("Sort failed", { description: errorMessage(error) });
-    }
+    await applySort(next);
   }
 
   const drawCell = useCallback<DrawCellCallback>(
@@ -560,6 +570,7 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
+    if (viewer || !event.currentTarget.contains(event.target as Node)) return;
     if (event.key === "Escape" && (selection.rows.length || selection.current || selection.columns.length)) {
       setSelection(emptySelection);
       return;
@@ -611,6 +622,7 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   }
 
   return (
+    <>
     <div className="flex h-full flex-col" onKeyDownCapture={onKeyDown}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
@@ -696,32 +708,26 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
             <button
               type="button"
               className="rounded px-1.5 py-0.5 text-foreground hover:bg-accent"
-              onClick={() => {
-                void api.resultSort(tabId, set.index, null, "ascending").then(() => {
-                  blocks.current = new Map();
-                  pending.current = new Set();
-                  setSort(null);
-                  setOrder((value) => value + 1);
-                });
-              }}
+              onClick={() => void applySort(null)}
             >
               Clear
             </button>
           </span>
         )}
       </footer>
-
-      {viewer && (
-        <ValueViewer
-          tabId={tabId}
-          set={set.index}
-          row={viewer.row}
-          column={viewer.column}
-          columnName={set.columns[viewer.column] ?? ""}
-          onClose={() => setViewer(null)}
-        />
-      )}
     </div>
+
+    {viewer && (
+      <ValueViewer
+        tabId={tabId}
+        set={set.index}
+        row={viewer.row}
+        column={viewer.column}
+        columnName={set.columns[viewer.column] ?? ""}
+        onClose={() => setViewer(null)}
+      />
+    )}
+    </>
   );
 });
 

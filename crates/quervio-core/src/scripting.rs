@@ -81,7 +81,7 @@ pub fn as_alter(definition: &str) -> String {
     let start = skip_comments(definition);
     let rest = &definition[start..];
     let word = |s: &str| {
-        s.split(|c: char| !c.is_alphanumeric())
+        s.split(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '@' | '#' | '$')))
             .next()
             .unwrap_or("")
             .to_string()
@@ -97,32 +97,36 @@ pub fn as_alter(definition: &str) -> String {
     format!("{}ALTER{}", &definition[..start], after)
 }
 
-/// Byte offset of the first character that is not whitespace or a comment.
+/// Byte offset of the first character that is not whitespace, a UTF-8 BOM, or a comment.
 fn skip_comments(text: &str) -> usize {
-    let bytes = text.as_bytes();
     let mut i = 0;
     loop {
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if bytes[i..].starts_with(b"--") {
-            while i < bytes.len() && bytes[i] != b'\n' {
-                i += 1;
+        while let Some(c) = text[i..].chars().next() {
+            if c.is_whitespace() || c == '\u{feff}' {
+                i += c.len_utf8();
+            } else {
+                break;
             }
-        } else if bytes[i..].starts_with(b"/*") {
-            let mut depth = 0;
-            while i < bytes.len() {
-                if bytes[i..].starts_with(b"/*") {
+        }
+        if text[i..].starts_with("--") {
+            match text[i..].find('\n') {
+                Some(nl) => i += nl + 1,
+                None => return text.len(),
+            }
+        } else if text[i..].starts_with("/*") {
+            let mut depth = 0u32;
+            while i < text.len() {
+                if text[i..].starts_with("/*") {
                     depth += 1;
                     i += 2;
-                } else if bytes[i..].starts_with(b"*/") {
+                } else if text[i..].starts_with("*/") {
                     depth -= 1;
                     i += 2;
                     if depth == 0 {
                         break;
                     }
                 } else {
-                    i += 1;
+                    i += text[i..].chars().next().map_or(1, char::len_utf8);
                 }
             }
         } else {
@@ -138,6 +142,23 @@ fn optional_int(row: &[ColumnValues], column: usize) -> Result<Option<i64>> {
     }
 }
 
+fn create_table_columns_sql(db: &str, object_id: i64) -> String {
+    format!(
+        "SELECT c.name, t.name, c.max_length, c.precision, c.scale, c.is_nullable,
+                CAST(ic.seed_value AS bigint), CAST(ic.increment_value AS bigint),
+                dc.name, dc.definition, cc.definition, CAST(ISNULL(cc.is_persisted, 0) AS bit),
+                CASE WHEN t.is_user_defined = 1 THEN ts.name END, t.is_user_defined
+         FROM {db}.sys.columns c
+         JOIN {db}.sys.types t ON t.user_type_id = c.user_type_id
+         LEFT JOIN {db}.sys.schemas ts ON ts.schema_id = t.schema_id
+         LEFT JOIN {db}.sys.identity_columns ic ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+         LEFT JOIN {db}.sys.default_constraints dc ON dc.object_id = c.default_object_id
+         LEFT JOIN {db}.sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
+         WHERE c.object_id = {object_id}
+         ORDER BY c.column_id"
+    )
+}
+
 /// A CREATE TABLE for a table: columns with identity, defaults and computed
 /// expressions, then primary key, unique, check and foreign key constraints.
 /// Indexes that are not constraints and storage options are not scripted.
@@ -147,19 +168,7 @@ pub async fn create_table(session: &mut Session, database: &str, object_id: i64)
     let mut lines = Vec::new();
 
     let columns = session
-        .query(&format!(
-            "SELECT c.name, t.name, c.max_length, c.precision, c.scale, c.is_nullable,
-                    CAST(ic.seed_value AS bigint), CAST(ic.increment_value AS bigint),
-                    dc.name, dc.definition, cc.definition, CAST(ISNULL(cc.is_persisted, 0) AS bit),
-                    CASE WHEN t.is_user_defined = 1 THEN SCHEMA_NAME(t.schema_id) END
-             FROM {db}.sys.columns c
-             JOIN {db}.sys.types t ON t.user_type_id = c.user_type_id
-             LEFT JOIN {db}.sys.identity_columns ic ON ic.object_id = c.object_id AND ic.column_id = c.column_id
-             LEFT JOIN {db}.sys.default_constraints dc ON dc.object_id = c.default_object_id
-             LEFT JOIN {db}.sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
-             WHERE c.object_id = {object_id}
-             ORDER BY c.column_id"
-        ))
+        .query(&create_table_columns_sql(&db, object_id))
         .await?;
     for row in &columns {
         let mut line = format!("    {} ", quote_name(&text(row, 0)?));
@@ -172,6 +181,7 @@ pub async fn create_table(session: &mut Session, database: &str, object_id: i64)
             let column_type = SqlType {
                 name: text(row, 1)?,
                 schema: optional_text(row, 12)?,
+                user_defined: flag(row, 13)?,
                 max_length: int(row, 2)?,
                 precision: int(row, 3)?,
                 scale: int(row, 4)?,
@@ -326,6 +336,25 @@ mod tests {
             "CREATE OR ALTER VIEW v AS SELECT 1"
         );
         assert_eq!(as_alter("CREATEX"), "CREATEX");
+        assert_eq!(as_alter("CREATE_FOO"), "CREATE_FOO");
         assert_eq!(as_alter(""), "");
+        assert_eq!(
+            as_alter("\u{feff}CREATE PROCEDURE dbo.p AS SELECT 1"),
+            "\u{feff}ALTER PROCEDURE dbo.p AS SELECT 1"
+        );
+        assert_eq!(
+            as_alter("\u{00a0}create view v as select 1"),
+            "\u{00a0}ALTER view v as select 1"
+        );
+    }
+
+    #[test]
+    fn create_table_columns_query_resolves_udt_schema_in_target_database() {
+        let sql = create_table_columns_sql("[OtherDB]", 42);
+        assert!(
+            sql.contains("LEFT JOIN [OtherDB].sys.schemas ts ON ts.schema_id = t.schema_id"),
+            "{sql}"
+        );
+        assert!(!sql.contains("SCHEMA_NAME("), "{sql}");
     }
 }

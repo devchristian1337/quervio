@@ -132,17 +132,26 @@ fn validate(text: &str) -> Result<(), String> {
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     // Separate temporary files for primary and backup. A process killed during
     // write leaves the previously committed file intact.
     let temporary = path.with_file_name(format!(
         "{}.tmp",
         path.file_name().unwrap().to_string_lossy()
     ));
-    let mut file = fs::File::create(&temporary).map_err(|e| e.to_string())?;
-    file.write_all(bytes).map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
-    drop(file);
-    fs::rename(&temporary, path).map_err(|e| e.to_string())
+    let written = (|| -> Result<(), String> {
+        let mut file = fs::File::create(&temporary).map_err(|e| e.to_string())?;
+        file.write_all(bytes).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        drop(file);
+        fs::rename(&temporary, path).map_err(|e| e.to_string())
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    written
 }
 
 #[cfg(test)]
@@ -254,5 +263,20 @@ mod tests {
             Some(second.as_str())
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn first_save_creates_missing_data_directory() {
+        let root = std::env::temp_dir().join(format!("quervio-tabs-fresh-{}", uuid::Uuid::new_v4()));
+        let data_dir = root.join("com.quervio.app");
+        assert!(!data_dir.exists());
+        let store = TabSnapshots::new(&data_dir);
+        let first = snapshot("SELECT 1;");
+        store.save(&first).unwrap();
+        let loaded = store.load().unwrap();
+        assert!(!loaded.recovered);
+        assert_eq!(loaded.snapshot.as_deref(), Some(first.as_str()));
+        assert_eq!(fs::read_to_string(&store.backup).unwrap(), first);
+        fs::remove_dir_all(root).unwrap();
     }
 }

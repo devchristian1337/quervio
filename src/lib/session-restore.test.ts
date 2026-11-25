@@ -118,4 +118,17 @@ describe("query tab recovery", () => {
     expect(await session.saveNow()).toBe(true);
     expect(JSON.parse(mocks.save.mock.calls[0][0]).tabs[0].text).toBe("SELECT N'unsaved';");
   });
+
+  it("clears planMode when restoring a tab with sqlcmdMode enabled", async () => {
+    mocks.load.mockResolvedValue(
+      loaded([{ ...savedTab(), sqlcmdMode: true, planMode: "estimated" } as ReturnType<typeof savedTab>]),
+    );
+    const session = await import("./session-restore");
+    await session.restoreTabs();
+    expect(mocks.open).toHaveBeenCalledWith(
+      "known",
+      "master",
+      expect.objectContaining({ sqlcmdMode: true, planMode: "none" }),
+    );
+  });
 });

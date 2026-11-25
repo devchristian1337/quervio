@@ -103,4 +103,14 @@ describe("fitting cell text to its column", () => {
   it("falls back to a lone ellipsis when nothing fits", () => {
     expect(fitText("abc", 3, width)).toBe("…");
   });
+
+  it("does not split UTF-16 surrogate pairs and keeps combining sequences that already fit", () => {
+    const fittedEmoji = fitText("😀😀😀", 28, width);
+    expect(fittedEmoji).toBe("😀…");
+    const beforeEllipsis = fittedEmoji.charCodeAt(fittedEmoji.length - 2);
+    expect(beforeEllipsis >= 0xd800 && beforeEllipsis <= 0xdbff).toBe(false);
+
+    const combining = "a" + "\u0301".repeat(20);
+    expect(fitText(combining, 15, () => 7)).toBe(combining);
+  });
 });

@@ -248,4 +248,37 @@ describe("administrative scripts", () => {
       ),
     ).toThrow(/cycles/);
   });
+
+  it("rejects invalid renamed column identifiers in edit mode", () => {
+    const original = { schema: "dbo", name: "t", columns: [column], primaryKey: [] };
+    for (const bad of ["", "   ", "bad\0name", "a".repeat(129)]) {
+      expect(() =>
+        tableScript({ ...original, columns: [{ ...column, originalName: "id", name: bad }] }, original),
+      ).toThrow(/1–128/);
+    }
+  });
+
+  it("rejects empty-string nextSuccess cycles, duplicate task IDs and clamps schedule name to 128 chars", () => {
+    const base = { kind: "sql" as const, sql: "SELECT 1", schema: "dbo", table: "", path: "", days: 30 };
+    expect(() =>
+      maintenanceScript("job", "test", [{ ...base, id: "a", nextSuccess: "" }, { ...base, id: "b", nextSuccess: "a" }], 0, 0),
+    ).toThrow(/cycles/);
+    expect(() =>
+      maintenanceScript(
+        "job",
+        "test",
+        [
+          { ...base, id: "a", nextSuccess: "end" },
+          { ...base, id: "a", nextSuccess: "a" },
+          { ...base, id: "end" },
+        ],
+        0,
+        0,
+      ),
+    ).toThrow(/unique/);
+    const longJob = "J".repeat(128);
+    const sql = maintenanceScript(longJob, "test", [{ ...base, id: "a" }], 2, 0);
+    const match = /@name=N'([^']+)'/.exec(sql);
+    expect(match?.[1].length).toBeLessThanOrEqual(128);
+  });
 });

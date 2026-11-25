@@ -161,11 +161,15 @@ const MESSAGE_FLUSH_SLOW_MS = 100;
 async function readFirstBlocks(id: string, sets: ResultSetSummary[]) {
   const tab = useQueries.getState().tabs.find((t) => t.id === id);
   if (!tab) return;
+  const runId = tab.runId + 1;
   await Promise.all(
     sets.filter((set) => set.rows > 0).map(async (set) => {
       try {
         const rows = decodeWindow(await api.resultRows(id, set.index, 0, ROW_BLOCK));
-        rememberFirstBlock(id, tab.runId + 1, set.index, rows);
+        // The tab may have closed while reading; never repopulate a forgotten cache.
+        if (useQueries.getState().tabs.some((t) => t.id === id)) {
+          rememberFirstBlock(id, runId, set.index, rows);
+        }
       } catch {
         // The grid reads them itself.
       }
@@ -175,6 +179,14 @@ async function readFirstBlocks(id: string, sets: ResultSetSummary[]) {
 
 /** Tabs whose Execute is past its "ready" check and still being prepared. */
 const starting = new Set<string>();
+/** Monotonic per-tab revision for USE database calls so stale responses cannot overwrite newer ones. */
+const databaseSwitchRevision = new Map<string, number>();
+
+function bumpDatabaseSwitchRevision(id: string): number {
+  const next = (databaseSwitchRevision.get(id) ?? 0) + 1;
+  databaseSwitchRevision.set(id, next);
+  return next;
+}
 
 type Prepared = { allowDestructive: boolean; sqlcmdToken: string | null };
 
@@ -221,13 +233,21 @@ async function prepareSqlcmd(tab: QueryTab, script: { text: string; baseLine: nu
     let preview = await api.sqlcmdPrepare(id, script.text, tab.filePath, script.baseLine);
     if (preview.kind === "fileAccessRequired") {
       if (!await useSqlcmdConfirmation.getState().ask(script.text, false, "fileAccess")) return null;
+      if (!useQueries.getState().tabs.some((t) => t.id === id)) return null;
       preview = await api.sqlcmdPrepare(id, script.text, tab.filePath, script.baseLine, true);
     }
     if (preview.kind !== "ready") throw new Error("SQLCMD file access was not authorized.");
     token = preview.token;
+    if (!useQueries.getState().tabs.some((t) => t.id === id)) return discard();
     if (!await useSqlcmdConfirmation.getState().ask(preview.script, preview.hasLocalCommands)) return discard();
-    // Production, or a :connect that may reach any server.
-    if (confirm && preview.needsConfirmation) {
+    if (!useQueries.getState().tabs.some((t) => t.id === id)) return discard();
+    // Production (including connections promoted to Production after the tab opened),
+    // or a :connect that may reach any server.
+    const hasDestructive = preview.destructive.findings.length > 0 || preview.destructive.uncertain;
+    const needsConfirmation =
+      preview.needsConfirmation ||
+      (hasDestructive && tabEnvironment(tab, useConnections.getState().connections) === "production");
+    if (confirm && needsConfirmation) {
       return await confirmDestructive(tab, preview.destructive) ? { allowDestructive: true, sqlcmdToken: token } : discard();
     }
     return { allowDestructive: !confirm, sqlcmdToken: token };
@@ -255,7 +275,8 @@ export const useQueries = create<QueriesState>((set, get) => {
       const { tabs, activeId } = get();
       if (tabs.length < 2) return;
       const index = tabs.findIndex((t) => t.id === activeId);
-      set({ activeId: tabs[(index + step + tabs.length) % tabs.length].id });
+      const next = index === -1 ? (step > 0 ? 0 : tabs.length - 1) : (index + step + tabs.length) % tabs.length;
+      set({ activeId: tabs[next].id });
     },
 
     setDirty: (id, dirty) => {
@@ -327,6 +348,7 @@ export const useQueries = create<QueriesState>((set, get) => {
       const activeId =
         get().activeId === id ? (remaining[Math.min(index, remaining.length - 1)]?.id ?? null) : get().activeId;
       set({ tabs: remaining, activeId });
+      databaseSwitchRevision.delete(id);
       forgetFirstBlocks(id);
       await api.closeQuery(id);
     },
@@ -334,7 +356,7 @@ export const useQueries = create<QueriesState>((set, get) => {
     activate: (id) => set({ activeId: id }),
 
     setView: (id, view) => patch(id, { view }),
-    setPlanMode: (id, planMode) => patch(id, { planMode }),
+    setPlanMode: (id, planMode) => patch(id, planMode === "none" ? { planMode } : { planMode, sqlcmdMode: false }),
     setSqlcmdMode: (id, sqlcmdMode) => patch(id, { sqlcmdMode, planMode: "none" }),
 
     execute: async (id, script) => {
@@ -348,8 +370,16 @@ export const useQueries = create<QueriesState>((set, get) => {
       try {
         const pending = prepareExecution(tab, script);
         prepared = pending instanceof Promise ? await pending : pending;
+        // The tab may have closed while awaiting checkScript, sqlcmdPrepare or confirmation dialogs.
+        if (prepared && !get().tabs.some((t) => t.id === id)) {
+          if (prepared.sqlcmdToken) void api.sqlcmdDiscard(id, prepared.sqlcmdToken).catch(() => {});
+          prepared = null;
+        }
         // Executing from here on, before another Execute can see "ready".
-        if (prepared) patch(id, { status: "executing", longRunning: false, error: null });
+        if (prepared) {
+          bumpDatabaseSwitchRevision(id);
+          patch(id, { status: "executing", longRunning: false, error: null });
+        }
       } finally {
         starting.delete(id);
       }
@@ -495,7 +525,7 @@ export const useQueries = create<QueriesState>((set, get) => {
       } finally {
         clearTimeout(longRun);
         flushMessages();
-        if (staged) await readFirstBlocks(id, staged.resultSets ?? []);
+        if (staged && get().tabs.some((t) => t.id === id)) await readFirstBlocks(id, staged.resultSets ?? []);
         show();
         patch(id, (t) => ({ status: t.status === "executing" ? "ready" : t.status, longRunning: false }));
       }
@@ -506,13 +536,18 @@ export const useQueries = create<QueriesState>((set, get) => {
     },
 
     useDatabase: async (id, database) => {
-      // Not while an Execution runs, even before it shows itself running.
-      if (get().tabs.find((t) => t.id === id)?.status !== "ready") return;
+      // Not while an Execution is being prepared or running, even before it shows itself running.
+      if (starting.has(id) || get().tabs.find((t) => t.id === id)?.status !== "ready") return;
+      const revision = bumpDatabaseSwitchRevision(id);
       try {
         const current = await api.useDatabase(id, database);
-        patch(id, { database: current });
+        if (databaseSwitchRevision.get(id) === revision && get().tabs.some((t) => t.id === id)) {
+          patch(id, { database: current });
+        }
       } catch (error) {
-        toast.error("Could not switch database", { description: errorMessage(error) });
+        if (databaseSwitchRevision.get(id) === revision) {
+          toast.error("Could not switch database", { description: errorMessage(error) });
+        }
       }
     },
 

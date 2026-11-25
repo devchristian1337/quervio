@@ -16,12 +16,12 @@ $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $repo = 'https://github.com/devchristian1337/quervio'
 # Not "Quervio": the NSIS installer used %LOCALAPPDATA%\Quervio.
 $packId = 'Quervio.App'
-$version = (Get-Content (Join-Path $root 'src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json).version
+$version = (Get-Content -LiteralPath (Join-Path $root 'src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json).version
 $publishDir = Join-Path $root 'target/velopack/publish'
 $releasesDir = Join-Path $root 'target/velopack/releases'
 
 if ($Draft -and -not $Publish) { throw '-Draft requires -Publish.' }
-# Cleanup is limited to ordinary directories inside this checkout.
+# Cleanup and release output are limited to ordinary directories inside this checkout.
 $workspacePath = [IO.Path]::GetFullPath($root.Path).TrimEnd([IO.Path]::DirectorySeparatorChar)
 foreach ($directory in @($publishDir, $releasesDir)) {
     $absolute = [IO.Path]::GetFullPath($directory)
@@ -29,7 +29,7 @@ foreach ($directory in @($publishDir, $releasesDir)) {
         throw "Build output must stay inside the workspace: $absolute"
     }
 }
-foreach ($directory in @((Join-Path $root 'target'), (Join-Path $root 'target/velopack'), $publishDir)) {
+foreach ($directory in @((Join-Path $root 'target'), (Join-Path $root 'target/velopack'), $publishDir, $releasesDir)) {
     if (Test-Path -LiteralPath $directory) {
         if ((Get-Item -LiteralPath $directory).Attributes -band [IO.FileAttributes]::ReparsePoint) {
             throw "Build output must not traverse a reparse point: $directory"
@@ -46,7 +46,39 @@ function Invoke-Step([string]$what, [scriptblock]$step) {
     if ($LASTEXITCODE -ne 0) { throw "$what failed." }
 }
 
-if (-not (Test-Path (Join-Path $root 'src-tauri/resources/microsoft/Quervio.MicrosoftBridge.exe'))) {
+function Invoke-VpkWithToken([string]$what, [string[]]$arguments, [string]$tokenValue) {
+    # Pass --token via a private response file (@file) so the GitHub token never
+    # appears in process command lines (Win32_Process.CommandLine / audit logs).
+    $rspDir = Join-Path $root 'target/velopack'
+    [IO.Directory]::CreateDirectory($rspDir) | Out-Null
+    $rspFile = Join-Path $rspDir ('.vpk-token-' + [Guid]::NewGuid().ToString('N') + '.rsp')
+    try {
+        [IO.File]::WriteAllText($rspFile, '', [Text.UTF8Encoding]::new($false))
+        $acl = New-Object System.Security.AccessControl.FileSecurity
+        $acl.SetAccessRuleProtection($true, $false)
+        $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $sid,
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        )
+        $acl.AddAccessRule($rule)
+        Set-Acl -LiteralPath $rspFile -AclObject $acl
+        [IO.File]::WriteAllText($rspFile, "--token`n$tokenValue`n", [Text.UTF8Encoding]::new($false))
+        Invoke-Step $what { dotnet vpk @arguments "@$rspFile" }
+    }
+    finally {
+        if (Test-Path -LiteralPath $rspFile) {
+            try {
+                $len = (Get-Item -LiteralPath $rspFile).Length
+                if ($len -gt 0) { [IO.File]::WriteAllBytes($rspFile, (New-Object byte[] $len)) }
+            } catch {}
+            Remove-Item -LiteralPath $rspFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $root 'src-tauri/resources/microsoft/Quervio.MicrosoftBridge.exe'))) {
     throw 'The Microsoft bridge is missing: run scripts/build-microsoft.ps1 first.'
 }
 
@@ -58,27 +90,30 @@ if ($missing.Count -gt 0) {
     throw "Not found on PATH: $($missing -join ', '). Install them, then open a new terminal."
 }
 
-Push-Location $root
+Push-Location -LiteralPath $root
 try {
     Invoke-Step 'vpk restore' { dotnet tool restore }
     # A fresh or older clone lacks node_modules, the Tauri CLI included.
     Invoke-Step 'pnpm install' { pnpm install --frozen-lockfile }
     Invoke-Step 'Tauri build' { pnpm tauri build --no-bundle }
 
+    $cargoTargetDir = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).target_directory
+    if (-not $cargoTargetDir) { throw 'Could not determine Cargo target directory.' }
+
     # The same layout as tauri.conf.json's bundle.resources, next to the exe:
     # on Windows Tauri's resource_dir() is the exe's folder.
-    if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
-    New-Item -ItemType Directory $publishDir | Out-Null
-    Copy-Item (Join-Path $root 'target/release/quervio.exe') $publishDir
-    Copy-Item (Join-Path $root 'src-tauri/resources/microsoft') (Join-Path $publishDir 'microsoft') -Recurse
-    Remove-Item (Join-Path $publishDir 'microsoft/README.txt') -ErrorAction SilentlyContinue
-    Copy-Item (Join-Path $root 'scripts/install-sqltools.ps1') $publishDir
+    if (Test-Path -LiteralPath $publishDir) { Remove-Item -LiteralPath $publishDir -Recurse -Force }
+    [IO.Directory]::CreateDirectory($publishDir) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $cargoTargetDir 'release/quervio.exe') -Destination $publishDir
+    Copy-Item -LiteralPath (Join-Path $root 'src-tauri/resources/microsoft') -Destination (Join-Path $publishDir 'microsoft') -Recurse
+    Remove-Item -LiteralPath (Join-Path $publishDir 'microsoft/README.txt') -ErrorAction SilentlyContinue
+    Copy-Item -LiteralPath (Join-Path $root 'scripts/install-sqltools.ps1') -Destination $publishDir
 
     if ($Publish) {
         if (-not $Token) { $Token = gh auth token }
         if (-not $Token) { throw 'No GitHub token: run gh auth login or pass -Token.' }
         # The previous release, so vpk can build a delta package from it.
-        Invoke-Step 'vpk download' { dotnet vpk download github -o $releasesDir --repoUrl $repo --token $Token }
+        Invoke-VpkWithToken 'vpk download' @('download', 'github', '-o', $releasesDir, '--repoUrl', $repo) $Token
     }
 
     $pack = @(
@@ -96,12 +131,10 @@ try {
     Invoke-Step 'vpk pack' { dotnet vpk @pack }
 
     if ($Publish) {
-        $upload = @('upload', 'github', '-o', $releasesDir, '--repoUrl', $repo, '--token', $Token,
+        $upload = @('upload', 'github', '-o', $releasesDir, '--repoUrl', $repo,
             '--merge', '--releaseName', "Quervio $version", '--tag', "v$version")
         if (-not $Draft) { $upload += '--publish' }
-        Invoke-Step 'vpk upload' {
-            dotnet vpk @upload
-        }
+        Invoke-VpkWithToken 'vpk upload' $upload $Token
     }
     Write-Host "Setup: $(Join-Path $releasesDir "$packId-win-Setup.exe")"
 }

@@ -25,26 +25,78 @@ internal static class Program
     private static JsonObject Args = new();
     private static JsonObject Connection = new();
     private static string? Password;
+    private static string? LastAccessToken;
+    private static bool IdentityLoaded;
     private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
     private static readonly string IdentityPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "com.quervio.app", "identity.json");
     private static readonly InteractiveBrowserCredential Credential = CreateCredential();
     private static InteractiveBrowserCredential CreateCredential()
     {
         var options = new InteractiveBrowserCredentialOptions { TokenCachePersistenceOptions = new TokenCachePersistenceOptions { Name = "Quervio", UnsafeAllowUnencryptedStorage = false } };
-        try { if (File.Exists(IdentityPath)) { using var stream = File.OpenRead(IdentityPath); options.AuthenticationRecord = AuthenticationRecord.Deserialize(stream); } } catch (Exception) { }
+        try { if (File.Exists(IdentityPath)) { using var stream = File.OpenRead(IdentityPath); options.AuthenticationRecord = AuthenticationRecord.Deserialize(stream); IdentityLoaded = true; } } catch (Exception) { IdentityLoaded = false; }
         return new InteractiveBrowserCredential(options);
     }
     private static async Task<AccessToken> Token(string scope)
     {
         var request = new TokenRequestContext([scope]);
-        if (!File.Exists(IdentityPath)) { var record = await Credential.AuthenticateAsync(request); Directory.CreateDirectory(Path.GetDirectoryName(IdentityPath)!); using var stream = new FileStream(IdentityPath, FileMode.Create, FileAccess.Write, FileShare.None); record.Serialize(stream); }
-        return await Credential.GetTokenAsync(request);
+        if (!IdentityLoaded || !File.Exists(IdentityPath))
+        {
+            var record = await Credential.AuthenticateAsync(request);
+            Directory.CreateDirectory(Path.GetDirectoryName(IdentityPath)!);
+            string temp = IdentityPath + ".tmp-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) record.Serialize(stream);
+                File.Move(temp, IdentityPath, true);
+                IdentityLoaded = true;
+            }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
+        }
+        var access = await Credential.GetTokenAsync(request);
+        LastAccessToken = access.Token;
+        return access;
     }
     private static string S(string key, string fallback = "") => Args[key]?.GetValue<string>() ?? fallback;
+    private static string SNonEmpty(string key, string fallback) => Args[key]?.GetValue<string>() is { Length: > 0 } value && !string.IsNullOrWhiteSpace(value) ? value : fallback;
     private static bool B(string key, bool fallback = false) => Args[key]?.GetValue<bool>() ?? fallback;
     private static int I(string key, int fallback = 0) => Args[key]?.GetValue<int>() ?? fallback;
+    private static bool UseEntra() => B("entra") || Connection["authentication"]?["kind"]?.GetValue<string>() == "entra";
     private static string Q(string name) => "[" + name.Replace("]", "]]") + "]";
     private static string L(string text) => "N'" + text.Replace("'", "''") + "'";
+    private static string RedactSecrets(string text)
+    {
+        var secrets = new HashSet<string>(StringComparer.Ordinal);
+        void Add(string? secret)
+        {
+            if (string.IsNullOrEmpty(secret)) return;
+            secrets.Add(secret);
+            secrets.Add(secret.Replace("\"", "\"\"", StringComparison.Ordinal));
+            secrets.Add(secret.Replace("'", "''", StringComparison.Ordinal));
+        }
+        Add(Password);
+        try { Add(Args["backupPassword"]?.GetValue<string>()); } catch (Exception) { }
+        Add(LastAccessToken);
+        try
+        {
+            string? odbc = Args["sourceConnection"]?.GetValue<string>();
+            if (!string.IsNullOrEmpty(odbc))
+            {
+                secrets.Add(odbc);
+                foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
+                    odbc,
+                    @"(?:^|;)\s*(?:pwd|password)\s*=\s*(?:\{([^}]*)\}|""((?:""""|[^""])*)""|'((?:''|[^'])*)'|([^;]*))",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                {
+                    for (int g = 1; g < match.Groups.Count; g++)
+                        if (match.Groups[g].Success) Add(match.Groups[g].Value);
+                }
+            }
+        }
+        catch (Exception) { }
+        foreach (string secret in secrets.OrderByDescending(s => s.Length))
+            text = text.Replace(secret, "[redacted]", StringComparison.Ordinal);
+        return text;
+    }
     private static void Emit(object value) { Console.WriteLine(JsonSerializer.Serialize(value, Json)); Console.Out.Flush(); }
     private static void Progress(string text, long? count = null) => Emit(new { type = "progress", phase = "running", message = text, completed = count });
 
@@ -91,8 +143,7 @@ internal static class Program
             // Do not serialize connection strings, credentials or arbitrary exception objects.
             var causes = new List<string>();
             for (Exception? e = error; e is not null; e = e.InnerException) { string m = e is SqlException sql ? $"SQL {sql.Number}: {sql.Message}" : e.Message, plain = e is SqlException s ? s.Message : e.Message; if (!causes.Any(c => c.Contains(plain, StringComparison.Ordinal))) causes.Add(m); }
-            string text = string.Join(" ", causes);
-            if (!string.IsNullOrEmpty(Password)) text = text.Replace(Password, "[redacted]", StringComparison.Ordinal);
+            string text = RedactSecrets(string.Join(" ", causes));
             Emit(new { type = "error", message = text }); return 1;
         }
     }
@@ -169,7 +220,143 @@ internal static class Program
                 catch (InvalidOperationException) { rejected = true; }
                 if (!rejected) throw new Exception("DACPAC publish accepted bytes that differ from the approved hash.");
             }
-            Emit(new { type = "result", value = new { tests = 9, status = "passed" } });
+
+            // Test 10: ValidateSourceQuery rejects multi-statement, dialect-desync, and write queries while allowing valid SELECT/WITH.
+            foreach (string allowedSql in new[]
+            {
+                "SELECT a, REPLACE(b, 'x', 'y') FROM [dbo].[Users] WHERE name = 'O''Brien' AND dir = 'C:\\\\data';",
+                "WITH c AS (SELECT id FROM #temp WHERE x = '1') SELECT * FROM c",
+                "SELECT 'DROP TABLE x; SHUTDOWN' AS msg"
+            }) ValidateSourceQuery(allowedSql);
+            foreach (string blockedSql in new[]
+            {
+                "SELECT 1; DROP TABLE t",
+                "SELECT 1\nSHUTDOWN WITH NOWAIT",
+                "SELECT 1\nDBCC FREEPROCCACHE",
+                "SELECT 1\nBACKUP DATABASE [db] TO DISK='NUL'",
+                "SELECT 1\nRESTORE DATABASE [db] FROM DISK='NUL'",
+                "SELECT 1\nKILL 55",
+                "SELECT 1\nRECONFIGURE WITH OVERRIDE",
+                @"SELECT '\''; DROP TABLE t -- '",
+                @"SELECT E'\''; DROP TABLE t -- '",
+                "SELECT 1 /*! INTO OUTFILE '/tmp/x' */",
+                "SELECT 1 /*! ; DROP TABLE t */",
+                "SELECT 1 # '\n; DROP TABLE t -- '",
+                "SELECT $$ ' $$; DROP TABLE t -- '",
+                "SELECT 1 /* /* nested */ ; DROP TABLE t */",
+                "SELECT 'unterminated"
+            })
+            {
+                bool blocked = false;
+                try { ValidateSourceQuery(blockedSql); } catch (Exception) { blocked = true; }
+                if (!blocked) throw new Exception($"ValidateSourceQuery failed to reject: {blockedSql}");
+            }
+
+            // Test 11: ExcelText & WriteWorkbook safely handle valid surrogate pairs and unpaired UTF-16 surrogates.
+            string surrogateWorkbook = Path.Combine(directory, "surrogates.xlsx");
+            WriteWorkbook(surrogateWorkbook, ["Col"], [new string?[] { "emoji 😀 lone:\uD800:\uDC00:\uD83D" }]);
+            var surrogateRow = FileRows(surrogateWorkbook, out _).Single();
+            if (surrogateRow[0]?.ToString()?.Contains("😀", StringComparison.Ordinal) != true)
+                throw new Exception("Excel export did not preserve valid UTF-16 surrogate pairs.");
+
+            // Test 12: ConvertCell & ParseSqlDbType edge cases.
+            var localDt = new DateTime(2025, 1, 2, 3, 4, 5, DateTimeKind.Local);
+            if (ConvertCell(localDt, "datetimeoffset") is not DateTimeOffset dto || dto != new DateTimeOffset(localDt))
+                throw new Exception("Local DateTime did not convert to DateTimeOffset.");
+            if (ConvertCell(1e30, "decimal").ToString() != "1000000000000000000000000000000")
+                throw new Exception("Large double failed decimal(38) conversion.");
+            if (ConvertCell("1e5", "decimal").ToString() != "100000" || ConvertCell("-1.25E-2", "decimal").ToString() != "-0.0125")
+                throw new Exception("Scientific notation failed decimal conversion.");
+            if (ConvertCell("0X00AB", "varbinary") is not byte[] upperHex || !upperHex.SequenceEqual(new byte[] { 0, 171 }))
+                throw new Exception("Uppercase 0X binary conversion failed.");
+            if (ConvertCell("0x0001", "timestamp") is not byte[] ts || !ts.SequenceEqual(new byte[] { 0, 1 }))
+                throw new Exception("Timestamp binary conversion failed.");
+            if (ParseSqlDbType("numeric") != SqlDbType.Decimal || ParseSqlDbType("rowversion") != SqlDbType.Timestamp)
+                throw new Exception("SQL parameter type alias mapping failed.");
+            if (!Equals(ConvertCell("12.50", "money"), 12.50m))
+                throw new Exception("Valid money conversion failed.");
+            bool commaMoneyRejected = false;
+            try { ConvertCell("12,50", "money"); } catch (FormatException) { commaMoneyRejected = true; }
+            if (!commaMoneyRejected) throw new Exception("Money conversion silently accepted thousands/comma separator.");
+
+            // Test 13: Non-UTF-8 (Windows-1252) CSV is rejected instead of silently producing U+FFFD.
+            string win1252Csv = Path.Combine(directory, "win1252.csv");
+            File.WriteAllBytes(win1252Csv, Encoding.GetEncoding(1252).GetBytes("Name,City\r\nCaffè,München\r\n"));
+            bool invalidUtf8Rejected = false;
+            try { foreach (var _ in FileRows(win1252Csv, out _)) { } }
+            catch (DecoderFallbackException) { invalidUtf8Rejected = true; }
+            if (!invalidUtf8Rejected) throw new Exception("Invalid UTF-8 CSV was silently accepted with replacement characters.");
+
+            // Test 14: .xlsm and lowercase XLSX CellReference preserve empty string "" (not NULL).
+            void CreateEmptyCellWorkbook(string file, SpreadsheetDocumentType docType, string colARef, string colBRef, string row2ARef, string row2BRef)
+            {
+                using var doc = SpreadsheetDocument.Create(file, docType);
+                var wb = doc.AddWorkbookPart(); wb.Workbook = new Workbook();
+                var ws = wb.AddNewPart<WorksheetPart>();
+                var sd = new SheetData();
+                sd.Append(new Row(
+                    new Cell(new InlineString(new Text("Id"))) { DataType = CellValues.InlineString, CellReference = colARef },
+                    new Cell(new InlineString(new Text("Note"))) { DataType = CellValues.InlineString, CellReference = colBRef }
+                ) { RowIndex = 1 });
+                sd.Append(new Row(
+                    new Cell(new InlineString(new Text("1"))) { DataType = CellValues.InlineString, CellReference = row2ARef },
+                    new Cell(new InlineString(new Text(""))) { DataType = CellValues.InlineString, CellReference = row2BRef }
+                ) { RowIndex = 2 });
+                ws.Worksheet = new Worksheet(sd);
+                wb.Workbook.Append(new Sheets(new Sheet { Id = wb.GetIdOfPart(ws), SheetId = 1, Name = "Data" }));
+                wb.Workbook.Save();
+            }
+            string lowerXlsx = Path.Combine(directory, "lower.xlsx"), emptyXlsm = Path.Combine(directory, "empty.xlsm");
+            CreateEmptyCellWorkbook(lowerXlsx, SpreadsheetDocumentType.Workbook, "a1", "b1", "a2", "b2");
+            CreateEmptyCellWorkbook(emptyXlsm, SpreadsheetDocumentType.MacroEnabledWorkbook, "A1", "B1", "A2", "B2");
+            if (!Equals(FileRows(lowerXlsx, out _).Single()[1], "")) throw new Exception("Lowercase XLSX CellReference lost empty string.");
+            if (!Equals(FileRows(emptyXlsm, out _).Single()[1], "")) throw new Exception(".xlsm workbook lost empty string.");
+
+            // Test 15: CSV rejects trailing characters after closing quote and invalid delimiters (", \r, \n).
+            string badQuoteCsv = Path.Combine(directory, "badquote.csv");
+            File.WriteAllText(badQuoteCsv, "a,b\n\"hello\"world,2\n", new UTF8Encoding(false));
+            bool badQuoteRejected = false;
+            try { foreach (var _ in FileRows(badQuoteCsv, out _)) { } }
+            catch (InvalidDataException) { badQuoteRejected = true; }
+            if (!badQuoteRejected) throw new Exception("CSV accepted trailing characters after a closing quote.");
+            foreach (string badDelim in new[] { "\"", "\n", "\r" })
+            {
+                Args = new JsonObject { ["delimiter"] = badDelim };
+                bool badDelimRejected = false;
+                try { FileRows(path, out _); } catch (Exception) { badDelimRejected = true; }
+                if (!badDelimRejected) throw new Exception("CSV accepted quote or line break as delimiter.");
+            }
+            Args = new JsonObject { ["backslashEscaping"] = true };
+
+            // Test 16: Azure ARM resource ID validation rejects #, traversal, non-SQL paths, and case-insensitive same-DB restore.
+            string validDb = "/subscriptions/sub1/resourceGroups/rg/providers/Microsoft.Sql/servers/srv/databases/mydb";
+            if (!IsValidAzureSqlResourceId(validDb, true) || !IsValidAzureSqlResourceId("/subscriptions/sub1/resourceGroups/rg/providers/Microsoft.Sql/servers/srv", false))
+                throw new Exception("Valid Azure SQL resource ID was rejected.");
+            foreach (string badId in new[]
+            {
+                validDb + "#",
+                validDb + "%2f..%2fother",
+                validDb + "\\..\\other",
+                "/subscriptions/sub1/resourceGroups/rg/providers/Microsoft.Authorization/roleAssignments/x"
+            }) if (IsValidAzureSqlResourceId(badId, false)) throw new Exception($"Invalid Azure resource ID accepted: {badId}");
+            bool sameDbRejected = false;
+            try { ValidateAzureRestoreTarget(validDb, validDb.Replace("mydb", "MYDB")); } catch (Exception) { sameDbRejected = true; }
+            if (!sameDbRejected) throw new Exception("Azure restore accepted case-variant of source database ID.");
+
+            // Test 17: Secret redaction, UseEntra consistency, and non-empty schema fallback.
+            Password = "My;Pass\"Word'123";
+            LastAccessToken = "eyJ.secret.token";
+            Args = new JsonObject { ["backupPassword"] = "PfxBackupSecret99!", ["sourceConnection"] = "Driver={SQL Server};Pwd=OdbcSecret77!;Server=x", ["entra"] = true, ["schema"] = "" };
+            Connection = new JsonObject { ["authentication"] = new JsonObject { ["kind"] = "sql" } };
+            string sampleErr = "cs=\"My;Pass\"\"Word'123\" raw=My;Pass\"Word'123 pfx=PfxBackupSecret99! odbc=OdbcSecret77! tok=eyJ.secret.token";
+            string cleaned = RedactSecrets(sampleErr);
+            if (cleaned.Contains("Word", StringComparison.Ordinal) || cleaned.Contains("PfxBackup", StringComparison.Ordinal) || cleaned.Contains("OdbcSecret", StringComparison.Ordinal) || cleaned.Contains("eyJ.secret", StringComparison.Ordinal))
+                throw new Exception("Secret redaction missed one or more secrets: " + cleaned);
+            if (!UseEntra() || SNonEmpty("schema", "dbo") != "dbo")
+                throw new Exception("UseEntra or SNonEmpty fallback failed.");
+            Password = null; LastAccessToken = null; Args = new(); Connection = new();
+
+            Emit(new { type = "result", value = new { tests = 17, status = "passed" } });
         }
         finally
         {
@@ -192,7 +379,7 @@ internal static class Program
         var authentication = Connection["authentication"]!.AsObject();
         if (authentication["kind"]!.GetValue<string>() == "windows") cs.IntegratedSecurity = true;
         else { cs.UserID = authentication["userName"]?.GetValue<string>() ?? ""; cs.Password = Password ?? ""; }
-        if (B("entra") || authentication["kind"]!.GetValue<string>() == "entra") { cs.IntegratedSecurity = false; cs.Remove("User ID"); cs.Remove("Password"); }
+        if (UseEntra()) { cs.IntegratedSecurity = false; cs.Remove("User ID"); cs.Remove("Password"); }
         return cs;
     }
 
@@ -201,7 +388,7 @@ internal static class Program
         var connection = new SqlConnection(Builder(encrypted).ConnectionString);
         try
         {
-            if (B("entra") || Connection["authentication"]?["kind"]?.GetValue<string>() == "entra") connection.AccessToken = (await Token("https://database.windows.net/.default")).Token;
+            if (UseEntra()) connection.AccessToken = (await Token("https://database.windows.net/.default")).Token;
             await connection.OpenAsync(); return connection;
         }
         catch { await connection.DisposeAsync(); throw; }
@@ -261,7 +448,7 @@ internal static class Program
     {
         await using var connection = await Open();
         // An open connection's ConnectionString no longer holds the password.
-        var service = Connection["authentication"]?["kind"]?.GetValue<string>() == "entra" ? new DacServices(Builder().ConnectionString, new SqlTokenProvider()) : new DacServices(Builder().ConnectionString);
+        var service = UseEntra() ? new DacServices(Builder().ConnectionString, new SqlTokenProvider()) : new DacServices(Builder().ConnectionString);
         service.Message += (s, e) => Progress(e.Message.Message);
         service.ProgressChanged += (s, e) => Progress(e.Status + ": " + e.Message);
         string database = connection.Database, path = S("path");
@@ -321,19 +508,28 @@ internal static class Program
         if (Path.GetExtension(path).Equals(".csv", StringComparison.OrdinalIgnoreCase))
         {
             string delimiter = S("delimiter", ",");
-            if (delimiter.Length != 1) throw new Exception("The CSV delimiter must be a single character.");
-            var text = new StreamReader(path, Encoding.UTF8, true);
+            if (delimiter.Length != 1 || delimiter[0] is '"' or '\r' or '\n') throw new Exception("The CSV delimiter must be a single character other than a quote or line break.");
+            var text = new StreamReader(path, new UTF8Encoding(false, throwOnInvalidBytes: true), true);
             var records = CsvRecords(text, delimiter[0]).GetEnumerator();
-            if (!records.MoveNext()) { records.Dispose(); text.Dispose(); throw new Exception("Missing CSV header."); }
-            columns = records.Current;
+            try
+            {
+                if (!records.MoveNext()) throw new Exception("Missing CSV header.");
+                columns = records.Current;
+            }
+            catch { records.Dispose(); text.Dispose(); throw; }
             return ReadCsv(text, records);
         }
         var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        var reader = ExcelDataReader.ExcelReaderFactory.CreateReader(stream);
+        ExcelDataReader.IExcelDataReader reader;
+        try { reader = ExcelDataReader.ExcelReaderFactory.CreateReader(stream); }
+        catch { stream.Dispose(); throw; }
         int sheet = I("sheet"); while (sheet-- > 0) if (!reader.NextResult()) { reader.Dispose(); throw new Exception("Worksheet not found."); }
         if (!reader.Read()) { reader.Dispose(); throw new Exception("Missing worksheet header."); }
         columns = Enumerable.Range(0, reader.FieldCount).Select(i => Convert.ToString(reader.GetValue(i), Invariant) ?? "").ToArray();
-        return Path.GetExtension(path).Equals(".xlsx", StringComparison.OrdinalIgnoreCase) ? ReadExactExcel(path, reader) : ReadExcel(reader);
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".xlsx", StringComparison.OrdinalIgnoreCase) || extension.Equals(".xlsm", StringComparison.OrdinalIgnoreCase)
+            ? ReadExactExcel(path, reader)
+            : ReadExcel(reader);
     }
     private static IEnumerable<object?[]> ReadCsv(StreamReader reader, IEnumerator<string[]> records)
     {
@@ -343,26 +539,27 @@ internal static class Program
     /// <summary>RFC 4180 records: quoted fields keep delimiters, quotes and line breaks, blank lines included.</summary>
     private static IEnumerable<string[]> CsvRecords(TextReader reader, char delimiter)
     {
-        var fields = new List<string>(); var field = new StringBuilder(); bool quoted = false, any = false;
+        var fields = new List<string>(); var field = new StringBuilder(); bool quoted = false, afterQuote = false, any = false;
         int c;
         while ((c = reader.Read()) != -1)
         {
             char ch = (char)c;
             if (quoted)
             {
-                if (ch == '"') { if (reader.Peek() == '"') { reader.Read(); field.Append('"'); } else quoted = false; }
+                if (ch == '"') { if (reader.Peek() == '"') { reader.Read(); field.Append('"'); } else { quoted = false; afterQuote = true; } }
                 else field.Append(ch);
                 continue;
             }
-            if (ch == '"' && field.Length == 0) { quoted = true; any = true; }
-            else if (ch == delimiter) { fields.Add(field.ToString()); field.Clear(); any = true; }
+            if (ch == delimiter) { fields.Add(field.ToString()); field.Clear(); any = true; afterQuote = false; }
             else if (ch == '\r' || ch == '\n')
             {
                 if (ch == '\r' && reader.Peek() == '\n') reader.Read();
                 // A line with nothing on it is not a record.
                 if (any) { fields.Add(field.ToString()); yield return fields.ToArray(); }
-                fields.Clear(); field.Clear(); any = false;
+                fields.Clear(); field.Clear(); any = false; afterQuote = false;
             }
+            else if (afterQuote) throw new InvalidDataException("Unexpected character after a closing quote in CSV.");
+            else if (ch == '"' && field.Length == 0) { quoted = true; any = true; }
             else { field.Append(ch); any = true; }
         }
         if (quoted) throw new InvalidDataException("The CSV file ends inside a quoted value.");
@@ -393,7 +590,17 @@ internal static class Program
             var columns = new HashSet<int>(); int column = 0;
             foreach (var cell in row.Elements<Cell>())
             {
-                if (cell.CellReference?.Value is string reference) { column = 0; foreach (char c in reference) { if (c < 'A' || c > 'Z') break; column = column * 26 + (c - 'A' + 1); } column--; }
+                if (cell.CellReference?.Value is string reference)
+                {
+                    int parsed = 0; bool hasLetters = false;
+                    foreach (char raw in reference)
+                    {
+                        char c = char.ToUpperInvariant(raw);
+                        if (c < 'A' || c > 'Z') break;
+                        parsed = parsed * 26 + (c - 'A' + 1); hasLetters = true;
+                    }
+                    if (hasLetters) column = parsed - 1;
+                }
                 bool empty = cell.DataType?.Value == CellValues.InlineString && (cell.InlineString?.InnerText.Length ?? 0) == 0 || cell.DataType?.Value == CellValues.String && (cell.CellValue?.Text.Length ?? 0) == 0 || cell.DataType?.Value == CellValues.SharedString && int.TryParse(cell.CellValue?.Text, out int shared) && emptySharedStrings.Contains(shared);
                 if (empty) columns.Add(column); column++;
             }
@@ -435,12 +642,13 @@ internal static class Program
     {
         await using var connection = await Open();
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync();
-        string target = Q(S("schema", "dbo")) + "." + Q(S("table"));
+        string target = Q(SNonEmpty("schema", "dbo")) + "." + Q(S("table"));
         try
         {
             var metadata = new Dictionary<string, (string Name, string Type, int Length)>(StringComparer.OrdinalIgnoreCase);
             // CLR types (hierarchyid, geometry, geography) share system type 240; alias types resolve to their base type.
-            await using (var command = new SqlCommand("SELECT c.name,CASE WHEN c.system_type_id=240 THEN TYPE_NAME(c.user_type_id) ELSE TYPE_NAME(c.system_type_id) END,c.max_length FROM sys.columns c WHERE c.object_id=OBJECT_ID(@target) AND c.is_computed=0 AND c.generated_always_type=0", connection, transaction))
+            // system_type_id 189 is timestamp/rowversion, which is server-generated and not writable.
+            await using (var command = new SqlCommand("SELECT c.name,CASE WHEN c.system_type_id=240 THEN TYPE_NAME(c.user_type_id) ELSE TYPE_NAME(c.system_type_id) END,c.max_length FROM sys.columns c WHERE c.object_id=OBJECT_ID(@target) AND c.is_computed=0 AND c.generated_always_type=0 AND c.system_type_id<>189", connection, transaction))
             {
                 // generated_always_type does not exist on SQL Server 2012/2014.
                 if (int.Parse(connection.ServerVersion.Split('.')[0]) < 13) command.CommandText = command.CommandText.Replace(" AND c.generated_always_type=0", "");
@@ -498,7 +706,7 @@ internal static class Program
             else { var rows = FileRows(S("path"), out var headers); await Transfer(headers, rows); }
             await transaction.CommitAsync(); return new { rows = count, transaction = "committed" };
         }
-        catch { await transaction.RollbackAsync(); throw; }
+        catch { try { await transaction.RollbackAsync(); } catch (Exception) { } throw; }
     }
 
     // decimal(38) does not fit System.Decimal, and OdbcDataReader.IsDBNull reads the value
@@ -506,7 +714,54 @@ internal static class Program
     private static object? OdbcValue(System.Data.Common.DbDataReader reader, int i)
     {
         if (reader.GetFieldType(i) != typeof(decimal)) return reader.IsDBNull(i) ? null : reader.GetValue(i);
-        try { return reader.GetString(i); } catch (InvalidCastException) { return null; }
+        try { return reader.GetString(i); }
+        catch (InvalidCastException)
+        {
+            if (reader.IsDBNull(i)) return null;
+            return reader.GetDecimal(i).ToString(Invariant);
+        }
+    }
+
+    private static SqlDecimal ParseSqlDecimal(string text)
+    {
+        string trimmed = text.Trim();
+        int expIndex = trimmed.IndexOfAny(['e', 'E']);
+        if (expIndex < 0) return SqlDecimal.Parse(trimmed);
+        if (trimmed.IndexOfAny(['e', 'E'], expIndex + 1) >= 0) throw new FormatException("Invalid decimal value.");
+        string mantissa = trimmed[..expIndex], exponentText = trimmed[(expIndex + 1)..];
+        if (mantissa.Length == 0 || exponentText.Length == 0) throw new FormatException("Invalid decimal value.");
+        bool negative = false;
+        if (mantissa[0] is '+' or '-') { negative = mantissa[0] == '-'; mantissa = mantissa[1..]; }
+        int dot = mantissa.IndexOf('.');
+        if (dot >= 0 && mantissa.IndexOf('.', dot + 1) >= 0) throw new FormatException("Invalid decimal value.");
+        string intPart = dot >= 0 ? mantissa[..dot] : mantissa;
+        string fracPart = dot >= 0 ? mantissa[(dot + 1)..] : "";
+        if ((intPart.Length == 0 && fracPart.Length == 0) || !intPart.All(char.IsAsciiDigit) || !fracPart.All(char.IsAsciiDigit))
+            throw new FormatException("Invalid decimal value.");
+        int exponent = int.Parse(exponentText, NumberStyles.AllowLeadingSign, Invariant);
+        string digits = (intPart + fracPart).TrimStart('0');
+        if (digits.Length == 0) return new SqlDecimal(0m);
+        int leadingZeros = intPart.Length + fracPart.Length - digits.Length;
+        int decimalPos = intPart.Length - leadingZeros + exponent;
+        digits = digits.TrimEnd('0');
+        string fixedPoint;
+        if (decimalPos <= 0)
+        {
+            int pad = -decimalPos;
+            if ((long)pad + digits.Length > 38) throw new OverflowException("Decimal value exceeds SQL Server decimal(38) precision.");
+            fixedPoint = "0." + new string('0', pad) + digits;
+        }
+        else if (decimalPos >= digits.Length)
+        {
+            if (decimalPos > 38) throw new OverflowException("Decimal value exceeds SQL Server decimal(38) precision.");
+            fixedPoint = digits + new string('0', decimalPos - digits.Length);
+        }
+        else
+        {
+            if (digits.Length > 38) throw new OverflowException("Decimal value exceeds SQL Server decimal(38) precision.");
+            fixedPoint = digits[..decimalPos] + "." + digits[decimalPos..];
+        }
+        return SqlDecimal.Parse(negative ? "-" + fixedPoint : fixedPoint);
     }
 
     private static object ConvertCell(object? value, string type)
@@ -520,7 +775,9 @@ internal static class Program
                 case "float": return number;
                 case "real": return (float)number;
                 case "bit": return number != 0;
-                case "decimal" or "numeric": return new SqlDecimal((decimal)number);
+                case "decimal" or "numeric":
+                    if (double.IsNaN(number) || double.IsInfinity(number)) throw new FormatException($"{number.ToString("R", Invariant)} is not a valid decimal.");
+                    return Math.Abs(number) < 7.9e28 ? new SqlDecimal((decimal)number) : ParseSqlDecimal(number.ToString("R", Invariant));
                 case "money" or "smallmoney": return (decimal)number;
                 case "bigint" or "int" or "smallint" or "tinyint":
                     if (number != Math.Floor(number)) throw new FormatException($"{number.ToString("R", Invariant)} is not a whole number.");
@@ -532,14 +789,14 @@ internal static class Program
         if (value is DateTime moment)
         {
             if (type == "time") return moment.TimeOfDay;
-            if (type == "datetimeoffset") return new DateTimeOffset(moment, TimeSpan.Zero);
+            if (type == "datetimeoffset") return moment.Kind == DateTimeKind.Unspecified ? new DateTimeOffset(moment, TimeSpan.Zero) : new DateTimeOffset(moment);
             if (type is not ("date" or "datetime" or "datetime2" or "smalldatetime")) value = moment.ToString("yyyy-MM-ddTHH:mm:ss.fffffff", Invariant);
         }
         string text = Convert.ToString(value, Invariant) ?? "";
         return type switch
         {
-            "decimal" or "numeric" => SqlDecimal.Parse(text),
-            "money" or "smallmoney" => decimal.Parse(text, NumberStyles.Number, Invariant),
+            "decimal" or "numeric" => ParseSqlDecimal(text),
+            "money" or "smallmoney" => decimal.Parse(text, NumberStyles.Float, Invariant),
             "bigint" => long.Parse(text, Invariant),
             "int" => int.Parse(text, Invariant),
             "smallint" => short.Parse(text, Invariant),
@@ -551,15 +808,131 @@ internal static class Program
             "datetimeoffset" => DateTimeOffset.Parse(text, Invariant, DateTimeStyles.RoundtripKind),
             "time" => TimeSpan.Parse(text, Invariant),
             "uniqueidentifier" => Guid.Parse(text),
-            "binary" or "varbinary" or "image" => value is byte[] bytes ? bytes : Convert.FromHexString(text.StartsWith("0x") ? text[2..] : text),
+            "binary" or "varbinary" or "image" or "timestamp" or "rowversion" => value is byte[] bytes ? bytes : Convert.FromHexString(text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? text[2..] : text),
             _ => text
         };
     }
 
+    private static string StripSqlTokens(string sql, bool hashStartsComment)
+    {
+        const string rejected = "The ODBC source must be one SELECT query; preview and import do not execute source writes.";
+        var output = new StringBuilder(sql.Length);
+        int i = 0;
+        while (i < sql.Length)
+        {
+            char ch = sql[i];
+            if (ch is '\'' or '"')
+            {
+                char quote = ch; i++; int slashes = 0; bool closed = false;
+                while (i < sql.Length)
+                {
+                    char c = sql[i++];
+                    if (c == quote)
+                    {
+                        if ((slashes & 1) == 1) throw new Exception(rejected);
+                        if (i < sql.Length && sql[i] == quote) { i++; slashes = 0; continue; }
+                        closed = true; break;
+                    }
+                    slashes = c == '\\' ? slashes + 1 : 0;
+                }
+                if (!closed) throw new Exception(rejected);
+                output.Append(' ');
+                continue;
+            }
+            if (ch == '[')
+            {
+                i++; bool closed = false;
+                while (i < sql.Length)
+                {
+                    char c = sql[i++];
+                    if (c == ']')
+                    {
+                        if (i < sql.Length && sql[i] == ']') { i++; continue; }
+                        closed = true; break;
+                    }
+                }
+                if (!closed) throw new Exception(rejected);
+                output.Append(' ');
+                continue;
+            }
+            if (ch == '`')
+            {
+                i++; bool closed = false;
+                while (i < sql.Length)
+                {
+                    char c = sql[i++];
+                    if (c == '`')
+                    {
+                        if (i < sql.Length && sql[i] == '`') { i++; continue; }
+                        closed = true; break;
+                    }
+                }
+                if (!closed) throw new Exception(rejected);
+                output.Append(' ');
+                continue;
+            }
+            if (ch == '$')
+            {
+                int end = i + 1;
+                if (end < sql.Length && (sql[end] == '$' || char.IsLetter(sql[end]) || sql[end] == '_'))
+                {
+                    if (sql[end] != '$') while (end < sql.Length && (char.IsLetterOrDigit(sql[end]) || sql[end] == '_')) end++;
+                    if (end < sql.Length && sql[end] == '$')
+                    {
+                        string tag = sql[i..(end + 1)];
+                        int close = sql.IndexOf(tag, end + 1, StringComparison.Ordinal);
+                        if (close < 0) throw new Exception(rejected);
+                        i = close + tag.Length;
+                        output.Append(' ');
+                        continue;
+                    }
+                }
+            }
+            if (ch == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+            {
+                i += 2;
+                while (i < sql.Length && sql[i] != '\r' && sql[i] != '\n') i++;
+                output.Append(' ');
+                continue;
+            }
+            if (hashStartsComment && ch == '#')
+            {
+                i++;
+                while (i < sql.Length && sql[i] != '\r' && sql[i] != '\n') i++;
+                output.Append(' ');
+                continue;
+            }
+            if (ch == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+            {
+                if (i + 2 < sql.Length && sql[i + 2] == '!') throw new Exception(rejected);
+                i += 2; bool closed = false;
+                while (i + 1 < sql.Length)
+                {
+                    if (sql[i] == '/' && sql[i + 1] == '*') throw new Exception(rejected);
+                    if (sql[i] == '*' && sql[i + 1] == '/') { i += 2; closed = true; break; }
+                    i++;
+                }
+                if (!closed) throw new Exception(rejected);
+                output.Append(' ');
+                continue;
+            }
+            output.Append(ch); i++;
+        }
+        return output.ToString();
+    }
+
     private static void ValidateSourceQuery(string sql)
     {
-        string tokens = System.Text.RegularExpressions.Regex.Replace(sql, """'(?:''|[^'])*'|"(?:""|[^"])*"|\[(?:\]\]|[^\]])*\]|`(?:``|[^`])*`|--[^\r\n]*|/\*[\s\S]*?\*/""", " ");
-        if (!System.Text.RegularExpressions.Regex.IsMatch(tokens, @"^\s*(SELECT|WITH)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase) || System.Text.RegularExpressions.Regex.IsMatch(tokens, @"\b(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|CREATE|TRUNCATE|EXEC|EXECUTE|CALL|GRANT|DENY|REVOKE|INTO|OUTFILE|DUMPFILE)\b|;\s*\S", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) throw new Exception("The ODBC source must be one SELECT query; preview and import do not execute source writes.");
+        const string rejected = "The ODBC source must be one SELECT query; preview and import do not execute source writes.";
+        if (string.IsNullOrWhiteSpace(sql)) throw new Exception(rejected);
+        void Check(string tokens)
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(tokens, @"^\s*(SELECT|WITH)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                || System.Text.RegularExpressions.Regex.IsMatch(tokens, @"\b(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|CREATE|TRUNCATE|EXEC|EXECUTE|CALL|GRANT|DENY|REVOKE|INTO|OUTFILE|DUMPFILE|SHUTDOWN|DBCC|BACKUP|RESTORE|KILL|RECONFIGURE|CHECKPOINT|BULK|OPENROWSET|OPENDATASOURCE|WAITFOR|WRITETEXT|UPDATETEXT|READTEXT|COPY|LOAD|FLUSH|PURGE|ATTACH|DETACH|VACUUM|PRAGMA|RAISERROR|DEALLOCATE|PREPARE|DO|LOCK|UNLOCK|RENAME|REPAIR|OPTIMIZE|INSTALL|UNINSTALL|USE|SET|DECLARE|PRINT|THROW|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|GO)\b|;\s*\S", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                throw new Exception(rejected);
+        }
+        Check(StripSqlTokens(sql, hashStartsComment: false));
+        if (sql.Contains('#')) Check(StripSqlTokens(sql, hashStartsComment: true));
     }
 
     private static Type CellType(string type) => type switch
@@ -577,7 +950,7 @@ internal static class Program
         "datetimeoffset" => typeof(DateTimeOffset),
         "time" => typeof(TimeSpan),
         "uniqueidentifier" => typeof(Guid),
-        "binary" or "varbinary" or "image" => typeof(byte[]),
+        "binary" or "varbinary" or "image" or "timestamp" or "rowversion" => typeof(byte[]),
         _ => typeof(string)
     };
 
@@ -614,7 +987,7 @@ internal static class Program
         string path = S("path"), temp = path + ".quervio-partial-" + Guid.NewGuid().ToString("N"); long rows = 0;
         try
         {
-            await using var command = new SqlCommand("SELECT * FROM " + Q(S("schema", "dbo")) + "." + Q(S("table")), connection) { CommandTimeout = 0 };
+            await using var command = new SqlCommand("SELECT * FROM " + Q(SNonEmpty("schema", "dbo")) + "." + Q(S("table")), connection) { CommandTimeout = 0 };
             await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess);
             if (Path.GetExtension(path).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
             {
@@ -672,20 +1045,35 @@ internal static class Program
         for (int i = 0; i < text.Length; i++)
         {
             char c = text[i];
-            if (c == '_' && i + 6 < text.Length && text[i + 1] == 'x' && text[i + 6] == '_' && text.Substring(i + 2, 4).All(Uri.IsHexDigit)) result.Append("_x005F_");
+            if (char.IsHighSurrogate(c))
+            {
+                if (i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])) result.Append(c).Append(text[++i]);
+                else result.Append("_x").Append(((int)c).ToString("X4", Invariant)).Append('_');
+            }
+            else if (char.IsLowSurrogate(c)) result.Append("_x").Append(((int)c).ToString("X4", Invariant)).Append('_');
+            else if (c == '_' && i + 6 < text.Length && text[i + 1] == 'x' && text[i + 6] == '_' && text.Substring(i + 2, 4).All(Uri.IsHexDigit)) result.Append("_x005F_");
             else if (c < 0x20 && c != '\t' && c != '\n' || c == '\uFFFE' || c == '\uFFFF') result.Append("_x").Append(((int)c).ToString("X4", Invariant)).Append('_');
             else result.Append(c);
         }
         return result.ToString();
     }
 
+    private static SqlDbType ParseSqlDbType(string rawType) => rawType.Trim().ToLowerInvariant() switch
+    {
+        "numeric" => SqlDbType.Decimal,
+        "rowversion" => SqlDbType.Timestamp,
+        _ => Enum.Parse<SqlDbType>(rawType, true)
+    };
+
     private static async Task<object> EncryptedQuery()
     {
         await using var connection = await Open(true);
         await using var command = new SqlCommand(S("query"), connection) { CommandTimeout = I("timeout", 30) };
-        foreach (var node in Args["parameters"]?.AsArray() ?? JsonNode.Parse(S("parametersJson", "[]"))!.AsArray())
+        string rawParameters = S("parametersJson");
+        var parameterNodes = Args["parameters"]?.AsArray() ?? JsonNode.Parse(string.IsNullOrWhiteSpace(rawParameters) ? "[]" : rawParameters)!.AsArray();
+        foreach (var node in parameterNodes)
         {
-            var item = node!.AsObject(); var type = Enum.Parse<SqlDbType>(item["type"]!.GetValue<string>(), true);
+            var item = node!.AsObject(); var type = ParseSqlDbType(item["type"]!.GetValue<string>());
             var parameter = command.Parameters.Add(item["name"]!.GetValue<string>(), type);
             if (item["size"] is not null) parameter.Size = item["size"]!.GetValue<int>();
             if (item["precision"] is not null) parameter.Precision = item["precision"]!.GetValue<byte>();
@@ -700,13 +1088,17 @@ internal static class Program
 
     private static async Task<object> ColumnEncryption()
     {
+        string? token = UseEntra() ? (await Token("https://database.windows.net/.default")).Token : null;
         var start = new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")) { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8, UseShellExecute = false, CreateNoWindow = true };
         foreach (string argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(AppContext.BaseDirectory, "ColumnEncryption.ps1") }) start.ArgumentList.Add(argument);
         using var process = System.Diagnostics.Process.Start(start) ?? throw new Exception("Could not start the Microsoft column encryption tool.");
-        string? token = Connection["authentication"]?["kind"]?.GetValue<string>() == "entra" ? (await Token("https://database.windows.net/.default")).Token : null;
-        await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { connectionString = Builder(true).ConnectionString, accessToken = token, schema = S("schema", "dbo"), table = S("table"), column = S("column"), key = S("key"), decrypt = B("decrypt"), encryptionType = S("encryptionType", "Deterministic") }));
-        process.StandardInput.Close();
         var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { connectionString = Builder(true).ConnectionString, accessToken = token, schema = SNonEmpty("schema", "dbo"), table = S("table"), column = S("column"), key = S("key"), decrypt = B("decrypt"), encryptionType = SNonEmpty("encryptionType", "Deterministic") }));
+        }
+        catch (IOException) { }
+        finally { try { process.StandardInput.Close(); } catch (IOException) { } }
         await process.WaitForExitAsync(); string output = await stdout; string error = await stderr;
         if (process.ExitCode != 0) throw new Exception(string.IsNullOrWhiteSpace(error) ? output : error);
         return new { message = output.Trim() };
@@ -717,22 +1109,37 @@ internal static class Program
         string master = S("masterKey"), key = S("key"), path = S("backupPath"), password = S("backupPassword");
         if (string.IsNullOrWhiteSpace(master) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(path) || password.Length < 12) throw new Exception("Provide key names, a new PFX backup path and a password of at least 12 characters.");
         if (File.Exists(path)) throw new Exception("The PFX backup destination already exists.");
+        await using var connection = await Open();
         using var rsa = RSA.Create(3072);
         var request = new CertificateRequest("CN=Quervio Always Encrypted", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.DataEncipherment, true));
         using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddYears(5));
         byte[] pfx = generated.Export(X509ContentType.Pfx, password);
-        // The backup is created before registering keys in the database.
-        using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None)) await file.WriteAsync(pfx);
-        using var certificate = X509CertificateLoader.LoadPkcs12(pfx, password, X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable | X509KeyStorageFlags.UserKeySet);
-        CryptographicOperations.ZeroMemory(pfx);
-        using (var store = new X509Store(StoreName.My, StoreLocation.CurrentUser)) { store.Open(OpenFlags.ReadWrite); store.Add(certificate); }
-        string keyPath = "CurrentUser/My/" + certificate.Thumbprint;
+        X509Certificate2 certificate;
+        try
+        {
+            // The backup is created before registering keys in the database.
+            using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None)) await file.WriteAsync(pfx);
+            certificate = X509CertificateLoader.LoadPkcs12(pfx, password, X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable | X509KeyStorageFlags.UserKeySet);
+        }
+        finally { CryptographicOperations.ZeroMemory(pfx); }
+        string keyPath;
+        using (certificate)
+        {
+            using (var store = new X509Store(StoreName.My, StoreLocation.CurrentUser)) { store.Open(OpenFlags.ReadWrite); store.Add(certificate); }
+            keyPath = "CurrentUser/My/" + certificate.Thumbprint;
+        }
         byte[] plain = RandomNumberGenerator.GetBytes(32); byte[] encrypted;
         try { encrypted = new SqlColumnEncryptionCertificateStoreProvider().EncryptColumnEncryptionKey(keyPath, "RSA_OAEP", plain); } finally { CryptographicOperations.ZeroMemory(plain); }
-        await using var connection = await Open();
-        await using var command = new SqlCommand($"CREATE COLUMN MASTER KEY {Q(master)} WITH(KEY_STORE_PROVIDER_NAME=N'MSSQL_CERTIFICATE_STORE',KEY_PATH={L(keyPath)}); CREATE COLUMN ENCRYPTION KEY {Q(key)} WITH VALUES(COLUMN_MASTER_KEY={Q(master)},ALGORITHM=N'RSA_OAEP',ENCRYPTED_VALUE=0x{Convert.ToHexString(encrypted)});", connection);
-        await command.ExecuteNonQueryAsync(); return new { masterKey = master, key, keyPath, backupPath = path };
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync();
+        try
+        {
+            await using var command = new SqlCommand($"CREATE COLUMN MASTER KEY {Q(master)} WITH(KEY_STORE_PROVIDER_NAME=N'MSSQL_CERTIFICATE_STORE',KEY_PATH={L(keyPath)}); CREATE COLUMN ENCRYPTION KEY {Q(key)} WITH VALUES(COLUMN_MASTER_KEY={Q(master)},ALGORITHM=N'RSA_OAEP',ENCRYPTED_VALUE=0x{Convert.ToHexString(encrypted)});", connection, transaction);
+            await command.ExecuteNonQueryAsync();
+            await transaction.CommitAsync();
+        }
+        catch { try { await transaction.RollbackAsync(); } catch (Exception) { } throw; }
+        return new { masterKey = master, key, keyPath, backupPath = path };
     }
 
     private static async Task<object> RotateMasterKey()
@@ -748,9 +1155,37 @@ internal static class Program
         await command.ExecuteNonQueryAsync(); return new { key = S("key"), masterKey = S("masterKey"), oldProtectorRetained = true };
     }
 
+    private static bool IsValidAzureSqlResourceId(string id, bool requireDatabase)
+    {
+        if (string.IsNullOrWhiteSpace(id) || id.Contains('?') || id.Contains('#') || id.Contains("..") || id.Contains('\\')
+            || id.Any(c => char.IsWhiteSpace(c) || char.IsControl(c))
+            || System.Text.RegularExpressions.Regex.IsMatch(id, @"%(?:2e|2f|5c|3f|23)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            return false;
+        string pattern = requireDatabase
+            ? @"^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Sql/servers/[^/]+/databases/[^/]+$"
+            : @"^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Sql/servers/[^/]+(?:/databases(?:/[^/]+)?)?$";
+        return System.Text.RegularExpressions.Regex.IsMatch(id, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    private static void ValidateAzureRestoreTarget(string sourceId, string targetId)
+    {
+        if (!IsValidAzureSqlResourceId(targetId, requireDatabase: true)
+            || string.Equals(targetId.TrimEnd('/'), sourceId.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+            throw new Exception("Restore requires a different full destination Azure SQL database resource ID.");
+    }
+
     private static async Task<object> Azure(string action)
     {
-        string id = S("resourceId"); if (!id.StartsWith("/subscriptions/", StringComparison.OrdinalIgnoreCase) || id.Contains('?') || id.Contains("..")) throw new Exception("Use a full Azure SQL resource ID.");
+        string id = S("resourceId");
+        bool requireDatabase = action != "azureList";
+        if (!IsValidAzureSqlResourceId(id, requireDatabase)) throw new Exception("Use a full Azure SQL resource ID.");
+        string target = ""; string restorePointInTime = "";
+        if (action == "azureRestore")
+        {
+            target = S("targetResourceId");
+            ValidateAzureRestoreTarget(id, target);
+            restorePointInTime = DateTimeOffset.Parse(S("pointInTime"), Invariant).ToString("O");
+        }
         using var http = new HttpClient(); http.DefaultRequestHeaders.Authorization = new("Bearer", (await Token("https://management.azure.com/.default")).Token);
         async Task<JsonNode> Send(HttpMethod method, string resource, JsonNode? body = null)
         {
@@ -763,8 +1198,7 @@ internal static class Program
         if (action == "azureList") return await Send(HttpMethod.Get, id);
         if (action == "azureBackups") return new { shortTerm = await Send(HttpMethod.Get, id + "/backupShortTermRetentionPolicies/default"), longTerm = await Send(HttpMethod.Get, id + "/backupLongTermRetentionPolicies/default") };
         if (action == "azureRetention") return await Send(HttpMethod.Put, id + "/backupShortTermRetentionPolicies/default", new JsonObject { ["properties"] = new JsonObject { ["retentionDays"] = I("days", 7) } });
-        string target = S("targetResourceId"); if (!target.StartsWith("/subscriptions/", StringComparison.OrdinalIgnoreCase) || target == id || target.Contains('?') || target.Contains("..")) throw new Exception("Restore requires a different full destination resource ID.");
         var source = await Send(HttpMethod.Get, id);
-        return await Send(HttpMethod.Put, target, new JsonObject { ["location"] = source["location"]!.DeepClone(), ["properties"] = new JsonObject { ["createMode"] = "PointInTimeRestore", ["sourceDatabaseId"] = id, ["restorePointInTime"] = DateTimeOffset.Parse(S("pointInTime"), Invariant).ToString("O") } });
+        return await Send(HttpMethod.Put, target, new JsonObject { ["location"] = source["location"]!.DeepClone(), ["properties"] = new JsonObject { ["createMode"] = "PointInTimeRestore", ["sourceDatabaseId"] = id, ["restorePointInTime"] = restorePointInTime } });
     }
 }

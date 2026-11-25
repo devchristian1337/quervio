@@ -17,22 +17,61 @@ const reportDir = path.join(root, "target", "sql-compatibility", `${values.versi
 const password = `Qv-${randomBytes(24).toString("hex")}-Aa1!`;
 if (process.env.GITHUB_ACTIONS) console.log(`::add-mask::${password}`);
 
-function run(command, args, { env = process.env, capture = false, allowFailure = false } = {}) {
+let activeChild = null;
+let interrupted = null;
+const shutdown = new AbortController();
+
+function run(command, args, { env = process.env, capture = false, allowFailure = false, trackChild = true } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd: root, env, stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit" });
+    if (trackChild) activeChild = child;
     let stdout = "", stderr = "";
     child.stdout?.on("data", (data) => { stdout += data; });
     child.stderr?.on("data", (data) => { stderr += data; });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0 || allowFailure) resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() });
-      else reject(new Error(`${command} failed (${code}). ${stderr}`));
+    child.on("error", (error) => {
+      if (trackChild && activeChild === child) activeChild = null;
+      reject(error);
+    });
+    child.on("close", (code, signal) => {
+      if (trackChild && activeChild === child) activeChild = null;
+      if (interrupted && trackChild) {
+        reject(new Error(`Interrupted by ${interrupted}.`));
+      } else if (code === 0 || (allowFailure && !signal)) {
+        resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() });
+      } else {
+        reject(new Error(`${command} failed (${signal ?? code}). ${stderr}`));
+      }
     });
   });
 }
 
 let created = false;
+let removed = false;
 const report = { requestedVersion: values.version, image, startedAt: new Date().toISOString(), status: "failed" };
+
+async function removeContainer() {
+  if (!created || removed) return;
+  removed = true;
+  try {
+    await run("docker", ["rm", "--force", name], { capture: true, trackChild: false });
+  } catch {
+    console.error(`Could not remove dedicated test container ${name}.`);
+    process.exitCode = process.exitCode || 1;
+    report.status = "failed";
+  }
+}
+
+function onSignal(signal) {
+  if (interrupted) return;
+  interrupted = signal;
+  process.exitCode = signal === "SIGINT" ? 130 : 143;
+  shutdown.abort();
+  try { activeChild?.kill("SIGTERM"); } catch { /* Child may already have exited. */ }
+}
+
+process.on("SIGINT", onSignal);
+process.on("SIGTERM", onSignal);
+
 try {
   const engine = await run("docker", ["info", "--format", "{{.OSType}}"], { capture: true });
   if (engine.stdout !== "linux") throw new Error("Docker must have a running Linux engine before the SQL tests can start.");
@@ -50,13 +89,13 @@ try {
   if (!port) throw new Error("Could not determine the dedicated test container port.");
   report.imageId = (await run("docker", ["inspect", "--format", "{{.Image}}", name], { capture: true })).stdout;
   let ready = false;
-  for (let attempt = 0; attempt < 90; attempt++) {
+  for (let attempt = 0; attempt < 90 && !interrupted; attempt++) {
     const result = await run("docker", ["exec", "-e", "SQLCMDPASSWORD", name,
       "/opt/mssql-tools18/bin/sqlcmd", "-C", "-S", "localhost", "-U", "sa", "-l", "2", "-b", "-Q", "SELECT 1;"],
     { env: { ...process.env, SQLCMDPASSWORD: password }, capture: true, allowFailure: true });
     if (result.code === 0) { ready = true; break; }
     if (attempt % 15 === 0) console.log("Waiting for the dedicated SQL Server to accept connections...");
-    await delay(2000);
+    await delay(2000, undefined, { signal: shutdown.signal });
   }
   if (!ready) throw new Error("The dedicated SQL Server did not become ready within the startup timeout.");
   const env = { ...process.env, QUERVIO_TEST_SERVER: `tcp:127.0.0.1,${port}`,
@@ -72,17 +111,11 @@ try {
   // Do not print raw subprocess errors: diagnostic output must never disclose
   // the generated password, even when a downstream tool echoes its environment.
   console.error(String(error).replaceAll(password, "[redacted]"));
-  process.exitCode = 1;
+  process.exitCode = process.exitCode || 1;
 } finally {
-  if (created) {
-    try {
-      await run("docker", ["rm", "--force", name], { capture: true });
-    } catch {
-      console.error(`Could not remove dedicated test container ${name}.`);
-      process.exitCode = 1;
-      report.status = "failed";
-    }
-  }
+  await removeContainer();
+  process.off("SIGINT", onSignal);
+  process.off("SIGTERM", onSignal);
   await mkdir(reportDir, { recursive: true });
   try { report.server = JSON.parse(await readFile(path.join(reportDir, "server.json"), "utf8")); } catch { /* Probe may not have run. */ }
   report.finishedAt = new Date().toISOString();

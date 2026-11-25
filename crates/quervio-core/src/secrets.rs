@@ -3,7 +3,8 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::error::{Error, Result};
@@ -104,29 +105,61 @@ impl DpapiSecretStore {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let temporary = self.path.with_extension("tmp");
-        fs::write(&temporary, serde_json::to_vec_pretty(entries)?)?;
-        fs::rename(&temporary, &self.path)?;
+        let temporary = unique_temp_path(&self.path);
+        let bytes = serde_json::to_vec_pretty(entries)?;
+        let write_result = (|| -> std::io::Result<()> {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)?;
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&temporary);
+            return Err(error.into());
+        }
+        if let Err(error) = fs::rename(&temporary, &self.path) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error.into());
+        }
         Ok(())
     }
 }
 
+fn unique_temp_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+    path.with_file_name(name)
+}
+
+fn zeroize_bytes(bytes: &mut [u8]) {
+    for byte in bytes.iter_mut() {
+        // SAFETY: `byte` is a valid, aligned mutable reference to a `u8`.
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
 impl SecretStore for DpapiSecretStore {
     fn get(&self, connection_id: &str) -> Result<Option<String>> {
-        let _guard = self.lock.lock().expect("secret store lock");
+        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let Some(encoded) = self.read()?.remove(connection_id) else {
             return Ok(None);
         };
         let encrypted = from_hex(&encoded)
             .ok_or_else(|| Error::Secrets("stored password is not valid hex".into()))?;
         let plain = dpapi::unprotect(&encrypted)?;
-        String::from_utf8(plain)
-            .map(Some)
-            .map_err(|_| Error::Secrets("stored password is not valid UTF-8".into()))
+        String::from_utf8(plain).map(Some).map_err(|error| {
+            let mut bytes = error.into_bytes();
+            zeroize_bytes(&mut bytes);
+            Error::Secrets("stored password is not valid UTF-8".into())
+        })
     }
 
     fn set(&self, connection_id: &str, secret: &str) -> Result<()> {
-        let _guard = self.lock.lock().expect("secret store lock");
+        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut entries = self.read()?;
         entries.insert(
             connection_id.to_string(),
@@ -136,7 +169,7 @@ impl SecretStore for DpapiSecretStore {
     }
 
     fn delete(&self, connection_id: &str) -> Result<()> {
-        let _guard = self.lock.lock().expect("secret store lock");
+        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut entries = self.read()?;
         if entries.remove(connection_id).is_some() {
             self.write(&entries)?;
@@ -188,10 +221,11 @@ mod dpapi {
         }
     }
 
-    /// Copies DPAPI's output and frees it.
+    /// Copies DPAPI's output, wipes the LocalAlloc buffer, and frees it.
     unsafe fn take(output: CRYPT_INTEGER_BLOB) -> Vec<u8> {
-        let bytes =
-            unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize) }.to_vec();
+        let slice = unsafe { std::slice::from_raw_parts_mut(output.pbData, output.cbData as usize) };
+        let bytes = slice.to_vec();
+        super::zeroize_bytes(slice);
         unsafe { LocalFree(output.pbData.cast()) };
         bytes
     }
@@ -304,6 +338,26 @@ mod tests {
         assert_eq!(from_hex(&to_hex(&[0, 15, 255])), Some(vec![0, 15, 255]));
         assert_eq!(from_hex("abc"), None);
         assert_eq!(from_hex("zz"), None);
+    }
+
+    #[test]
+    fn tmp_extension_path_and_failed_write_cleanup_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let tmp_named = dir.path().join("secrets.tmp");
+        let store = DpapiSecretStore::new(&tmp_named);
+        store.set("k", "val").unwrap();
+        assert_eq!(store.get("k").unwrap().as_deref(), Some("val"));
+
+        let blocked = dir.path().join("blocked.json");
+        fs::create_dir(&blocked).unwrap();
+        let blocked_store = DpapiSecretStore::new(&blocked);
+        assert!(blocked_store.set("k", "v").is_err());
+        let leftover: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("blocked.json."))
+            .collect();
+        assert!(leftover.is_empty(), "leftover temp files: {leftover:?}");
     }
 }
 

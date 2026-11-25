@@ -44,23 +44,55 @@ export function minimumColumnWidths(
   return widths;
 }
 
+type GraphemeSegmenter = { segment(input: string): Iterable<{ segment: string }> };
+const SegmenterCtor = (
+  typeof Intl !== "undefined"
+    ? (Intl as typeof Intl & {
+        Segmenter?: new (locales?: string | string[], options?: { granularity: "grapheme" }) => GraphemeSegmenter;
+      }).Segmenter
+    : undefined
+);
+const graphemeSegmenter: GraphemeSegmenter | null = SegmenterCtor
+  ? new SegmenterCtor(undefined, { granularity: "grapheme" })
+  : null;
+
+function splitGraphemes(text: string): string[] {
+  if (graphemeSegmenter) {
+    const out: string[] = [];
+    for (const { segment } of graphemeSegmenter.segment(text)) out.push(segment);
+    return out;
+  }
+  return Array.from(text);
+}
+
 /**
  * The longest start of `text` that fits `width` with an ellipsis, or `text`
  * itself when it fits. A binary search: values can be hundreds of characters.
  */
 export function fitText(text: string, width: number, measure: (text: string) => number): string {
-  // No glyph drawn is narrower than a pixel: more characters than pixels never fit.
-  const cut = text.length > width;
-  const source = cut ? text.slice(0, Math.max(0, Math.ceil(width))) : text;
-  if (!cut && measure(source) <= width) return source;
+  if (width <= 0) return "…";
+  const maxUnits = Math.ceil(width);
+  // Avoid measuring multi-megabyte values in full, while allowing shorter strings
+  // with combining marks or ZWJ sequences (whose UTF-16 length can exceed pixel width)
+  // to be measured before deciding to truncate.
+  const huge = text.length > maxUnits * 4;
+  if (!huge && measure(text) <= width) return text;
+  let source = text;
+  if (huge) {
+    let end = maxUnits;
+    const code = text.charCodeAt(end - 1);
+    if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+    source = text.slice(0, Math.max(0, end));
+  }
+  const units = splitGraphemes(source);
   let low = 0;
-  let high = source.length;
+  let high = units.length;
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
-    if (measure(`${source.slice(0, middle)}…`) <= width) low = middle;
+    if (measure(`${units.slice(0, middle).join("")}…`) <= width) low = middle;
     else high = middle - 1;
   }
-  return `${source.slice(0, low).trimEnd()}…`;
+  return `${units.slice(0, low).join("").trimEnd()}…`;
 }
 
 /**

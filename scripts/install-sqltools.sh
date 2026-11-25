@@ -20,7 +20,7 @@ if [[ ! -x "$executable" ]]; then
   curl --fail --location --proto '=https' --tlsv1.2 \
     "https://github.com/microsoft/sqltoolsservice/releases/download/$version/Microsoft.SqlTools.ServiceLayer-linux-$arch-net10.0.tar.gz" \
     --output "$temporary/service.tar.gz"
-  printf '%s  %s\n' "$expected" "$temporary/service.tar.gz" | sha256sum --check --status
+  (cd -- "$temporary" && printf '%s  service.tar.gz\n' "$expected" | sha256sum --check --status)
   mkdir -- "$temporary/service"
   tar -xzf "$temporary/service.tar.gz" --no-same-owner -C "$temporary/service"
   test -f "$temporary/service/MicrosoftSqlToolsServiceLayer"
@@ -32,12 +32,32 @@ if [[ ! -x "$executable" ]]; then
   fi
   mv -- "$temporary/service" "$directory"
 fi
-# Encode a JSON string without requiring Python or jq on the user's machine.
-encoded="${executable//\\/\\\\}"
-encoded="${encoded//\"/\\\"}"
-encoded="${encoded//$'\n'/\\n}"
-encoded="${encoded//$'\r'/\\r}"
-encoded="${encoded//$'\t'/\\t}"
+# Encode a JSON string (RFC 8259, including all U+0000..U+001F control chars)
+# without requiring Python or jq on the user's machine.
+json_escape() {
+  local LC_ALL=C s="$1" out="" i ch ord
+  for (( i = 0; i < ${#s}; i++ )); do
+    ch="${s:i:1}"
+    case "$ch" in
+      '\') out+='\\' ;;
+      '"') out+='\"' ;;
+      $'\b') out+='\b' ;;
+      $'\f') out+='\f' ;;
+      $'\n') out+='\n' ;;
+      $'\r') out+='\r' ;;
+      $'\t') out+='\t' ;;
+      *)
+        printf -v ord '%d' "'$ch"
+        if (( ord >= 0 && ord < 32 )); then
+          printf -v ch '\\u%04x' "$ord"
+        fi
+        out+="$ch"
+        ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+encoded="$(json_escape "$executable")"
 printf '"%s"\n' "$encoded" > "$temporary/language.json"
 mv -f -- "$temporary/language.json" "$root/language.json"
 printf 'SQL Tools Service %s installed and selected.\n' "$version"

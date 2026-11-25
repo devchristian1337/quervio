@@ -28,16 +28,21 @@ export async function copySelection() {
   const selection = current?.getSelection();
   const model = current?.getModel();
   if (!selection || selection.isEmpty() || !model) return;
-  await writeText(model.getValueInRange(selection));
+  const text = model.getValueInRange(selection);
+  if (inTauri()) await writeText(text);
+  else await navigator.clipboard.writeText(text);
 }
 
 export async function cutSelection() {
-  const selection = current?.getSelection();
-  if (!current || !selection || selection.isEmpty()) return;
+  const editor = current;
+  const model = editor?.getModel();
+  const selection = editor?.getSelection();
+  if (!editor || !model || !selection || selection.isEmpty()) return;
   await copySelection();
-  current.executeEdits("cut", [{ range: selection, text: "" }]);
-  current.pushUndoStop();
-  current.focus();
+  if (current !== editor || editor.getModel() !== model) return;
+  editor.executeEdits("cut", [{ range: selection, text: "" }]);
+  editor.pushUndoStop();
+  editor.focus();
 }
 
 export async function pasteClipboard() {

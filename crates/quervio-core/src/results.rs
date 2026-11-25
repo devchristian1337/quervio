@@ -123,13 +123,27 @@ impl ResultSet {
                 "This result contains truncated values. Increase the cell limit and rerun the query before exporting.",
             ));
         }
-        fn field(out: &mut impl Write, value: Option<&str>, escape: bool) -> io::Result<()> {
-            if value.is_some_and(is_spreadsheet_formula) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "CSV contains formula-like text in a value or column name. Export as Excel (.xlsx) to preserve it safely as text.",
-                ));
+        let formula_error = || {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "CSV contains formula-like text in a value or column name. Export as Excel (.xlsx) to preserve it safely as text.",
+            )
+        };
+        if self.columns.iter().any(|c| is_spreadsheet_formula(&c.name)) {
+            return Err(formula_error());
+        }
+        for row in 0..self.row_count() {
+            let stored = self.stored(row);
+            for column in 0..self.columns.len() {
+                if self
+                    .cell_text(stored, column)
+                    .is_some_and(is_spreadsheet_formula)
+                {
+                    return Err(formula_error());
+                }
             }
+        }
+        fn field(out: &mut impl Write, value: Option<&str>, escape: bool) -> io::Result<()> {
             out.write_all(b"\"")?;
             match value {
                 None => out.write_all(br"\N")?,
@@ -418,7 +432,7 @@ impl ResultSet {
     /// cell a kind byte (0 text, 1 NULL, 2 text cut to `preview_chars`), a
     /// `u32` byte length and the UTF-8 bytes, all little-endian.
     pub fn window(&self, start: usize, count: usize, preview_chars: usize) -> Vec<u8> {
-        let rows = start.min(self.row_count())..(start + count).min(self.row_count());
+        let rows = start.min(self.row_count())..start.saturating_add(count).min(self.row_count());
         let width = self.columns.len();
         let mut out = Vec::with_capacity(8 + rows.len() * width * 16);
         out.extend_from_slice(&(rows.len() as u32).to_le_bytes());
@@ -914,9 +928,43 @@ impl RowWriter for RowChunk {
 }
 
 fn markdown_cell(text: &str) -> String {
-    text.replace('|', r"\|")
-        .replace("\r\n", "<br>")
-        .replace(['\n', '\r'], "<br>")
+    let mut out = String::with_capacity(text.len());
+    let mut backslashes = 0usize;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            backslashes += 1;
+            continue;
+        }
+        if c == '|' {
+            // Double every backslash immediately before `|` so `\|` becomes
+            // `\\\|` instead of `\\|` (which leaves `|` unescaped in GFM).
+            for _ in 0..backslashes * 2 {
+                out.push('\\');
+            }
+            backslashes = 0;
+            out.push_str(r"\|");
+            continue;
+        }
+        for _ in 0..backslashes {
+            out.push('\\');
+        }
+        backslashes = 0;
+        match c {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push_str("<br>");
+            }
+            '\n' => out.push_str("<br>"),
+            other => out.push(other),
+        }
+    }
+    for _ in 0..backslashes {
+        out.push('\\');
+    }
+    out
 }
 
 #[derive(Debug, Default)]
@@ -1077,6 +1125,40 @@ mod tests {
         let mut out = Vec::new();
         assert!(data.write_csv(&mut out).is_err());
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn csv_formula_error_in_later_row_writes_no_partial_output() {
+        let mut data = set();
+        data.push_row(
+            &[
+                ColumnValues::Int(4),
+                ColumnValues::String(SqlString::from_utf8_string("=1+1".into())),
+            ],
+            100,
+        );
+        let mut out = Vec::new();
+        let error = data.write_csv(&mut out).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(out.is_empty(), "wrote partial bytes: {:?}", String::from_utf8_lossy(&out));
+    }
+
+    #[test]
+    fn window_saturates_on_overflow() {
+        let data = set();
+        let window = data.window(1, usize::MAX, 10);
+        let rows = u32::from_le_bytes(window[0..4].try_into().unwrap());
+        assert_eq!(rows, 2);
+        let empty = data.window(usize::MAX, 10, 10);
+        let empty_rows = u32::from_le_bytes(empty[0..4].try_into().unwrap());
+        assert_eq!(empty_rows, 0);
+    }
+
+    #[test]
+    fn markdown_escapes_backslashes_before_pipes() {
+        assert_eq!(markdown_cell(r"a\|b"), r"a\\\|b");
+        assert_eq!(markdown_cell(r"a\\|b"), r"a\\\\\|b");
+        assert_eq!(markdown_cell(r"C:\Users\name"), r"C:\Users\name");
     }
 
     #[test]

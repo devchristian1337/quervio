@@ -162,6 +162,7 @@ function NumberField({
   min,
   max,
   step = 1,
+  integer = Number.isInteger(step) && Number.isInteger(min),
   suffix,
   onChange,
 }: {
@@ -170,6 +171,7 @@ function NumberField({
   min: number;
   max: number;
   step?: number;
+  integer?: boolean;
   suffix?: string;
   onChange: (value: number) => void;
 }) {
@@ -193,7 +195,7 @@ function NumberField({
           </QuantityValue>
           <Input
             aria-label={label}
-            inputMode="decimal"
+            inputMode={integer ? "numeric" : "decimal"}
             className={cn(
               "absolute inset-0 h-full rounded-none border-0 bg-transparent px-1 text-center tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent",
               !editing && "text-transparent caret-transparent",
@@ -206,7 +208,15 @@ function NumberField({
             onChange={(event) => {
               setText(event.target.value);
               const next = Number(event.target.value);
-              if (event.target.value.trim() !== "" && Number.isFinite(next) && next >= min && next <= max) onChange(next);
+              if (
+                event.target.value.trim() !== "" &&
+                Number.isFinite(next) &&
+                (!integer || Number.isInteger(next)) &&
+                next >= min &&
+                next <= max
+              ) {
+                onChange(next);
+              }
             }}
             onKeyDown={(event) => {
               if (event.key === "ArrowUp" || event.key === "ArrowDown") {
@@ -514,6 +524,11 @@ function ShortcutsSection() {
   const shortcuts = useSettings((s) => s.settings.shortcuts);
   const resetShortcuts = useSettings((s) => s.resetShortcuts);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [recordingId, setRecordingId] = useState<Command["id"] | null>(null);
+  useEffect(() => {
+    pauseShortcuts(recordingId !== null);
+    return () => pauseShortcuts(false);
+  }, [recordingId]);
   const groups = [...new Set(COMMANDS.map((command) => command.group))];
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -564,7 +579,14 @@ function ShortcutsSection() {
           <div key={group} role="group" aria-label={group} className="mb-6">
             <h4 className="mb-1 text-xs font-medium text-muted-foreground">{group}</h4>
             {COMMANDS.filter((command) => command.group === group).map((command) => (
-              <ShortcutRow key={command.id} command={command} onPreview={setPreview} />
+              <ShortcutRow
+                key={command.id}
+                command={command}
+                recording={recordingId === command.id}
+                anyRecording={recordingId !== null}
+                onRecordingChange={(on) => setRecordingId(on ? command.id : null)}
+                onPreview={setPreview}
+              />
             ))}
           </div>
         ))}
@@ -578,21 +600,31 @@ function heldModifiers(event: KeyboardEvent) {
   return [event.ctrlKey && "Ctrl", event.shiftKey && "Shift", event.altKey && "Alt"].filter(Boolean).join("+");
 }
 
-function ShortcutRow({ command, onPreview }: { command: Command; onPreview: (preview: Preview | null) => void }) {
+function ShortcutRow({
+  command,
+  recording,
+  anyRecording,
+  onRecordingChange,
+  onPreview,
+}: {
+  command: Command;
+  recording: boolean;
+  anyRecording: boolean;
+  onRecordingChange: (recording: boolean) => void;
+  onPreview: (preview: Preview | null) => void;
+}) {
   const shortcuts = useSettings((s) => s.settings.shortcuts);
   const setShortcut = useSettings((s) => s.setShortcut);
-  const [recording, setRecording] = useState(false);
   const keys = keysOf(command.id, shortcuts);
   const changed = shortcuts[command.id] !== undefined;
 
   useEffect(() => {
     if (!recording) return;
-    pauseShortcuts(true);
     const onKeyDown = (event: KeyboardEvent) => {
       event.preventDefault();
       event.stopPropagation();
       if (event.key === "Escape") {
-        setRecording(false);
+        onRecordingChange(false);
         onPreview(null);
         return;
       }
@@ -601,7 +633,7 @@ function ShortcutRow({ command, onPreview }: { command: Command; onPreview: (pre
         onPreview({ shortcut: heldModifiers(event), command: command.label, recording: true });
         return;
       }
-      setRecording(false);
+      onRecordingChange(false);
       onPreview({ shortcut, command: command.label });
       if (keys.includes(shortcut)) return;
       // A combination does one thing: take it from the command that had it.
@@ -622,12 +654,11 @@ function ShortcutRow({ command, onPreview }: { command: Command; onPreview: (pre
     return () => {
       window.removeEventListener("keydown", onKeyDown, { capture: true });
       window.removeEventListener("keyup", onKeyUp, { capture: true });
-      pauseShortcuts(false);
     };
-  }, [recording, keys, command, setShortcut, onPreview]);
+  }, [recording, keys, command, setShortcut, onRecordingChange, onPreview]);
 
   const show = (shortcut: string | undefined) =>
-    !recording && onPreview(shortcut ? { shortcut, command: command.label } : null);
+    !anyRecording && onPreview(shortcut ? { shortcut, command: command.label } : null);
 
   return (
     <div
@@ -670,7 +701,7 @@ function ShortcutRow({ command, onPreview }: { command: Command; onPreview: (pre
                   ? keys[0] ? { shortcut: keys[0], command: command.label } : null
                   : { shortcut: "", command: command.label, recording: true },
               );
-              setRecording(!recording);
+              onRecordingChange(!recording);
             }}
           >
             {recording ? "Press keys…" : <Plus />}

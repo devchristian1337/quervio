@@ -132,7 +132,10 @@ pub async fn run(
     if let Some(db) = database {
         connection.default_database = Some(db);
     }
-    let password = explorer.password(id, None)?;
+    let password = match connection.authentication {
+        quervio_core::connection::Authentication::Sql { .. } => explorer.password(id, None)?,
+        _ => None,
+    };
     let input = json!({"connection":connection,"password":password,"action":request.action,"arguments":request.arguments,"confirmed":request.confirmed});
     let mut command = Command::new(path);
     command
@@ -142,62 +145,77 @@ pub async fn run(
         .kill_on_drop(true);
     crate::processes::configure(&mut command);
     let mut child = command.spawn().map_err(message)?;
-    let _registration =
-        crate::processes::Registration::new(child.id().ok_or("Microsoft process ID is missing.")?);
-    let mut stdin = child.stdin.take().ok_or("Bridge stdin unavailable")?;
-    stdin
-        .write_all(&serde_json::to_vec(&input).map_err(message)?)
-        .await
-        .map_err(message)?;
-    stdin.write_all(b"\n").await.map_err(message)?;
-    drop(stdin);
-    let mut lines = BufReader::new(child.stdout.take().ok_or("Bridge stdout unavailable")?).lines();
-    let mut output = None;
-    // A steady tick, not a sleep restarted by every line: frequent progress
-    // lines must not keep a cancel from being seen.
-    let mut tick = tokio::time::interval(std::time::Duration::from_millis(200));
-    loop {
-        if cancel.is_cancelled() {
-            if let Some(pid) = child.id() {
-                crate::processes::terminate_tree(pid).await;
+    let pid = child.id().ok_or("Microsoft process ID is missing.")?;
+    let _registration = crate::processes::Registration::new(pid);
+    let io_result: CommandResult<Option<CommandResult<Value>>> = async {
+        let mut stdin = child.stdin.take().ok_or("Bridge stdin unavailable")?;
+        stdin
+            .write_all(&serde_json::to_vec(&input).map_err(message)?)
+            .await
+            .map_err(message)?;
+        stdin.write_all(b"\n").await.map_err(message)?;
+        drop(stdin);
+        let mut lines =
+            BufReader::new(child.stdout.take().ok_or("Bridge stdout unavailable")?).lines();
+        let mut output = None;
+        // A steady tick, not a sleep restarted by every line: frequent progress
+        // lines must not keep a cancel from being seen.
+        let mut tick = tokio::time::interval(std::time::Duration::from_millis(200));
+        loop {
+            if cancel.is_cancelled() {
+                return Err(
+                    "Microsoft operation cancelled. Server and Azure changes may remain or continue."
+                        .into(),
+                );
             }
+            let line = tokio::select! {
+                line = lines.next_line() => line.map_err(message)?,
+                _ = tick.tick() => continue,
+            };
+            let Some(line) = line else {
+                break;
+            };
+            let event: Value =
+                serde_json::from_str(&line).map_err(|_| "Invalid Microsoft bridge response.")?;
+            match event["type"].as_str() {
+                Some("progress") => {
+                    let _ = on_event.send(Progress {
+                        phase: event["phase"].as_str().unwrap_or("running").into(),
+                        message: event["message"].as_str().unwrap_or("").into(),
+                        completed: event["completed"].as_u64(),
+                    });
+                }
+                Some("result") => output = Some(Ok(event["value"].clone())),
+                Some("error") => {
+                    output = Some(Err(event["message"]
+                        .as_str()
+                        .unwrap_or("Microsoft operation failed.")
+                        .to_string()))
+                }
+                _ => {}
+            }
+        }
+        Ok(output)
+    }
+    .await;
+    let output = match io_result {
+        Ok(output) => output,
+        Err(error) => {
+            crate::processes::terminate_tree(pid).await;
             let _ = child.kill().await;
             let _ = child.wait().await;
             remove_partial_files(&request.arguments);
-            return Err("Microsoft operation cancelled. Server and Azure changes may remain or continue.".into());
+            return Err(error);
         }
-        let line = tokio::select! {
-            line = lines.next_line() => line.map_err(message)?,
-            _ = tick.tick() => continue,
-        };
-        let Some(line) = line else {
-            break;
-        };
-        let event: Value =
-            serde_json::from_str(&line).map_err(|_| "Invalid Microsoft bridge response.")?;
-        match event["type"].as_str() {
-            Some("progress") => {
-                let _ = on_event.send(Progress {
-                    phase: event["phase"].as_str().unwrap_or("running").into(),
-                    message: event["message"].as_str().unwrap_or("").into(),
-                    completed: event["completed"].as_u64(),
-                });
-            }
-            Some("result") => output = Some(Ok(event["value"].clone())),
-            Some("error") => {
-                output = Some(Err(event["message"]
-                    .as_str()
-                    .unwrap_or("Microsoft operation failed.")
-                    .to_string()))
-            }
-            _ => {}
-        }
-    }
+    };
     let status = child.wait().await.map_err(message)?;
     match output {
         Some(result) => result,
-        None => Err(format!(
-            "Microsoft bridge exited without a result ({status})."
-        )),
+        None => {
+            remove_partial_files(&request.arguments);
+            Err(format!(
+                "Microsoft bridge exited without a result ({status})."
+            ))
+        }
     }
 }

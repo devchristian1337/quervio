@@ -94,7 +94,20 @@ impl ExplorerState {
             return Ok(None);
         }
         if connection.authentication != Authentication::Entra {
-            return self.password(&connection.id, typed);
+            if let Some(password) = typed.filter(|password| !password.is_empty()) {
+                return Ok(Some(password));
+            }
+            if connection.id.is_empty() {
+                return Ok(None);
+            }
+            let saved = self.connections.lock().unwrap().get(&connection.id).ok().cloned();
+            let Some(saved) = saved else {
+                return Ok(None);
+            };
+            if !can_reuse_saved_password(&saved, connection) {
+                return Err(REENTER_PASSWORD.into());
+            }
+            return self.secrets.get(&connection.id).map_err(message);
         }
         let mut cached = self.token.lock().await;
         let now = std::time::SystemTime::now()
@@ -165,6 +178,26 @@ impl ExplorerState {
         drop(sessions);
         close(session).await;
     }
+}
+
+const REENTER_PASSWORD: &str =
+    "Re-enter the password when changing the server, login, or relaxing encryption settings.";
+
+fn encrypt_rank(encrypt: quervio_core::connection::Encrypt) -> u8 {
+    match encrypt {
+        quervio_core::connection::Encrypt::Optional => 0,
+        quervio_core::connection::Encrypt::Mandatory => 1,
+        quervio_core::connection::Encrypt::Strict => 2,
+    }
+}
+
+/// True when `candidate` still targets the same server, SQL login and at least
+/// the same TLS protection as `saved`, so reusing the stored password is safe.
+fn can_reuse_saved_password(saved: &SavedConnection, candidate: &SavedConnection) -> bool {
+    saved.server.trim().eq_ignore_ascii_case(candidate.server.trim())
+        && saved.authentication == candidate.authentication
+        && encrypt_rank(candidate.encrypt) >= encrypt_rank(saved.encrypt)
+        && (!candidate.trust_server_certificate || saved.trust_server_certificate)
 }
 
 async fn close(session: Option<SharedSession>) {
@@ -278,13 +311,27 @@ pub async fn save_connection(
     connection: SavedConnection,
     password: Option<String>,
 ) -> CommandResult<SavedConnection> {
+    let typed = password.filter(|p| !p.is_empty());
+    if typed.is_none()
+        && matches!(connection.authentication, Authentication::Sql { .. })
+        && !connection.id.is_empty()
+    {
+        let existing = state.connections.lock().unwrap().get(&connection.id).ok().cloned();
+        if let Some(existing) = existing {
+            if !can_reuse_saved_password(&existing, &connection)
+                && state.secrets.get(&existing.id).map_err(message)?.is_some()
+            {
+                return Err(REENTER_PASSWORD.into());
+            }
+        }
+    }
     let saved = state
         .connections
         .lock()
         .unwrap()
         .save(connection)
         .map_err(message)?;
-    match (&saved.authentication, password.filter(|p| !p.is_empty())) {
+    match (&saved.authentication, typed) {
         (Authentication::Sql { .. }, Some(password)) => {
             state.secrets.set(&saved.id, &password).map_err(message)?
         }
@@ -300,14 +347,18 @@ pub async fn save_connection(
 
 #[tauri::command]
 pub async fn delete_connection(state: State<'_, ExplorerState>, id: String) -> CommandResult<()> {
-    state.disconnect(&id).await;
+    // Remove connection and secret BEFORE disconnecting (bumping revision) so a
+    // concurrent explorer_connect cannot read the soon-to-be-deleted profile and
+    // cache an orphaned Session after disconnect finishes.
     state
         .connections
         .lock()
         .unwrap()
         .remove(&id)
         .map_err(message)?;
-    state.secrets.delete(&id).map_err(message)
+    state.secrets.delete(&id).map_err(message)?;
+    state.disconnect(&id).await;
+    Ok(())
 }
 
 /// Logs in with the dialog's current values without saving anything.
@@ -526,6 +577,62 @@ mod tests {
         assert_eq!(other.encrypt, Encrypt::Mandatory);
         assert!(!other.trust_server_certificate);
         assert_eq!(state.password(&other.id, None).unwrap(), None);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn saved_password_is_not_reused_for_modified_server_login_or_weakened_tls() {
+        let dir = std::env::temp_dir().join(format!("quervio-cred-guard-{}", uuid::Uuid::new_v4()));
+        let state = ExplorerState::open(&dir, &dir).unwrap();
+        let saved = state
+            .connections
+            .lock()
+            .unwrap()
+            .save(SavedConnection {
+                id: String::new(),
+                name: "Prod".into(),
+                group: None,
+                server: "prod-sql.internal,1433".into(),
+                authentication: Authentication::Sql {
+                    user_name: "sa".into(),
+                },
+                default_database: Some("Finance".into()),
+                environment: Environment::Production,
+                encrypt: Encrypt::Strict,
+                trust_server_certificate: false,
+            })
+            .unwrap();
+        state.secrets.set(&saved.id, "TopSecret!123").unwrap();
+
+        // Editing metadata (name/database/group/environment) with same server/login/TLS keeps password.
+        let mut benign = saved.clone();
+        benign.name = "Prod Renamed".into();
+        benign.default_database = Some("Sales".into());
+        assert_eq!(state.credential(&benign, None).await.unwrap().as_deref(), Some("TopSecret!123"));
+
+        // Changing server, login, or relaxing TLS without typing a password is rejected.
+        let mut diff_server = saved.clone();
+        diff_server.server = "127.0.0.1,1433".into();
+        assert!(state.credential(&diff_server, None).await.is_err());
+
+        let mut diff_user = saved.clone();
+        diff_user.authentication = Authentication::Sql { user_name: "other".into() };
+        assert!(state.credential(&diff_user, None).await.is_err());
+
+        let mut weak_encrypt = saved.clone();
+        weak_encrypt.encrypt = Encrypt::Optional;
+        assert!(state.credential(&weak_encrypt, None).await.is_err());
+
+        let mut weak_cert = saved.clone();
+        weak_cert.trust_server_certificate = true;
+        assert!(state.credential(&weak_cert, None).await.is_err());
+
+        // Typing a password explicitly still works with the new server.
+        assert_eq!(
+            state.credential(&diff_server, Some("NewPass!".into())).await.unwrap().as_deref(),
+            Some("NewPass!")
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }

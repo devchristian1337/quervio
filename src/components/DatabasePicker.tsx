@@ -54,7 +54,10 @@ export function DatabasePicker({ connection, password, canLoad, onChange }: Prop
     pending.current = requested;
     setOptions({ context: requested, status: "loading", names });
     try {
-      const databases = await api.connectionDatabases({ ...connection, server: connection.server.trim() }, password || null);
+      const databases = await api.connectionDatabases(
+        { ...connection, server: connection.server.trim() },
+        connection.authentication.kind === "sql" ? password || null : null,
+      );
       if (mounted.current && currentContext.current === requested) {
         setOptions({ context: requested, status: "ready", names: [...new Set(databases.map(db => db.name))] });
       }

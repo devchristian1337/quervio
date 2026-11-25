@@ -356,12 +356,16 @@ export function Agent({ context }: { context: Context }) {
           ? `DECLARE @job uniqueidentifier;\nEXEC msdb.dbo.sp_add_job @job_name=${l(name)},@enabled=${enabled ? 1 : 0},@job_id=@job OUTPUT;\nEXEC msdb.dbo.sp_add_jobserver @job_id=@job;`
           : mode === "update"
             ? `EXEC msdb.dbo.sp_update_job @job_name=${l(name)},@enabled=${enabled ? 1 : 0};`
-            : `EXEC msdb.dbo.sp_${mode}_job @job_name=${l(name)};`;
+            : mode === "start" || mode === "stop" || mode === "delete"
+              ? `EXEC msdb.dbo.sp_${mode}_job @job_name=${l(name)};`
+              : "";
     if (section === "operators")
       script =
         mode === "delete"
           ? `EXEC msdb.dbo.sp_delete_operator @name=${l(name)};`
-          : `EXEC msdb.dbo.sp_${mode === "update" ? "update" : "add"}_operator @name=${l(name)},@enabled=${enabled ? 1 : 0},@email_address=${l(email)};`;
+          : mode === "create" || mode === "update"
+            ? `EXEC msdb.dbo.sp_${mode === "update" ? "update" : "add"}_operator @name=${l(name)},@enabled=${enabled ? 1 : 0},@email_address=${l(email)};`
+            : "";
     if (
       section === "alerts" &&
       /^\d+$/.test(severity) &&
@@ -370,29 +374,46 @@ export function Agent({ context }: { context: Context }) {
       script =
         mode === "delete"
           ? `EXEC msdb.dbo.sp_delete_alert @name=${l(name)};`
-          : `EXEC msdb.dbo.sp_${mode === "update" ? "update" : "add"}_alert @name=${l(name)},@enabled=${enabled ? 1 : 0},@message_id=${messageId},@severity=${severity},@delay_between_responses=60;${operator ? `\nIF EXISTS (SELECT 1 FROM msdb.dbo.sysnotifications s JOIN msdb.dbo.sysalerts a ON a.id=s.alert_id JOIN msdb.dbo.sysoperators o ON o.id=s.operator_id WHERE a.name=${l(name)} AND o.name=${l(operator)})\n  EXEC msdb.dbo.sp_update_notification @alert_name=${l(name)},@operator_name=${l(operator)},@notification_method=1;\nELSE\n  EXEC msdb.dbo.sp_add_notification @alert_name=${l(name)},@operator_name=${l(operator)},@notification_method=1;` : ""}`;
+          : mode === "create" || mode === "update"
+            ? `EXEC msdb.dbo.sp_${mode === "update" ? "update" : "add"}_alert @name=${l(name)},@enabled=${enabled ? 1 : 0},@message_id=${messageId},@severity=${severity},@delay_between_responses=60;${operator ? `\nIF EXISTS (SELECT 1 FROM msdb.dbo.sysnotifications s JOIN msdb.dbo.sysalerts a ON a.id=s.alert_id JOIN msdb.dbo.sysoperators o ON o.id=s.operator_id WHERE a.name=${l(name)} AND o.name=${l(operator)})\n  EXEC msdb.dbo.sp_update_notification @alert_name=${l(name)},@operator_name=${l(operator)},@notification_method=1;\nELSE\n  EXEC msdb.dbo.sp_add_notification @alert_name=${l(name)},@operator_name=${l(operator)},@notification_method=1;` : ""}`
+            : "";
   }
   const validStep = /^\d+$/.test(stepId) && Number(stepId) > 0;
   const stepScript =
-    jobId && stepName && validStep
-      ? `EXEC msdb.dbo.sp_${mode === "update" ? "update" : mode === "delete" ? "delete" : "add"}_jobstep @job_id=${l(jobId)},@step_id=${stepId}${mode === "delete" ? "" : `,@step_name=${l(stepName)},@subsystem=N'TSQL',@database_name=${l(context.database ?? "master")},@command=${l(command)}${mode === "update" ? "" : ",@on_success_action=1"},@on_fail_action=2`};${mode !== "update" && mode !== "delete" ? `${Number(stepId) > 1 ? `\nEXEC msdb.dbo.sp_update_jobstep @job_id=${l(jobId)},@step_id=${Number(stepId) - 1},@on_success_action=3;` : ""}\nIF EXISTS (SELECT 1 FROM msdb.dbo.sysjobsteps WHERE job_id=${l(jobId)} AND step_id>${Number(stepId)}) EXEC msdb.dbo.sp_update_jobstep @job_id=${l(jobId)},@step_id=${Number(stepId)},@on_success_action=3;` : ""}`
+    jobId && validStep
+      ? mode === "delete"
+        ? `EXEC msdb.dbo.sp_delete_jobstep @job_id=${l(jobId)},@step_id=${stepId};`
+        : stepName && (mode === "create" || mode === "update")
+          ? `EXEC msdb.dbo.sp_${mode === "update" ? "update" : "add"}_jobstep @job_id=${l(jobId)},@step_id=${stepId},@step_name=${l(stepName)},@subsystem=N'TSQL',@database_name=${l(context.database ?? "master")},@command=${l(command)}${mode === "update" ? "" : ",@on_success_action=1"},@on_fail_action=2;${mode === "create" ? `${Number(stepId) > 1 ? `\nEXEC msdb.dbo.sp_update_jobstep @job_id=${l(jobId)},@step_id=${Number(stepId) - 1},@on_success_action=3;` : ""}\nIF EXISTS (SELECT 1 FROM msdb.dbo.sysjobsteps WHERE job_id=${l(jobId)} AND step_id>${Number(stepId)}) EXEC msdb.dbo.sp_update_jobstep @job_id=${l(jobId)},@step_id=${Number(stepId)},@on_success_action=3;` : ""}`
+          : ""
       : "";
   const validSchedule =
     /^\d+$/.test(interval) && Number(interval) > 0 && /^\d\d:\d\d$/.test(time);
-  const scheduleScript =
-    jobId && schedule && validSchedule
-      ? mode === "delete" && /^\d+$/.test(scheduleId)
+  const validScheduleId = /^\d+$/.test(scheduleId);
+  const scheduleScript = !jobId
+    ? ""
+    : mode === "delete"
+      ? validScheduleId
         ? `EXEC msdb.dbo.sp_detach_schedule @job_id=${l(jobId)},@schedule_id=${scheduleId};`
-        : mode === "update" && /^\d+$/.test(scheduleId)
+        : ""
+      : mode === "update"
+        ? schedule && validSchedule && validScheduleId
           ? `EXEC msdb.dbo.sp_update_schedule @schedule_id=${scheduleId},@new_name=${l(schedule)},@enabled=${enabled ? 1 : 0},@freq_type=${frequency},@freq_interval=${interval},@freq_recurrence_factor=1,@active_start_time=${Number(time.replace(":", "")) * 100};`
-          : `EXEC msdb.dbo.sp_add_jobschedule @job_id=${l(jobId)},@name=${l(schedule)},@enabled=${enabled ? 1 : 0},@freq_type=${frequency},@freq_interval=${interval},@freq_recurrence_factor=1,@active_start_time=${Number(time.replace(":", "")) * 100};`
-      : "";
+          : ""
+        : mode === "create"
+          ? schedule && validSchedule
+            ? `EXEC msdb.dbo.sp_add_jobschedule @job_id=${l(jobId)},@name=${l(schedule)},@enabled=${enabled ? 1 : 0},@freq_type=${frequency},@freq_interval=${interval},@freq_recurrence_factor=1,@active_start_time=${Number(time.replace(":", "")) * 100};`
+            : ""
+          : "";
   return (
     <div className="flex flex-col gap-3 overflow-auto">
       <ViewTabs
         label="Agent objects"
         value={section}
-        onChange={setSection}
+        onChange={(next) => {
+          setSection(next);
+          setMode("create");
+        }}
         options={[
           ["jobs", "Jobs"],
           ["alerts", "Alerts"],
@@ -597,6 +618,7 @@ export function Maintenance({
     validation = errorMessage(e);
   }
   async function file(importing: boolean) {
+    setError(null);
     try {
       if (importing) {
         const path = await open({
@@ -605,14 +627,23 @@ export function Maintenance({
         });
         if (path) {
           const value = JSON.parse(await api.fileRead(path));
-          if (value.version !== 1 || !Array.isArray(value.tasks))
+          if (
+            !value ||
+            typeof value !== "object" ||
+            value.version !== 1 ||
+            typeof value.name !== "string" ||
+            typeof value.time !== "string" ||
+            !/^\d\d:\d\d$/.test(value.time) ||
+            !Array.isArray(value.tasks)
+          )
             throw new Error("Unsupported maintenance flow format.");
+          const [hour, minute] = value.time.split(":").map(Number);
           maintenanceScript(
             value.name,
             context.database ?? "master",
             value.tasks,
-            2,
-            0,
+            hour,
+            minute,
           );
           setName(value.name);
           setTasks(value.tasks);
@@ -834,7 +865,7 @@ export function Maintenance({
           <Button
             variant="outline"
             disabled={!script}
-            onClick={() => void saveScript(script)}
+            onClick={() => void saveScript(script).catch((e) => setError(errorMessage(e)))}
           >
             Export deployment script
           </Button>

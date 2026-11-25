@@ -23,7 +23,6 @@ import {
   type Health,
 } from "@/lib/server-health";
 import {
-  management,
   records,
   quoteName as n,
   type Context,
@@ -31,7 +30,6 @@ import {
   type DataTable,
 } from "@/lib/management-api";
 import { queryStoreAction } from "@/lib/sql-management";
-import { errorMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   Choice,
@@ -567,7 +565,11 @@ export function QueryStore({ context }: { context: Context }) {
             <>
               <DataGrid
                 data={plans.data}
-                onRow={(row) => setPlan(row.plan_id ?? "")}
+                onRow={(row) => {
+                  const id = row.plan_id ?? "";
+                  setPlan(id);
+                  if (compare === id) setCompare("");
+                }}
                 selected={(row) => row.plan_id === plan}
               />
               <div className="flex flex-wrap items-end gap-3">
@@ -669,22 +671,24 @@ export function ExtendedEvents({
     [duration, setDuration] = useState("100000"),
     [view, setView] = useState("live"),
     [path, setPath] = useState(""),
-    [filter, setFilter] = useState(""),
-    [error, setError] = useState<string | null>(null);
+    [loadedPath, setLoadedPath] = useState(""),
+    [filter, setFilter] = useState("");
+  const sessionName = name.trim();
   const sessions = useRead(context, { kind: "events" });
   const data = useRead(
     context,
-    view === "live" && name
-      ? { kind: "eventData", name }
-      : view === "file" && path
-        ? { kind: "xel", path }
+    view === "live" && sessionName
+      ? { kind: "eventData", name: sessionName }
+      : view === "file" && loadedPath
+        ? { kind: "xel", path: loadedPath }
         : null,
     view === "live" ? 5 : 0,
   );
   const scope = azure ? "DATABASE" : "SERVER";
-  const script = /^\d+$/.test(duration)
-    ? `CREATE EVENT SESSION ${n(name)} ON ${scope}\nADD EVENT sqlserver.rpc_completed(ACTION(sqlserver.sql_text,sqlserver.database_name,sqlserver.session_id) WHERE duration>=${duration}),\nADD EVENT sqlserver.sql_batch_completed(ACTION(sqlserver.sql_text,sqlserver.database_name,sqlserver.session_id) WHERE duration>=${duration}),\nADD EVENT sqlserver.error_reported(ACTION(sqlserver.sql_text,sqlserver.database_name,sqlserver.session_id))\nADD TARGET package0.ring_buffer(SET max_memory=4096)\nWITH (MAX_MEMORY=4096 KB,EVENT_RETENTION_MODE=ALLOW_SINGLE_EVENT_LOSS,MAX_DISPATCH_LATENCY=5 SECONDS,STARTUP_STATE=OFF);\nALTER EVENT SESSION ${n(name)} ON ${scope} STATE=START;`
-    : "";
+  const script =
+    sessionName && /^\d+$/.test(duration)
+      ? `CREATE EVENT SESSION ${n(sessionName)} ON ${scope}\nADD EVENT sqlserver.rpc_completed(ACTION(sqlserver.sql_text,sqlserver.database_name,sqlserver.session_id) WHERE duration>=${duration}),\nADD EVENT sqlserver.sql_batch_completed(ACTION(sqlserver.sql_text,sqlserver.database_name,sqlserver.session_id) WHERE duration>=${duration}),\nADD EVENT sqlserver.error_reported(ACTION(sqlserver.sql_text,sqlserver.database_name,sqlserver.session_id))\nADD TARGET package0.ring_buffer(SET max_memory=4096)\nWITH (MAX_MEMORY=4096 KB,EVENT_RETENTION_MODE=ALLOW_SINGLE_EVENT_LOSS,MAX_DISPATCH_LATENCY=5 SECONDS,STARTUP_STATE=OFF);\nALTER EVENT SESSION ${n(sessionName)} ON ${scope} STATE=START;`
+      : "";
   const table = useMemo(() => {
     if (!data.data) return null;
     let table = data.data;
@@ -706,17 +710,19 @@ export function ExtendedEvents({
         }
       : table;
   }, [data.data, view, filter]);
-  async function loadFile() {
-    setError(null);
-    try {
-      const result = await management.read(context, { kind: "xel", path });
-      if (!result.rows.length)
-        setError("No events found at the server-side path.");
-      data.refresh();
-    } catch (e) {
-      setError(errorMessage(e));
-    }
+  function loadFile() {
+    const target = path.trim();
+    if (!target) return;
+    if (target === loadedPath) data.refresh();
+    else setLoadedPath(target);
   }
+  const emptyFile =
+    view === "file" &&
+    !!loadedPath &&
+    !data.loading &&
+    !data.error &&
+    data.data !== null &&
+    data.data.rows.length === 0;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
       <div className="flex flex-wrap items-end gap-3">
@@ -740,19 +746,19 @@ export function ExtendedEvents({
       <div className="flex flex-wrap gap-2">
         <Operation
           context={context}
-          script={`ALTER EVENT SESSION ${n(name)} ON ${scope} STATE=START;`}
+          script={sessionName ? `ALTER EVENT SESSION ${n(sessionName)} ON ${scope} STATE=START;` : ""}
           label="Start"
           onApplied={sessions.refresh}
         />
         <Operation
           context={context}
-          script={`ALTER EVENT SESSION ${n(name)} ON ${scope} STATE=STOP;`}
+          script={sessionName ? `ALTER EVENT SESSION ${n(sessionName)} ON ${scope} STATE=STOP;` : ""}
           label="Stop"
           onApplied={sessions.refresh}
         />
         <Operation
           context={context}
-          script={`DROP EVENT SESSION ${n(name)} ON ${scope};`}
+          script={sessionName ? `DROP EVENT SESSION ${n(sessionName)} ON ${scope};` : ""}
           label="Delete session"
           onApplied={sessions.refresh}
         />
@@ -781,7 +787,7 @@ export function ExtendedEvents({
               value={path}
               onChange={setPath}
             />
-            <Button variant="outline" onClick={() => void loadFile()}>
+            <Button variant="outline" disabled={!path.trim() || data.loading} onClick={loadFile}>
               Read file
             </Button>
           </>
@@ -793,7 +799,9 @@ export function ExtendedEvents({
           clearLabel="Clear captured events filter"
         />
       </div>
-      {(data.error || error) && <Notice error>{data.error ?? error}</Notice>}
+      {(data.error || emptyFile) && (
+        <Notice error>{data.error ?? "No events found at the server-side path."}</Notice>
+      )}
       {table && <DataGrid data={table} />}
       <p className="text-xs text-muted-foreground">
         The ring buffer is bounded and may discard older events. Duration is

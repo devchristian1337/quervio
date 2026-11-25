@@ -153,12 +153,22 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
     Math.max(5, ...model.columns.map((c) => Math.max(c.seed.length, c.increment.length))),
   );
   function change(index: number, patch: Partial<ColumnDefinition>) {
-    setModel((value) => ({
-      ...value,
-      columns: value.columns.map((c, i) =>
+    setModel((value) => {
+      const previous = value.columns[index];
+      const columns = value.columns.map((c, i) =>
         i === index ? { ...c, ...patch } : c,
-      ),
-    }));
+      );
+      let primaryKey = value.primaryKey;
+      if (!original && previous && patch.name !== undefined && patch.name !== previous.name && previous.name && primaryKey.includes(previous.name)) {
+        const stillExists = columns.some((c) => c.name === previous.name);
+        if (!stillExists) {
+          primaryKey = patch.name
+            ? [...new Set(primaryKey.map((name) => (name === previous.name ? patch.name! : name)))]
+            : primaryKey.filter((name) => name !== previous.name);
+        }
+      }
+      return { ...value, columns, primaryKey };
+    });
   }
   let script = "",
     validation = "";
@@ -168,16 +178,20 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
   } catch (e) {
     validation = errorMessage(e);
   }
+  const parsedConstraintColumns = constraintColumns
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
   let constraintScript = "";
   if (
     model.name &&
     constraintName &&
-    (constraintColumns || (constraint === "CHECK" && expression))
+    (constraint === "DROP" ||
+      (constraint === "CHECK"
+        ? !!expression.trim()
+        : parsedConstraintColumns.length > 0))
   ) {
-    const columns = constraintColumns
-      .split(",")
-      .map((c) => n(c.trim()))
-      .join(", ");
+    const columns = parsedConstraintColumns.map((c) => n(c)).join(", ");
     constraintScript =
       constraint === "INDEX"
         ? `CREATE INDEX ${n(constraintName)} ON ${q(model.schema, model.name)} (${columns});`
@@ -335,12 +349,15 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
                       <Button
                         variant="ghost"
                         onClick={() =>
-                          setModel((m) => ({
-                            ...m,
-                            columns: m.columns.filter(
-                              (_, index) => index !== i,
-                            ),
-                          }))
+                          setModel((m) => {
+                            const removed = m.columns[i];
+                            const columns = m.columns.filter((_, index) => index !== i);
+                            const primaryKey =
+                              !original && removed?.name && !columns.some((col) => col.name === removed.name)
+                                ? m.primaryKey.filter((name) => name !== removed.name)
+                                : m.primaryKey;
+                            return { ...m, columns, primaryKey };
+                          })
                         }
                       >
                         Remove
@@ -391,7 +408,7 @@ export function TableDesigner({ tab }: { tab: ToolTab }) {
               value={constraintName}
               onChange={setConstraintName}
             />
-            {constraint !== "CHECK" && (
+            {constraint !== "CHECK" && constraint !== "DROP" && (
               <Text
                 label="Columns in key order, comma separated"
                 value={constraintColumns}
@@ -532,6 +549,8 @@ export function ViewDesigner({ tab }: { tab: ToolTab }) {
             onChange={(value) => {
               setSource(value);
               setSelected([]);
+              setJoinLeft("");
+              setWhereColumn("");
             }}
             options={objectOptions("Select source")}
           />
@@ -556,7 +575,10 @@ export function ViewDesigner({ tab }: { tab: ToolTab }) {
                   <Choice
                   label="Join object"
                   value={joinSource}
-                  onChange={setJoinSource}
+                  onChange={(value) => {
+                    setJoinSource(value);
+                    setJoinRight("");
+                  }}
                   options={objectOptions("No join")}
                   />
                   <Choice

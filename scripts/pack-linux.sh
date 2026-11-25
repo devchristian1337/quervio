@@ -19,6 +19,8 @@ bash scripts/build-microsoft.sh
 bash scripts/install-sqltools.sh "$root/target/linux-components"
 service="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")))' "$root/target/linux-components/language.json")"
 mkdir -p src-tauri/resources/linux/sqltools
+# Remove stale payloads from earlier versions/architectures while keeping README.txt.
+find src-tauri/resources/linux/sqltools -mindepth 1 -maxdepth 1 ! -name 'README.txt' -exec rm -rf -- {} +
 cp -a -- "$(dirname -- "$service")/." src-tauri/resources/linux/sqltools/
 # Optional CoreCLR LTTng profiling provider, not used by Quervio or SQL
 # Extended Events. It links an obsolete liblttng-ust.so.0 on newer hosts and

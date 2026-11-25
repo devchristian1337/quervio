@@ -170,14 +170,19 @@ function sizeCanvas(canvas: HTMLCanvasElement, width: number, height: number) {
 function useVisibleLoop(ref: RefObject<HTMLElement | null>, frame: (dt: number, t: number) => boolean) {
   const frameRef = useRef(frame);
   frameRef.current = frame;
-  const state = useRef({ id: 0, last: 0, visible: true, running: false });
+  const state = useRef({ id: 0, last: 0, visible: true, running: false, mounted: false });
 
   const tick = useCallback((now: number) => {
     const s = state.current;
+    if (!s.mounted) {
+      s.running = false;
+      s.last = 0;
+      return;
+    }
     const dt = s.last ? Math.min(0.1, (now - s.last) / 1000) : 0;
     s.last = now;
     const more = frameRef.current(dt, now / 1000);
-    if (more && s.visible && !document.hidden) s.id = requestAnimationFrame(tick);
+    if (more && s.mounted && s.visible && !document.hidden) s.id = requestAnimationFrame(tick);
     else {
       s.running = false;
       s.last = 0;
@@ -187,7 +192,7 @@ function useVisibleLoop(ref: RefObject<HTMLElement | null>, frame: (dt: number, 
 
   const wake = useCallback(() => {
     const s = state.current;
-    if (s.running || !s.visible || document.hidden) return;
+    if (!s.mounted || s.running || !s.visible || document.hidden) return;
     s.running = true;
     ref.current?.setAttribute("data-loop", "running");
     s.id = requestAnimationFrame(tick);
@@ -196,6 +201,7 @@ function useVisibleLoop(ref: RefObject<HTMLElement | null>, frame: (dt: number, 
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
+    state.current.mounted = true;
     const observer = new IntersectionObserver(([entry]) => {
       state.current.visible = entry.isIntersecting;
       if (entry.isIntersecting) wake();
@@ -206,6 +212,7 @@ function useVisibleLoop(ref: RefObject<HTMLElement | null>, frame: (dt: number, 
     };
     document.addEventListener("visibilitychange", visibility);
     return () => {
+      state.current.mounted = false;
       observer.disconnect();
       document.removeEventListener("visibilitychange", visibility);
       cancelAnimationFrame(state.current.id);
@@ -457,7 +464,7 @@ export function LiveLine({
     const p = palRef.current;
     const isPaused = pausedRef.current;
     const { w, h, dpr } = sizeRef.current;
-    if (!canvas || !root || !w || !h || !p) return true;
+    if (!canvas || !root || !w || !h || !p) return false;
 
     const useAttract = cfg.attract && !cfg.hasInput;
     const buffers: Buffer[] = useAttract ? [{ id: "attract", samples: st.attract }] : bufRef.current;
@@ -945,6 +952,11 @@ export function LiveLine({
     sizeRef.current = { w: size.width, h: size.height, dpr: sizeCanvas(canvas, size.width, size.height) };
     wake();
   }, [size.width, size.height, wake]);
+
+  useEffect(() => () => {
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    if (announceTimer.current) clearTimeout(announceTimer.current);
+  }, []);
 
   const markInput = () => {
     stRef.current.lastInput = performance.now();

@@ -100,7 +100,7 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
     const revision = ++testRevision.current;
     setTest({ status: "running" });
     try {
-      const info = await api.testConnection(cleaned(), password || null);
+      const info = await api.testConnection(cleaned(), isSql ? password || null : null);
       if (revision === testRevision.current) setTest({ status: "ok", text: `Connected to ${info.serverName} (SQL Server ${info.version})` });
     } catch (e) {
       if (revision === testRevision.current) setTest({ status: "failed", text: errorMessage(e) });
@@ -113,7 +113,7 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
     setSaving(true);
     setError(null);
     try {
-      const saved = await save(cleaned(), password || null);
+      const saved = await save(cleaned(), isSql ? password || null : null);
       onSaved(saved);
       onOpenChange(false);
     } catch (e) {
@@ -150,11 +150,12 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
           <Field label="Authentication">
             <Select
               value={draft.authentication.kind}
-              onValueChange={(kind) =>
+              onValueChange={(kind) => {
+                if (kind !== "sql") setPassword("");
                 update({
-                  authentication: kind === "sql" ? { kind: "sql", userName } : kind === "entra" ? {kind: "entra"} : { kind: "windows" },
-                })
-              }
+                  authentication: kind === "sql" ? { kind: "sql", userName } : kind === "entra" ? { kind: "entra" } : { kind: "windows" },
+                });
+              }}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
@@ -201,7 +202,7 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
               <DatabasePicker
                 key={`${open}:${editing?.id ?? "new"}`}
                 connection={draft}
-                password={password}
+                password={isSql ? password : ""}
                 canLoad={open && canSubmit}
                 onChange={(defaultDatabase) => update({ defaultDatabase })}
               />

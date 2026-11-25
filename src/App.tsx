@@ -52,14 +52,21 @@ function useCloseGuard() {
     if (!(window as { __TAURI_INTERNALS__?: { metadata?: unknown } }).__TAURI_INTERNALS__?.metadata) return;
     const appWindow = getCurrentWindow();
     let closing = false;
+    let settling = false;
     const unlisten = appWindow.onCloseRequested(async (event) => {
       if (closing) return;
       // Held open until the tabs are saved (they come back on the next
       // start) and open transactions are settled.
       event.preventDefault();
-      if (await settleBeforeExit()) {
-        closing = true;
-        await appWindow.destroy();
+      if (settling) return;
+      settling = true;
+      try {
+        if (await settleBeforeExit()) {
+          closing = true;
+          await appWindow.destroy();
+        }
+      } finally {
+        settling = false;
       }
     });
     return () => void unlisten.then((stop) => stop());

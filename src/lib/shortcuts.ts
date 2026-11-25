@@ -23,21 +23,24 @@ export function openQueryFromContext() {
   if (active) void open(active.connectionId, active.database);
 }
 
+function hasOpenDialog() {
+  return Boolean(document.querySelector('[role="dialog"]') || document.querySelector('[role="alertdialog"]'));
+}
+
 export function runCommand(id: CommandId) {
   if (id === "commandPalette") {
     const palette = useCommandPalette.getState();
-    if (palette.open || !document.querySelector('[role="dialog"]')) palette.setOpen(!palette.open);
+    if (palette.open || !hasOpenDialog()) palette.setOpen(!palette.open);
     return;
   }
-  // Searching must not run a query or change tabs behind the modal.
-  if (useCommandPalette.getState().open) return;
+  // Searching or any open modal dialog must not run workspace commands behind it.
+  if (useCommandPalette.getState().open || hasOpenDialog()) return;
   const workbench = useWorkbench.getState();
   if (workbench.activeId) {
     if (id === "closeTab") {workbench.close(workbench.activeId);return;}
     if (["execute", "cancel", "toggleResults", "format", "save", "saveAs"].includes(id)) return;
     if (id === "nextTab" || id === "previousTab") {const index = workbench.tabs.findIndex(t => t.id === workbench.activeId);workbench.activate(workbench.tabs[index + (id === "nextTab" ? 1 : -1)]?.id ?? null);return;}
   }
-  if (id === "execute" && document.querySelector('[role="dialog"]')) return;
   const { activeId, execute, cancel, toggleResults, cycle } = useQueries.getState();
   switch (id) {
     case "execute": {
@@ -104,7 +107,7 @@ export function useGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         // A modal keeps focus until it is closed.
-        if (!useWorkbench.getState().activeId && !(event.target as Element | null)?.closest?.('[role="dialog"]')) findInEditor();
+        if (!useWorkbench.getState().activeId && !hasOpenDialog()) findInEditor();
       } else if (reload) {
         event.preventDefault();
       }

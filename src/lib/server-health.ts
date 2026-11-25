@@ -5,8 +5,11 @@
 
 export type Health = Record<string, string | null>;
 
-const number = (value: string | null | undefined) =>
-  value === null || value === undefined || value === "" ? null : Number(value);
+const number = (value: string | null | undefined) => {
+  if (value === null || value === undefined || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 
 /** 8 MB, 1.2 GB, 1 TB: binary units, as Windows and SSMS show sizes. */
 export function bytes(value: number | null): string {
@@ -79,6 +82,7 @@ export function figures(row: Health, previous: Health | null): Figures {
   const data = number(row.data_bytes);
   const dataUsed = number(row.data_used_bytes);
   const sampled = timestamp(row.sampled_at);
+  const started = timestamp(row.started_at);
   let batchesPerSecond: number | null = null;
   if (previous) {
     const seconds = (sampled - timestamp(previous.sampled_at)) / 1000;
@@ -86,15 +90,16 @@ export function figures(row: Health, previous: Health | null): Figures {
     // A restart resets the counter: no rate across it.
     if (seconds > 0 && count >= 0) batchesPerSecond = count / seconds;
   }
+  const sqlMemoryKb = number(row.physical_memory_in_use_kb);
   return {
     cpuPercent: number(row.cpu_percent),
     memoryPercent: total && available !== null ? ((total - available) / total) * 100 : null,
     memoryTotal: total === null ? null : total * 1024,
-    sqlMemory: number(row.physical_memory_in_use_kb) === null ? null : number(row.physical_memory_in_use_kb)! * 1024,
+    sqlMemory: sqlMemoryKb === null ? null : sqlMemoryKb * 1024,
     diskPercent: number(row.volume_used_percent),
     diskTotal: number(row.volume_bytes),
     workersPercent: workers !== null && maxWorkers ? (workers / maxWorkers) * 100 : null,
-    uptimeSeconds: row.started_at ? (sampled - timestamp(row.started_at)) / 1000 : null,
+    uptimeSeconds: Number.isFinite(sampled) && Number.isFinite(started) ? (sampled - started) / 1000 : null,
     batchesPerSecond,
     sessions: number(row.user_sessions),
     running: number(row.active_requests),

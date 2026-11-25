@@ -18,6 +18,7 @@ vi.mock("@/lib/api", async (original) => ({
     sqlcmdPrepare: vi.fn<(...args: Parameters<typeof import("@/lib/api").api.sqlcmdPrepare>) => Promise<SqlcmdPreview>>(),
     sqlcmdExecute: vi.fn(async () => "succeeded"),
     sqlcmdDiscard: vi.fn(async () => {}),
+    useDatabase: vi.fn(async (_id: string, db: string) => db),
     resultRows: vi.fn(async () => window1x1("a")),
   },
 }));
@@ -207,6 +208,38 @@ describe("SQLCMD include consent", () => {
     await useQueries.getState().execute(id, { text: "DROP TABLE dbo.t", baseLine: 0 });
     expect(api.sqlcmdExecute).toHaveBeenCalledWith(id, preview.token, true, expect.anything(), expect.anything());
   });
+
+  it("asks about Destructive Statements in SQLCMD when a connection is promoted to Production after tab open", async () => {
+    const devConn = { ...production, environment: "development" as const };
+    const id = await openTab(devConn);
+    useQueries.getState().setSqlcmdMode(id, true);
+    useConnections.setState({ connections: [production] });
+    const destructive = { findings: [{ kind: "drop" as const, target: "dbo.t", line: 1 }], uncertain: false };
+    useDialogs.setState({ confirmDestructive });
+    vi.mocked(api.sqlcmdPrepare).mockResolvedValueOnce({ ...preview, destructive, needsConfirmation: false });
+    ask.mockResolvedValueOnce(true);
+
+    await useQueries.getState().execute(id, { text: "DROP TABLE dbo.t", baseLine: 0 });
+    expect(confirmDestructive).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ check: destructive }));
+    expect(api.sqlcmdExecute).not.toHaveBeenCalled();
+    expect(api.sqlcmdDiscard).toHaveBeenCalledExactlyOnceWith(id, preview.token);
+  });
+
+  it("skips execution and discards SQLCMD preview when the tab closes during preparation", async () => {
+    const id = await sqlcmdTab();
+    let resolveAsk!: (confirmed: boolean) => void;
+    ask.mockImplementationOnce(() => new Promise<boolean>((resolve) => { resolveAsk = resolve; }));
+    vi.mocked(api.sqlcmdPrepare).mockResolvedValueOnce(preview);
+
+    const exec = useQueries.getState().execute(id, { text: "SELECT 1;", baseLine: 0 });
+    await vi.waitFor(() => expect(ask).toHaveBeenCalledOnce());
+    await useQueries.getState().close(id);
+    resolveAsk(true);
+    await exec;
+
+    expect(api.sqlcmdExecute).not.toHaveBeenCalled();
+    expect(api.sqlcmdDiscard).toHaveBeenCalledWith(id, preview.token);
+  });
 });
 
 describe("the Production guard of a Query Tab", () => {
@@ -332,5 +365,85 @@ describe("an Execution's running state", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not execute after a tab closes while checkScript is pending", async () => {
+    let finishCheck!: () => void;
+    vi.mocked(api.checkScript).mockImplementationOnce(
+      () => new Promise((resolve) => { finishCheck = () => resolve({ findings: [], uncertain: false }); }),
+    );
+    const id = await openTab(production);
+    const exec = useQueries.getState().execute(id, select);
+    await vi.waitFor(() => expect(api.checkScript).toHaveBeenCalledOnce());
+    await useQueries.getState().close(id);
+    finishCheck();
+    await exec;
+    expect(api.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it("ignores out-of-order useDatabase responses and blocks useDatabase during prepareExecution", async () => {
+    let resolveFirst!: (db: string) => void;
+    let resolveSecond!: (db: string) => void;
+    vi.mocked(api.useDatabase)
+      .mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }))
+      .mockImplementationOnce(() => new Promise((r) => { resolveSecond = r; }));
+
+    const id = await openTab(development);
+    const first = useQueries.getState().useDatabase(id, "DB_A");
+    const second = useQueries.getState().useDatabase(id, "DB_B");
+    resolveSecond("DB_B");
+    await second;
+    resolveFirst("DB_A");
+    await first;
+    expect(tab(id).database).toBe("DB_B");
+
+    // Block useDatabase while confirmDestructive / checkScript is awaiting
+    let finishCheck!: () => void;
+    vi.mocked(api.checkScript).mockImplementationOnce(
+      () => new Promise((resolve) => { finishCheck = () => resolve({ findings: [], uncertain: false }); }),
+    );
+    const prodId = await openTab(production);
+    const exec = useQueries.getState().execute(prodId, select);
+    await vi.waitFor(() => expect(api.checkScript).toHaveBeenCalledOnce());
+    vi.mocked(api.useDatabase).mockClear();
+    await useQueries.getState().useDatabase(prodId, "OtherDB");
+    expect(api.useDatabase).not.toHaveBeenCalled();
+    finishCheck();
+    await exec;
+  });
+
+  it("does not leak firstBlock cache when a tab closes while readFirstBlocks is awaiting resultRows", async () => {
+    let resolveRows!: (buf: ArrayBuffer) => void;
+    vi.mocked(api.resultRows).mockImplementationOnce(() => new Promise((r) => { resolveRows = r; }));
+    const id = await openTab(development);
+    vi.mocked(api.executeQuery).mockImplementationOnce(async (...args) => {
+      args[5].onmessage({ type: "resultSetStarted", index: 0, columns: [{ name: "c", kind: "text" }] });
+      args[5].onmessage({ type: "resultSetFinished", index: 0, rows: 1 });
+      args[5].onmessage({ type: "finished", outcome: "succeeded", elapsedMs: 1, database: "master", openTransactions: 0 });
+      return "succeeded";
+    });
+    const exec = useQueries.getState().execute(id, select);
+    await vi.waitFor(() => expect(api.resultRows).toHaveBeenCalledOnce());
+    await useQueries.getState().close(id);
+    resolveRows(window1x1("leaked"));
+    await exec;
+    expect(firstBlock(id, 1, 0)).toBeUndefined();
+  });
+
+  it("clears sqlcmdMode when setPlanMode selects a plan and cycles backward to the last tab when activeId is null", async () => {
+    const id1 = await openTab(development);
+    const id2 = await openTab(development);
+    const id3 = await openTab(development);
+    useQueries.getState().setSqlcmdMode(id1, true);
+    useQueries.getState().setPlanMode(id1, "estimated");
+    expect(tab(id1)).toMatchObject({ sqlcmdMode: false, planMode: "estimated" });
+
+    useQueries.setState({ activeId: null });
+    useQueries.getState().cycle(-1);
+    expect(useQueries.getState().activeId).toBe(id3);
+    useQueries.setState({ activeId: null });
+    useQueries.getState().cycle(1);
+    expect(useQueries.getState().activeId).toBe(id1);
+    expect(id2).toBeTruthy();
   });
 });

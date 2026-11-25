@@ -6,11 +6,14 @@ pub enum Error {
     #[error("{0}")]
     Server(#[from] mssql_tds::error::Error),
 
-    #[error("could not read or write saved connections: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("saved connections file is corrupt: {0}")]
+    #[error("corrupt JSON: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("{0}")]
+    Cancelled(String),
 
     #[error("saved passwords: {0}")]
     Secrets(String),

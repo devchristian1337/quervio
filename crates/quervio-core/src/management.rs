@@ -174,7 +174,11 @@ impl Resource {
 }
 
 fn device(path: &str) -> &'static str {
-    if path.starts_with("https://") {
+    let trimmed = path.trim_start();
+    if trimmed
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+    {
         "URL"
     } else {
         "DISK"
@@ -183,8 +187,13 @@ fn device(path: &str) -> &'static str {
 
 pub async fn capabilities(session: &mut Session) -> Result<ServerCapabilities> {
     let data=session.query_table("SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)),CAST(SERVERPROPERTY('Edition') AS nvarchar(256)),CAST(SERVERPROPERTY('EngineEdition') AS int),DB_NAME(),HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER STATE'),HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','SHOWPLAN'),HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','ALTER'),IS_SRVROLEMEMBER('sysadmin')",1).await?;
-    let row = &data.rows[0];
-    let get = |i: usize| row[i].clone().unwrap_or_default();
+    let Some(row) = data.rows.first() else {
+        return Err(crate::error::Error::UnexpectedValue {
+            column: 0,
+            found: "no rows from server capability probe".into(),
+        });
+    };
+    let get = |i: usize| row.get(i).and_then(|v| v.clone()).unwrap_or_default();
     let version = get(0);
     let major_version = version
         .split('.')
@@ -301,6 +310,13 @@ mod tests {
         assert!(
             Resource::BackupHeader {
                 path: "https://store/x.bak".into()
+            }
+            .sql(16, false)
+            .starts_with("RESTORE HEADERONLY FROM URL=")
+        );
+        assert!(
+            Resource::BackupHeader {
+                path: "HTTPS://store/x.bak".into()
             }
             .sql(16, false)
             .starts_with("RESTORE HEADERONLY FROM URL=")

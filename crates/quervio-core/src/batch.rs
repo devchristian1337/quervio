@@ -75,7 +75,7 @@ fn separator(line: &str) -> Option<u32> {
     }
     match (words.next(), words.next()) {
         (None, _) => Some(1),
-        (Some(count), None) => count.parse().ok(),
+        (Some(count), None) if count.bytes().all(|b| b.is_ascii_digit()) => count.parse().ok(),
         _ => None,
     }
 }
@@ -173,6 +173,12 @@ mod tests {
     #[test]
     fn go_with_other_words_is_not_a_separator() {
         assert_eq!(texts("SELECT 1 AS go\nGO TO x\nGOTO done").len(), 1);
+    }
+
+    #[test]
+    fn go_rejects_signed_counts() {
+        assert_eq!(texts("SELECT 1\nGO +2\nSELECT 2").len(), 1);
+        assert_eq!(texts("SELECT 1\nGO -1\nSELECT 2").len(), 1);
     }
 
     #[test]

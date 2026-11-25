@@ -247,43 +247,56 @@ impl Session {
                             let mut rows = 0u64;
                             let mut limited = false;
                             let mut last_progress = Instant::now();
-                            let read = loop {
-                                // Decodes straight into display text: no row of
-                                // ColumnValues, no String per cell.
-                                match self.client.next_row_into(&mut chunk).await {
+                            let read = if limits.max_rows == 0 {
+                                let mut next = RowChunk::new(width, limits.max_cell_bytes);
+                                match self.client.next_row_into(&mut next).await {
                                     Ok(true) => {
-                                        rows += 1;
-                                        if rows as usize >= limits.max_rows {
-                                            // Exactly max_rows rows is a complete result:
-                                            // stop only when the Server has another row.
-                                            let mut next = RowChunk::new(width, limits.max_cell_bytes);
-                                            match self.client.next_row_into(&mut next).await {
-                                                Ok(true) => {
-                                                    limited = true;
-                                                    break Ok(());
+                                        limited = true;
+                                        Ok(())
+                                    }
+                                    Ok(false) => Ok(()),
+                                    Err(error) => Err(error),
+                                }
+                            } else {
+                                loop {
+                                    // Decodes straight into display text: no row of
+                                    // ColumnValues, no String per cell.
+                                    match self.client.next_row_into(&mut chunk).await {
+                                        Ok(true) => {
+                                            rows += 1;
+                                            if rows as usize >= limits.max_rows {
+                                                // Exactly max_rows rows is a complete result:
+                                                // stop only when the Server has another row.
+                                                let mut next =
+                                                    RowChunk::new(width, limits.max_cell_bytes);
+                                                match self.client.next_row_into(&mut next).await {
+                                                    Ok(true) => {
+                                                        limited = true;
+                                                        break Ok(());
+                                                    }
+                                                    Ok(false) => break Ok(()),
+                                                    Err(error) => break Err(error),
                                                 }
-                                                Ok(false) => break Ok(()),
-                                                Err(error) => break Err(error),
+                                            }
+                                            let progress = rows.is_multiple_of(1024)
+                                                && last_progress.elapsed() >= PROGRESS_EVERY;
+                                            // The grid may read up to the reported count,
+                                            // so the rows go in before it is reported.
+                                            if progress || chunk.rows() >= CHUNK_ROWS {
+                                                results.write().unwrap()[result_sets]
+                                                    .append(&mut chunk);
+                                            }
+                                            if progress {
+                                                last_progress = Instant::now();
+                                                emit(ExecutionEvent::ResultSetRows {
+                                                    index: result_sets,
+                                                    rows,
+                                                });
                                             }
                                         }
-                                        let progress = rows.is_multiple_of(1024)
-                                            && last_progress.elapsed() >= PROGRESS_EVERY;
-                                        // The grid may read up to the reported count,
-                                        // so the rows go in before it is reported.
-                                        if progress || chunk.rows() >= CHUNK_ROWS {
-                                            results.write().unwrap()[result_sets]
-                                                .append(&mut chunk);
-                                        }
-                                        if progress {
-                                            last_progress = Instant::now();
-                                            emit(ExecutionEvent::ResultSetRows {
-                                                index: result_sets,
-                                                rows,
-                                            });
-                                        }
+                                        Ok(false) => break Ok(()),
+                                        Err(error) => break Err(error),
                                     }
-                                    Ok(false) => break Ok(()),
-                                    Err(error) => break Err(error),
                                 }
                             };
                             chunk.discard_partial_row();

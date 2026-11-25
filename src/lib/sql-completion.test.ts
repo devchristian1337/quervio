@@ -63,6 +63,21 @@ describe("tableReferences", () => {
   it("leaves out table variables and temporary tables", () => {
     expect(tableReferences("SELECT * FROM @rows r JOIN #temp t ON 1=1")).toEqual([]);
   });
+  it("does not consume JOIN/USING as an alias when the preceding table has none", () => {
+    expect(tableReferences("SELECT * FROM dbo.Customer JOIN sales.Orders o ON 1=1")).toEqual([
+      { schema: "dbo", name: "Customer", alias: null },
+      { schema: "sales", name: "Orders", alias: "o" },
+    ]);
+    expect(tableReferences("MERGE INTO dbo.Customer USING sales.Orders s ON 1=1")).toEqual([
+      { schema: "dbo", name: "Customer", alias: null },
+      { schema: "sales", name: "Orders", alias: "s" },
+    ]);
+    expect(tableReferences("SELECT * FROM dbo.A JOIN dbo.B JOIN dbo.C c ON 1=1")).toEqual([
+      { schema: "dbo", name: "A", alias: null },
+      { schema: "dbo", name: "B", alias: null },
+      { schema: "dbo", name: "C", alias: "c" },
+    ]);
+  });
 });
 
 describe("resolveQualifier", () => {

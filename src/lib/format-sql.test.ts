@@ -51,6 +51,9 @@ describe("formatScript", () => {
 
   it("refuses N split from its string, which would make N an alias", async () => {
     await expect(format("select N'x'", always("SELECT N 'x'"))).rejects.toThrow(FormatError);
+    await expect(format("select n'x'", always("SELECT N 'x'"))).rejects.toThrow(FormatError);
+    await expect(format("select n'x'", always("SELECT n 'x'"))).rejects.toThrow(FormatError);
+    expect(await format("select n'x'", always("SELECT N'x'"))).toBe("SELECT N'x'");
   });
 
   it("never moves the end of a nested comment", async () => {
@@ -108,6 +111,10 @@ describe("formatRange", () => {
   it("refuses a selection that starts inside a comment", async () => {
     const document = "DELETE FROM dbo.t /*\nok */ WHERE id = 1 -- */\n";
     await expect(formatRange(document, document.indexOf("ok"), document.length, undefined, tidy)).rejects.toThrow(
+      /inside a comment/,
+    );
+    const lineComment = "SELECT 1 -- select 2\nSELECT 3";
+    await expect(formatRange(lineComment, lineComment.indexOf("select 2"), lineComment.length, undefined, tidy)).rejects.toThrow(
       /inside a comment/,
     );
   });

@@ -67,6 +67,34 @@ export const DEFAULT_SETTINGS: Settings = {
 
 /** Bounds of the editor font size, in Settings and for Ctrl+wheel. */
 export const EDITOR_FONT_SIZE = { min: 9, max: 32 };
+const TAB_SIZE = { min: 1, max: 16 };
+const TIMEOUT_SECONDS = { min: 0, max: 86_400 };
+const MAX_ROWS = { min: 1, max: 10_000_000 };
+const MAX_CELL_MB = { min: 0.1, max: 64 };
+
+function clampNumber(value: unknown, fallback: number, min: number, max: number, integer: boolean): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  const clamped = Math.min(max, Math.max(min, value));
+  return integer ? Math.round(clamped) : clamped;
+}
+
+/** Normalizes and clamps numeric settings so floats or corrupt JSON never break Rust deserialization. */
+export function normalizeSettings(settings: Settings): Settings {
+  return {
+    ...settings,
+    editor: {
+      ...settings.editor,
+      fontSize: clampNumber(settings.editor.fontSize, DEFAULT_SETTINGS.editor.fontSize, EDITOR_FONT_SIZE.min, EDITOR_FONT_SIZE.max, true),
+      tabSize: clampNumber(settings.editor.tabSize, DEFAULT_SETTINGS.editor.tabSize, TAB_SIZE.min, TAB_SIZE.max, true),
+    },
+    query: {
+      ...settings.query,
+      timeoutSeconds: clampNumber(settings.query.timeoutSeconds, DEFAULT_SETTINGS.query.timeoutSeconds, TIMEOUT_SECONDS.min, TIMEOUT_SECONDS.max, true),
+      maxRows: clampNumber(settings.query.maxRows, DEFAULT_SETTINGS.query.maxRows, MAX_ROWS.min, MAX_ROWS.max, true),
+      maxCellMB: clampNumber(settings.query.maxCellMB, DEFAULT_SETTINGS.query.maxCellMB, MAX_CELL_MB.min, MAX_CELL_MB.max, false),
+    },
+  };
+}
 
 type Section = Exclude<keyof Settings, "shortcuts" | "version">;
 
@@ -100,21 +128,54 @@ function merge(saved: Partial<Settings> | null): Settings {
     if (saved.editor?.fontSize === 13) merged.editor.fontSize = DEFAULT_SETTINGS.editor.fontSize;
   }
   merged.version = DEFAULT_SETTINGS.version;
-  return merged;
+  return normalizeSettings(merged);
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
+let pendingSettings: Settings | null = null;
+let inFlightSave: Promise<void> | null = null;
+
+function persistSettings(settings: Settings): Promise<void> {
+  const payload = JSON.stringify(settings, null, 2);
+  const previous = inFlightSave ?? Promise.resolve();
+  const run = previous.then(() =>
+    api.settingsSave(payload).catch((error) => {
+      toast.error("Could not save the settings", { description: errorMessage(error) });
+    }),
+  );
+  const pending = run.finally(() => {
+    if (inFlightSave === pending) inFlightSave = null;
+  });
+  inFlightSave = pending;
+  return pending;
+}
+
 function save(settings: Settings) {
+  pendingSettings = settings;
   clearTimeout(timer);
   timer = setTimeout(() => {
-    api.settingsSave(JSON.stringify(settings, null, 2)).catch((error) =>
-      toast.error("Could not save the settings", { description: errorMessage(error) }),
-    );
+    timer = undefined;
+    const toWrite = pendingSettings;
+    pendingSettings = null;
+    if (toWrite) void persistSettings(toWrite);
   }, 300);
 }
 
+/** Immediately writes any debounced settings change (awaited before exit/restart). */
+export async function flushSettings(): Promise<void> {
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    timer = undefined;
+  }
+  const toWrite = pendingSettings;
+  pendingSettings = null;
+  if (toWrite) await persistSettings(toWrite);
+  else if (inFlightSave) await inFlightSave;
+}
+
 export const useSettings = create<SettingsState>()((set, get) => {
-  const commit = (settings: Settings) => {
+  const commit = (raw: Settings) => {
+    const settings = normalizeSettings(raw);
     set({ settings });
     save(settings);
   };
@@ -148,7 +209,7 @@ export async function loadSettings() {
 
 /** What the Rust side needs for one Execution. */
 export function executeOptions(): ExecuteOptions {
-  const { query } = useSettings.getState().settings;
+  const { query } = normalizeSettings(useSettings.getState().settings);
   return {
     timeoutSeconds: query.timeoutSeconds,
     maxRows: query.maxRows,

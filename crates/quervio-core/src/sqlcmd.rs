@@ -143,6 +143,8 @@ impl Lexer {
         }
     }
 }
+const MAX_EXPANDED_BYTES: usize = 8 * 1024 * 1024;
+
 struct Parser {
     steps: Vec<Step>,
     variables: HashMap<String, String>,
@@ -154,8 +156,15 @@ struct Parser {
     allow_file_reads: bool,
 }
 impl Parser {
+    fn account_bytes(&mut self, added: usize) -> Result<(), PrepareError> {
+        self.bytes = self.bytes.saturating_add(added);
+        if self.bytes > MAX_EXPANDED_BYTES {
+            return Err("Expanded SQLCMD script exceeds 8 MB.".into());
+        }
+        Ok(())
+    }
     fn flush(&mut self, repeat: u32) {
-        if !self.sql.trim().is_empty() {
+        if !self.sql.trim().is_empty() && repeat > 0 {
             self.steps.push(Step::Sql {
                 sql: std::mem::take(&mut self.sql),
                 lines: std::mem::take(&mut self.lines),
@@ -166,22 +175,37 @@ impl Parser {
             self.lines.clear();
         }
     }
-    fn expand(&self, text: &str) -> Result<String, String> {
+    fn expand(&self, text: &str) -> Result<String, PrepareError> {
+        let budget = MAX_EXPANDED_BYTES.saturating_sub(self.bytes);
         let mut output = String::new();
         let mut rest = text;
         while let Some(index) = rest.find("$(") {
-            output.push_str(&rest[..index]);
+            let prefix = &rest[..index];
+            if output.len().saturating_add(prefix.len()) > budget {
+                return Err("Expanded SQLCMD script exceeds 8 MB.".into());
+            }
+            output.push_str(prefix);
             let value = &rest[index + 2..];
-            let end = value.find(')').ok_or("Unterminated SQLCMD variable.")?;
+            let end = value
+                .find(')')
+                .ok_or_else(|| PrepareError::Invalid("Unterminated SQLCMD variable.".into()))?;
             let name = &value[..end];
             let replacement = self
                 .variables
                 .get(name)
                 .cloned()
                 .or_else(|| std::env::var(name).ok())
-                .ok_or_else(|| format!("SQLCMD variable {name} is not defined."))?;
+                .ok_or_else(|| {
+                    PrepareError::Invalid(format!("SQLCMD variable {name} is not defined."))
+                })?;
+            if output.len().saturating_add(replacement.len()) > budget {
+                return Err("Expanded SQLCMD script exceeds 8 MB.".into());
+            }
             output.push_str(&replacement);
             rest = &value[end + 1..];
+        }
+        if output.len().saturating_add(rest.len()) > budget {
+            return Err("Expanded SQLCMD script exceeds 8 MB.".into());
         }
         output.push_str(rest);
         Ok(output)
@@ -192,36 +216,22 @@ impl Parser {
         file: Option<&Path>,
         base_line: u32,
     ) -> Result<(), PrepareError> {
-        self.bytes += text.len();
-        if self.bytes > 8 * 1024 * 1024 {
-            return Err("Expanded SQLCMD script exceeds 8 MB.".into());
-        }
+        self.account_bytes(text.len())?;
         for (index, line) in text.lines().enumerate() {
             let trim = line.trim();
             if self.lexer.clear() && !trim.starts_with("--") {
                 let expanded = self.expand(trim)?;
                 let trimmed = expanded.trim();
+                if let Some(repeat) = go_repeat(trimmed)? {
+                    self.flush(repeat);
+                    continue;
+                }
                 let head = trimmed
                     .split_whitespace()
                     .next()
                     .unwrap_or("")
                     .to_ascii_lowercase();
                 let tail = trimmed.get(head.len()..).unwrap_or("").trim();
-                if head == "go" || head == "!!:go" {
-                    let count = tail.split("--").next().unwrap_or("").trim();
-                    let repeat = if count.is_empty() {
-                        1
-                    } else {
-                        count
-                            .parse::<u32>()
-                            .map_err(|_| "Invalid GO repeat count.")?
-                    };
-                    if repeat > 1000 {
-                        return Err("GO repeats are limited to 1000.".into());
-                    }
-                    self.flush(repeat);
-                    continue;
-                }
                 if head == ":setvar" {
                     let tokens = words(tail)?;
                     if tokens.len() < 1 || tokens.len() > 2 {
@@ -230,6 +240,7 @@ impl Parser {
                     if tokens.len() == 1 {
                         self.variables.remove(&tokens[0]);
                     } else {
+                        self.account_bytes(tokens[1].len())?;
                         self.variables.insert(tokens[0].clone(), tokens[1].clone());
                     }
                     continue;
@@ -264,7 +275,17 @@ impl Parser {
                     self.stack.pop();
                     continue;
                 }
-                if head.starts_with(':') || head == "!!" {
+                if trimmed.starts_with("!!") {
+                    self.flush(1);
+                    self.steps.push(Step::Shell(trimmed[2..].trim().into()));
+                    continue;
+                }
+                if trimmed.starts_with(":!!") {
+                    self.flush(1);
+                    self.steps.push(Step::Shell(trimmed[3..].trim().into()));
+                    continue;
+                }
+                if head.starts_with(':') {
                     self.flush(1);
                     match head.as_str() {
                         ":connect" => {
@@ -328,16 +349,15 @@ impl Parser {
                                 error: head == ":error",
                             });
                         }
-                        "!!" | ":!!" => self.steps.push(Step::Shell(tail.into())),
                         ":quit" => self.steps.push(Step::Quit),
                         _ if head.starts_with(":exit(") || head == ":exit" => {
-                            self.steps.push(Step::Exit(
-                                trimmed[5..]
-                                    .trim()
-                                    .trim_start_matches('(')
-                                    .trim_end_matches(')')
-                                    .to_string(),
-                            ))
+                            let arg = trimmed[5..].trim();
+                            let inner = arg
+                                .strip_prefix('(')
+                                .and_then(|s| s.strip_suffix(')'))
+                                .unwrap_or(arg)
+                                .trim();
+                            self.steps.push(Step::Exit(inner.to_string()));
                         }
                         _ => {
                             return Err(format!(
@@ -350,18 +370,63 @@ impl Parser {
                 }
             }
             let expanded = self.expand(line)?;
-            self.lexer.feed(&expanded);
-            self.sql.push_str(&expanded);
-            self.sql.push('\n');
-            self.lines.push(SourceLine {
+            if expanded.len() > line.len() {
+                self.account_bytes(expanded.len() - line.len())?;
+            }
+            let source = SourceLine {
                 // Only :r includes name a file; the editor's own lines, saved
                 // or not, are editor lines that a message can jump to.
-                file: (!self.stack.is_empty()).then(|| file.map(|f| f.display().to_string())).flatten(),
+                file: (!self.stack.is_empty())
+                    .then(|| file.map(|f| f.display().to_string()))
+                    .flatten(),
                 line: base_line + index as u32 + 1,
-            });
+            };
+            for expanded_line in expanded.split('\n') {
+                let expanded_line = expanded_line.strip_suffix('\r').unwrap_or(expanded_line);
+                if self.lexer.clear()
+                    && !expanded_line.trim().starts_with("--")
+                    && let Some(repeat) = go_repeat(expanded_line.trim())?
+                {
+                    self.flush(repeat);
+                    continue;
+                }
+                self.lexer.feed(expanded_line);
+                self.sql.push_str(expanded_line);
+                self.sql.push('\n');
+                self.lines.push(source.clone());
+            }
         }
         Ok(())
     }
+}
+
+fn go_repeat(trimmed: &str) -> Result<Option<u32>, PrepareError> {
+    let head = trimmed
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if head != "go" && head != "!!:go" {
+        return Ok(None);
+    }
+    let tail = trimmed.get(head.len()..).unwrap_or("").trim();
+    let count = tail.split("--").next().unwrap_or("").trim();
+    if count.is_empty() {
+        return Ok(Some(1));
+    }
+    if count.bytes().all(|b| b.is_ascii_digit()) {
+        let repeat = count
+            .parse::<u32>()
+            .map_err(|_| PrepareError::Invalid("GO repeats are limited to 1000.".into()))?;
+        if repeat > 1000 {
+            return Err("GO repeats are limited to 1000.".into());
+        }
+        return Ok(Some(repeat));
+    }
+    if head == "!!:go" {
+        return Err("Invalid GO repeat count.".into());
+    }
+    Ok(None)
 }
 fn words(text: &str) -> Result<Vec<String>, String> {
     let mut words = Vec::new();
@@ -526,5 +591,60 @@ mod tests {
         assert!(script.preview().contains("SELECT 1;"));
         std::fs::write(&nested, ":r child.sql").unwrap();
         assert!(prepare(":r child.sql", Some(&root), 0, true).is_err());
+    }
+
+    #[test]
+    fn exponential_setvar_expansion_is_capped_at_8mb() {
+        let mut bomb = String::from(
+            ":setvar v0 \"0123456789012345678901234567890123456789012345678901234567890123\"\n",
+        );
+        for i in 1..=18 {
+            bomb.push_str(&format!(":setvar v{i} \"$(v{p})$(v{p})\"\n", p = i - 1));
+        }
+        bomb.push_str("SELECT '$(v18)';\n");
+        let err = prepare(&bomb, None, 0, false).err().expect("must fail");
+        assert!(err.to_string().contains("8 MB"), "{err}");
+    }
+
+    #[test]
+    fn exit_preserves_inner_parentheses_and_shell_works_without_space() {
+        let exit = prepare(":exit(SELECT (1 + 2))", None, 0, false).unwrap();
+        assert!(matches!(&exit.steps[0], Step::Exit(sql) if sql == "SELECT (1 + 2)"));
+
+        let shell = prepare("!!whoami\n:!!hostname", None, 0, false).unwrap();
+        assert!(matches!(&shell.steps[0], Step::Shell(cmd) if cmd == "whoami"));
+        assert!(matches!(&shell.steps[1], Step::Shell(cmd) if cmd == "hostname"));
+    }
+
+    #[test]
+    fn go_identifier_go_zero_and_signed_go_match_batch_semantics() {
+        let go_col = prepare("SELECT\n  go AS alias\nFROM dbo.T", None, 0, false).unwrap();
+        assert_eq!(go_col.steps.len(), 1);
+        assert!(matches!(&go_col.steps[0], Step::Sql { sql, repeat: 1, .. } if sql.contains("go AS alias")));
+
+        let go_zero = prepare("SELECT 1\nGO 0\nSELECT 2", None, 0, false).unwrap();
+        assert_eq!(go_zero.steps.len(), 1);
+        assert!(matches!(&go_zero.steps[0], Step::Sql { sql, repeat: 1, .. } if sql.trim() == "SELECT 2"));
+
+        let go_signed = prepare("SELECT 1\nGO +2", None, 0, false).unwrap();
+        assert_eq!(go_signed.steps.len(), 1);
+        assert!(matches!(&go_signed.steps[0], Step::Sql { sql, repeat: 1, .. } if sql.contains("GO +2")));
+    }
+
+    #[test]
+    fn multiline_variable_expansion_keeps_line_map_and_splits_go() {
+        let var = "QUERVIO_TEST_SQLCMD_MULTILINE";
+        // SAFETY: unique env var name used only by this test.
+        unsafe { std::env::set_var(var, "1\nGO\nSELECT 2") };
+        let script = prepare(&format!("SELECT $({var})\nSELECT 3"), None, 0, false).unwrap();
+        unsafe { std::env::remove_var(var) };
+        assert_eq!(script.steps.len(), 2);
+        for step in &script.steps {
+            let Step::Sql { sql, lines, .. } = step else {
+                panic!("expected Sql step");
+            };
+            assert_eq!(sql.lines().count(), lines.len());
+            assert_eq!(crate::batch::split(sql).len(), 1);
+        }
     }
 }

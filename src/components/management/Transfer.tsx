@@ -39,6 +39,7 @@ export function Transfer({ context }: { context: Context }) {
     [targetDatabase, setTargetDatabase] = useState(context.database ?? ""),
     [keepIdentity, setKeepIdentity] = useState(false);
   const [backslashEscaping, setBackslashEscaping] = useState(false);
+  const [editingEmpty, setEditingEmpty] = useState<Record<string, boolean>>({});
   let parsed: unknown = {},
     validation = "";
   try {
@@ -68,6 +69,7 @@ export function Transfer({ context }: { context: Context }) {
       setPackageHash("");
       setReport("");
       setPreview(null);
+      setEditingEmpty({});
     }
   }
   const args = {
@@ -95,6 +97,7 @@ export function Transfer({ context }: { context: Context }) {
           setPackageHash("");
           setReport("");
           setPreview(null);
+          setEditingEmpty({});
         }}
         options={[
           ["import", "Import CSV / Excel / ODBC"],
@@ -206,6 +209,8 @@ export function Transfer({ context }: { context: Context }) {
                       const values = validation
                         ? {}
                         : (parsed as Record<string, string>);
+                      const ignored = !editingEmpty[column] && values[column] === "";
+                      const inputValue = editingEmpty[column] ? "" : (values[column] ?? column);
                       return (
                         <tr key={index} className="border-t">
                           <td className="px-3 py-1">{column}</td>
@@ -213,40 +218,71 @@ export function Transfer({ context }: { context: Context }) {
                             <input
                               className={inputClass}
                               aria-label={`Destination column for ${column}`}
-                              disabled={values[column] === ""}
-                              value={values[column] ?? column}
-                              onChange={(e) =>
-                                setMapping(
-                                  JSON.stringify(
-                                    { ...values, [column]: e.target.value },
-                                    null,
-                                    2,
-                                  ),
-                                )
-                              }
+                              disabled={ignored}
+                              value={inputValue}
+                              onChange={(e) => {
+                                const nextValue = e.target.value;
+                                if (nextValue === "") {
+                                  setEditingEmpty((prev) => ({ ...prev, [column]: true }));
+                                  const next = { ...values };
+                                  delete next[column];
+                                  setMapping(JSON.stringify(next, null, 2));
+                                } else {
+                                  if (editingEmpty[column]) {
+                                    setEditingEmpty((prev) => {
+                                      const next = { ...prev };
+                                      delete next[column];
+                                      return next;
+                                    });
+                                  }
+                                  setMapping(
+                                    JSON.stringify(
+                                      { ...values, [column]: nextValue },
+                                      null,
+                                      2,
+                                    ),
+                                  );
+                                }
+                              }}
+                              onBlur={() => {
+                                if (editingEmpty[column]) {
+                                  setEditingEmpty((prev) => {
+                                    const next = { ...prev };
+                                    delete next[column];
+                                    return next;
+                                  });
+                                }
+                              }}
                             />
                           </td>
                           <td className="px-3 py-1 text-center">
                             <Check
                               aria-label={`Ignore source column ${column}`}
-                              checked={values[column] === ""}
-                              onChange={(checked) =>
-                              setMapping(
-                              JSON.stringify(
-                              {
-                              ...values,
-                              [column]: checked ? "" : column,
-                              },
-                              null,
-                              2,
-                              ),
-                              )
-                              }
-                              />
-                              </td>
-                              </tr>
-                              );
-                              })}
+                              checked={ignored}
+                              onChange={(checked) => {
+                                if (editingEmpty[column]) {
+                                  setEditingEmpty((prev) => {
+                                    const next = { ...prev };
+                                    delete next[column];
+                                    return next;
+                                  });
+                                }
+                                setMapping(
+                                  JSON.stringify(
+                                    {
+                                      ...values,
+                                      [column]: checked ? "" : column,
+                                    },
+                                    null,
+                                    2,
+                                  ),
+                                );
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
                               </tbody>
                               </table>
                               </div>
@@ -264,7 +300,10 @@ export function Transfer({ context }: { context: Context }) {
               id="column-mapping"
               className={cn(textareaClass, "min-h-24")}
               value={mapping}
-              onChange={(e) => setMapping(e.target.value)}
+              onChange={(e) => {
+                setEditingEmpty({});
+                setMapping(e.target.value);
+              }}
             />
             <p className="text-xs text-muted-foreground">
               Source names to destination names. Omitted names map identically.

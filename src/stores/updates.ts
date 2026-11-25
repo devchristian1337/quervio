@@ -26,6 +26,8 @@ export type UpdatePhase =
   | "installing"
   | "error";
 
+let installing = false;
+
 export const useUpdates = create<{
   phase: UpdatePhase;
   available: string | null;
@@ -43,9 +45,12 @@ export const useUpdates = create<{
   error: null,
   failed: null,
   check: async () => {
+    const current = get().phase;
+    if (current === "checking" || current === "downloading" || current === "installing") return;
     set({ phase: "checking", error: null, failed: null });
     try {
       const status = await invoke<UpdateStatus>("update_check");
+      if (get().phase !== "checking") return;
       set({
         available: status.available,
         phase: !status.installed
@@ -59,10 +64,13 @@ export const useUpdates = create<{
                 : "current",
       });
     } catch (error) {
+      if (get().phase !== "checking") return;
       set({ phase: "error", error: String(error), failed: "check" });
     }
   },
   download: async () => {
+    const current = get().phase;
+    if (current === "downloading" || current === "installing" || current === "ready") return;
     const onProgress = new Channel<number>();
     onProgress.onmessage = (progress) => set({ progress });
     set({ phase: "downloading", progress: 0, error: null, failed: null });
@@ -74,14 +82,17 @@ export const useUpdates = create<{
     }
   },
   install: async () => {
-    if (get().phase !== "ready") return;
-    if (!(await settleBeforeExit("restart to update"))) return;
-    set({ phase: "installing" });
+    if (installing || get().phase !== "ready") return;
+    installing = true;
     try {
+      if (!(await settleBeforeExit("restart to update"))) return;
+      set({ phase: "installing" });
       // Quervio exits here; Velopack starts the new version.
       await invoke("update_apply");
     } catch (error) {
       set({ phase: "error", error: String(error), failed: "install" });
+    } finally {
+      installing = false;
     }
   },
 }));
@@ -90,6 +101,7 @@ export const useUpdates = create<{
 export function useUpdateCheck() {
   useEffect(() => {
     const timer = setTimeout(async () => {
+      if (useUpdates.getState().phase !== "idle") return;
       await useUpdates.getState().check();
       const { phase, available } = useUpdates.getState();
       if (phase === "available" || phase === "ready")

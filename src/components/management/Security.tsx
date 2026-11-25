@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   quoteName as n,
   qualifiedName as q,
@@ -36,6 +37,7 @@ export function Security({ context }: { context: Context }) {
     [object, setObject] = useState(""),
     [securable, setSecurable] = useState("database"),
     [path, setPath] = useState(""),
+    [loadedAuditPath, setLoadedAuditPath] = useState(""),
     [audit, setAudit] = useState(""),
     [auditAction, setAuditAction] = useState("DATABASE_OBJECT_ACCESS_GROUP");
   const server = scope === "server";
@@ -146,15 +148,24 @@ export function Security({ context }: { context: Context }) {
       </div>
       {section === "auditData" ? (
         <>
-          <Text
-            label="Server-side .sqlaudit path or URL"
-            value={path}
-            onChange={setPath}
-          />
-          {path && (
+          <div className="flex flex-wrap items-end gap-3">
+            <Text
+              label="Server-side .sqlaudit path or URL"
+              value={path}
+              onChange={setPath}
+            />
+            <Button
+              variant="outline"
+              disabled={!path.trim()}
+              onClick={() => setLoadedAuditPath(path.trim())}
+            >
+              Read audit file
+            </Button>
+          </div>
+          {loadedAuditPath && (
             <ReadTable
               context={context}
-              resource={{ kind: "auditData", path }}
+              resource={{ kind: "auditData", path: loadedAuditPath }}
             />
           )}
         </>

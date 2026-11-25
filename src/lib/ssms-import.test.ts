@@ -80,6 +80,9 @@ describe("matchSaved", () => {
     expect(environmentFromName("Villa Margherita [TEST SERVER]")).toBe("test");
     expect(environmentFromName("CDR Collaudo")).toBe("test");
     expect(environmentFromName("H2O DEV")).toBe("development");
+    expect(environmentFromName("SQL_TEST_01")).toBe("test");
+    expect(environmentFromName("H2O_DEV_SERVER")).toBe("development");
+    expect(environmentFromName("APP_STAGING")).toBe("test");
     expect(environmentFromName("Villa Margherita [APP SERVER]")).toBeNull();
     expect(environmentFromName("Testaccio")).toBeNull();
   });

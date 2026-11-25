@@ -20,6 +20,18 @@ pub fn configure(command: &mut tokio::process::Command) {
     #[cfg(unix)]
     command.process_group(0);
 }
+pub fn configure_std(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+}
 impl Registration {
     pub fn new(pid: u32) -> Self {
         #[cfg(windows)]

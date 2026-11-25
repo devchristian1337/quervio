@@ -17,11 +17,18 @@ for directory in "$release/microsoft" "$release/sqltools" \
   case "$resolved" in "$release/"*) ;; *) printf 'Unsafe output path: %s\n' "$resolved" >&2; exit 1 ;; esac
   rm -rf -- "$directory"
 done
+# Optional LTTng tracing is not a dependency of the application's SQL tools.
+# Prepare both src-tauri/resources/linux/ (read by `tauri bundle`) and
+# `$release/` so standalone `bundle-linux.sh` runs stay self-contained.
+rm -f -- src-tauri/resources/linux/microsoft/libcoreclrtraceptprovider.so \
+  src-tauri/resources/linux/sqltools/libcoreclrtraceptprovider.so
+chmod -R u+rwX,go+rX,go-w -- src-tauri/resources/linux/microsoft src-tauri/resources/linux/sqltools
+chmod 644 -- scripts/install-sqltools.sh
 cp -a -- src-tauri/resources/linux/microsoft "$release/microsoft"
 cp -a -- src-tauri/resources/linux/sqltools "$release/sqltools"
 cp -- scripts/install-sqltools.sh "$release/install-sqltools.sh"
-# Optional LTTng tracing is not a dependency of the application's SQL tools.
-rm -f -- "$release/microsoft/libcoreclrtraceptprovider.so" "$release/sqltools/libcoreclrtraceptprovider.so"
+rm -f -- "$release/microsoft/libcoreclrtraceptprovider.so" "$release/sqltools/libcoreclrtraceptprovider.so" \
+  "$release/microsoft/README.txt" "$release/sqltools/README.txt"
 chmod -R u+rwX,go+rX,go-w -- "$release/microsoft" "$release/sqltools"
 chmod 644 -- "$release/install-sqltools.sh"
 "$release/microsoft/Quervio.MicrosoftBridge" --self-test

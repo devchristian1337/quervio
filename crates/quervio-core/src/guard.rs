@@ -233,6 +233,17 @@ const STATEMENT_STARTS: &[&str] = &[
     "DEALLOCATE",
     "BULK",
     "WITH",
+    "RECEIVE",
+    "BACKUP",
+    "RESTORE",
+    "DBCC",
+    "CHECKPOINT",
+    "KILL",
+    "SHUTDOWN",
+    "RECONFIGURE",
+    "READTEXT",
+    "WRITETEXT",
+    "UPDATETEXT",
 ];
 
 /// Objects whose CREATE/ALTER makes the rest of the batch a definition.
@@ -256,6 +267,10 @@ fn scan(tokens: &[Token], line_offset: u32, findings: &mut Vec<Finding>) {
             Some(Kind::Word(w)) => Some(w.as_str()),
             _ => None,
         };
+        let prev_word = i.checked_sub(1).and_then(|p| match &tokens[p].kind {
+            Kind::Word(w) => Some(w.as_str()),
+            _ => None,
+        });
         let line = line_offset + token.line + 1;
         let mut report = |kind, target: Option<String>| {
             if let Some(target) = target {
@@ -277,18 +292,58 @@ fn scan(tokens: &[Token], line_offset: u32, findings: &mut Vec<Finding>) {
             return;
         }
 
-        if token.is_word("UPDATE") && next_word(1) != Some("STATISTICS") {
-            let target = name_after(tokens, skip_top(tokens, i + 1));
-            if !has_where(tokens, i + 1, &["SET"]) {
+        if token.is_word("MERGE") {
+            let mut at = skip_top(tokens, i + 1);
+            if tokens.get(at).is_some_and(|t| t.is_word("INTO")) {
+                at += 1;
+            }
+            let target = name_after(tokens, at);
+            let end = statement_end(tokens, i + 1, &["UPDATE", "DELETE", "INSERT", "SET"]);
+            let mut sub_depth = 0i32;
+            let mut has_delete = false;
+            let mut has_update = false;
+            for t in &tokens[i + 1..end] {
+                if t.is_symbol('(') {
+                    sub_depth += 1;
+                } else if t.is_symbol(')') {
+                    sub_depth -= 1;
+                } else if sub_depth == 0 {
+                    if t.is_word("DELETE") {
+                        has_delete = true;
+                    } else if t.is_word("UPDATE") {
+                        has_update = true;
+                    }
+                }
+            }
+            if has_delete {
+                report(DestructiveKind::DeleteWithoutWhere, target);
+            } else if has_update {
                 report(DestructiveKind::UpdateWithoutWhere, target);
             }
-        } else if token.is_word("DELETE") {
+            i = end;
+            continue;
+        } else if token.is_word("UPDATE")
+            && !matches!(next_word(1), Some("STATISTICS" | "ON"))
+            && !tokens.get(i + 1).is_some_and(|t| t.is_symbol(','))
+            && prev_word != Some("FOR")
+        {
+            let target_at = skip_top(tokens, i + 1);
+            let end = statement_end(tokens, i + 1, &["SET"]);
+            let target = resolve_dml_target(tokens, target_at, end);
+            if !has_where_in(tokens, i + 1, end) {
+                report(DestructiveKind::UpdateWithoutWhere, target);
+            }
+        } else if token.is_word("DELETE")
+            && next_word(1) != Some("ON")
+            && !tokens.get(i + 1).is_some_and(|t| t.is_symbol(','))
+        {
             let mut at = skip_top(tokens, i + 1);
             if tokens.get(at).is_some_and(|t| t.is_word("FROM")) {
                 at += 1;
             }
-            let target = name_after(tokens, at);
-            if !has_where(tokens, i + 1, &[]) {
+            let end = statement_end(tokens, i + 1, &[]);
+            let target = resolve_dml_target(tokens, at, end);
+            if !has_where_in(tokens, i + 1, end) {
                 report(DestructiveKind::DeleteWithoutWhere, target);
             }
         } else if token.is_word("TRUNCATE") && next_word(1) == Some("TABLE") {
@@ -351,43 +406,128 @@ fn name_after(tokens: &[Token], at: usize) -> Option<String> {
     name_span(tokens, at).0
 }
 
+fn unquote(text: &str) -> &str {
+    text.strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .or_else(|| text.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+        .unwrap_or(text)
+}
+
+/// Resolves the target of an UPDATE/DELETE, including when a `#alias` targets
+/// a permanent table referenced in the statement's FROM/JOIN clause.
+fn resolve_dml_target(tokens: &[Token], target_at: usize, end: usize) -> Option<String> {
+    let (target, after_target) = name_span(tokens, target_at);
+    if target.is_some() {
+        return target;
+    }
+    let alias = match tokens.get(target_at) {
+        Some(t)
+            if after_target == target_at + 1
+                && matches!(t.kind, Kind::Word(_) | Kind::Quoted(_)) =>
+        {
+            unquote(&t.text)
+        }
+        _ => return None,
+    };
+    if !alias.starts_with('#') {
+        return None;
+    }
+    find_aliased_permanent_table(tokens, after_target, end, alias)
+}
+
+fn find_aliased_permanent_table(
+    tokens: &[Token],
+    from: usize,
+    end: usize,
+    alias: &str,
+) -> Option<String> {
+    let mut depth = 0i32;
+    let mut i = from;
+    while i < end {
+        let token = &tokens[i];
+        if token.is_symbol('(') {
+            depth += 1;
+            i += 1;
+            continue;
+        } else if token.is_symbol(')') {
+            depth -= 1;
+            i += 1;
+            continue;
+        }
+        if depth == 0 && (token.is_word("FROM") || token.is_word("JOIN")) {
+            let (table, mut next) = name_span(tokens, i + 1);
+            if let Some(table) = table {
+                if tokens.get(next).is_some_and(|t| t.is_word("AS")) {
+                    next += 1;
+                }
+                if let Some(candidate) = tokens.get(next)
+                    && matches!(candidate.kind, Kind::Word(_) | Kind::Quoted(_))
+                    && unquote(&candidate.text).eq_ignore_ascii_case(alias)
+                {
+                    return Some(table);
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 /// Like [`name_after`], with the index just past the name.
 fn name_span(tokens: &[Token], mut at: usize) -> (Option<String>, usize) {
-    let mut parts = Vec::new();
+    let mut parts: Vec<(String, bool)> = Vec::new();
     loop {
         match tokens.get(at) {
             Some(token) if matches!(token.kind, Kind::Word(_) | Kind::Quoted(_)) => {
-                parts.push(token.text.clone())
+                let is_quoted = matches!(token.kind, Kind::Quoted(_));
+                parts.push((token.text.clone(), is_quoted));
             }
             _ => break,
         }
         at += 1;
-        // `db..table` leaves an empty schema; keep it.
+        // `db..table` leaves an empty schema segment between dots; keep it.
+        let mut dots = 0usize;
         while tokens.get(at).is_some_and(|t| t.is_symbol('.')) {
-            parts.push(String::new());
+            dots += 1;
             at += 1;
         }
-        if !parts.last().is_some_and(String::is_empty) {
+        if dots == 0 {
             break;
         }
-        parts.pop();
-        parts.push(String::new());
+        for _ in 1..dots {
+            parts.push((String::new(), false));
+        }
     }
-    let parts: Vec<_> = parts.into_iter().filter(|p| !p.is_empty()).collect();
-    let Some(last) = parts.last() else {
+    while parts.last().is_some_and(|(p, _)| p.is_empty()) {
+        parts.pop();
+    }
+    let Some((last, last_quoted)) = parts.last() else {
         return (None, at);
     };
-    let bare = last.trim_start_matches(['[', '"']);
-    if bare.starts_with('#') || bare.starts_with('@') {
+    let bare = unquote(last);
+    // Table variables (`@t`) are always unqualified and unquoted.
+    if parts.len() == 1 && !last_quoted && bare.starts_with('@') {
         return (None, at);
     }
-    (Some(parts.join(".")), at)
+    // Temp tables (`#t`) are either unqualified or explicitly in `tempdb`.
+    // Schema-qualified names like `dbo.[#Orders]` are permanent tables.
+    if bare.starts_with('#') {
+        let is_temp = parts.len() == 1
+            || (parts.len() >= 3 && unquote(&parts[0].0).eq_ignore_ascii_case("tempdb"));
+        if is_temp {
+            return (None, at);
+        }
+    }
+    let joined = parts
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect::<Vec<_>>()
+        .join(".");
+    (Some(joined), at)
 }
 
-/// Whether the statement starting at `from` has a top-level WHERE before it
-/// ends.
-fn has_where(tokens: &[Token], from: usize, belongs: &[&str]) -> bool {
-    let end = statement_end(tokens, from, belongs);
+/// Whether `tokens[from..end]` has a top-level WHERE.
+fn has_where_in(tokens: &[Token], from: usize, end: usize) -> bool {
     let mut depth = 0;
     tokens[from..end].iter().any(|token| {
         if token.is_symbol('(') {
@@ -479,6 +619,23 @@ const DROPPED_OBJECTS: &[&str] = &[
     "SERVER",
     "AGGREGATE",
     "SECURITY",
+    "MASTER",
+    "APPLICATION",
+    "AVAILABILITY",
+    "ENDPOINT",
+    "MESSAGE",
+    "CONTRACT",
+    "ROUTE",
+    "REMOTE",
+    "BROKER",
+    "WORKLOAD",
+    "RESOURCE",
+    "SIGNATURE",
+    "SEARCH",
+    "AUDIT",
+    "CRYPTOGRAPHIC",
+    "SENSITIVITY",
+    "FEDERATION",
 ];
 
 /// Index just past the ALTER TABLE whose clauses start at `from`. Without a
@@ -511,8 +668,16 @@ fn alter_table_end(tokens: &[Token], from: usize) -> usize {
             Some(Kind::Word(w)) => Some(w.as_str()),
             _ => None,
         };
+        let next_2_word = match tokens.get(at + 2).map(|t| &t.kind) {
+            Some(Kind::Word(w)) => Some(w.as_str()),
+            _ => None,
+        };
         let belongs = match word.as_str() {
-            "DROP" => !next_word.is_some_and(|w| DROPPED_OBJECTS.contains(&w)),
+            "DROP" => match next_word {
+                Some("COLUMN") => !matches!(next_2_word, Some("ENCRYPTION" | "MASTER")),
+                Some(w) => !DROPPED_OBJECTS.contains(&w),
+                None => true,
+            },
             "ALTER" => next_word == Some("COLUMN"),
             "SET" => next.is_some_and(|t| t.is_symbol('(')),
             "WITH" => {
@@ -735,5 +900,89 @@ mod tests {
         assert!(check("SELECT 'oops", 0).uncertain);
         assert!(check("/* never closed", 0).needs_confirmation());
         assert!(!check("SELECT 1", 0).needs_confirmation());
+    }
+
+    #[test]
+    fn detects_merge_destructive_actions_with_target() {
+        assert_eq!(
+            kinds("MERGE dbo.Orders AS t USING dbo.Empty AS s ON t.Id = s.Id WHEN NOT MATCHED BY SOURCE THEN DELETE;"),
+            [(DeleteWithoutWhere, "dbo.Orders".into(), 1)]
+        );
+        assert_eq!(
+            kinds("MERGE INTO dbo.Orders AS t USING dbo.Src AS s ON t.Id = s.Id WHEN MATCHED THEN UPDATE SET t.Status = 'X';"),
+            [(UpdateWithoutWhere, "dbo.Orders".into(), 1)]
+        );
+        assert!(
+            kinds("MERGE dbo.Orders AS t USING dbo.Src AS s ON t.Id = s.Id WHEN NOT MATCHED THEN INSERT (Id) VALUES (s.Id);")
+                .is_empty()
+        );
+        assert!(
+            kinds("MERGE #tmp AS t USING dbo.Src AS s ON t.Id = s.Id WHEN NOT MATCHED BY SOURCE THEN DELETE;")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn alter_table_does_not_swallow_uncommon_drop_statements() {
+        for drop_stmt in [
+            "DROP MASTER KEY",
+            "DROP COLUMN ENCRYPTION KEY MyCEK",
+            "DROP COLUMN MASTER KEY MyCMK",
+            "DROP AVAILABILITY GROUP ProdAG",
+            "DROP APPLICATION ROLE AppRole",
+            "DROP ENDPOINT Mirroring",
+        ] {
+            let script = format!("ALTER TABLE #tmp ADD x int\n{drop_stmt}");
+            let found = kinds(&script);
+            assert_eq!(found.len(), 1, "missed {drop_stmt}: {found:?}");
+            assert_eq!(found[0].0, Drop, "{drop_stmt}");
+        }
+    }
+
+    #[test]
+    fn receive_where_does_not_mask_unfiltered_writes() {
+        assert_eq!(
+            kinds("DELETE FROM dbo.Orders\nRECEIVE TOP(1) * FROM dbo.MyQueue WHERE conversation_handle = @h"),
+            [(DeleteWithoutWhere, "dbo.Orders".into(), 1)]
+        );
+        assert_eq!(
+            kinds("UPDATE dbo.Orders SET Total = 0\nRECEIVE TOP(1) * FROM dbo.MyQueue WHERE conversation_handle = @h"),
+            [(UpdateWithoutWhere, "dbo.Orders".into(), 1)]
+        );
+    }
+
+    #[test]
+    fn permanent_tables_with_hash_or_at_and_hash_aliases_are_caught() {
+        assert_eq!(
+            kinds("DELETE FROM dbo.[#Orders]; DROP TABLE dbo.[@Config]; TRUNCATE TABLE dbo.[#Orders];"),
+            [
+                (DeleteWithoutWhere, "dbo.[#Orders]".into(), 1),
+                (Drop, "dbo.[@Config]".into(), 1),
+                (Truncate, "dbo.[#Orders]".into(), 1),
+            ]
+        );
+        assert_eq!(
+            kinds("UPDATE #a SET Total = 0 FROM dbo.Orders AS #a;\nDELETE #b FROM dbo.Customers AS #b;"),
+            [
+                (UpdateWithoutWhere, "dbo.Orders".into(), 1),
+                (DeleteWithoutWhere, "dbo.Customers".into(), 2),
+            ]
+        );
+        // Updating a real temp table joined with a permanent table stays ignored.
+        assert!(
+            kinds("UPDATE #t SET x = o.x FROM #t JOIN dbo.Orders o ON o.id = #t.id").is_empty()
+        );
+        assert!(kinds("DROP TABLE tempdb..#tmp; DROP TABLE tempdb.dbo.#tmp2").is_empty());
+    }
+
+    #[test]
+    fn permissions_and_cursor_clauses_are_not_dml_and_db_dot_dot_keeps_empty_schema() {
+        assert!(kinds("GRANT DELETE ON dbo.Orders TO app_user;").is_empty());
+        assert!(kinds("GRANT UPDATE, DELETE ON dbo.Orders TO app_user;").is_empty());
+        assert!(kinds("DECLARE c CURSOR FOR SELECT * FROM dbo.Orders FOR UPDATE OF Total").is_empty());
+        assert_eq!(
+            kinds("DROP TABLE ProdDB..Orders"),
+            [(Drop, "ProdDB..Orders".into(), 1)]
+        );
     }
 }

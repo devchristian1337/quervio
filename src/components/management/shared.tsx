@@ -488,9 +488,14 @@ export function useRead(
   useEffect(() => {
     if (!resource) {
       setRead(null);
+      setFailure(null);
+      setLoading(false);
       return;
     }
-    if (context.active === false) return;
+    if (context.active === false) {
+      setLoading(false);
+      return;
+    }
     let disposed = false,
       busy = false;
     async function load() {
@@ -595,6 +600,7 @@ export function Operation({
   async function prepare() {
     setBusy(true);
     setError(null);
+    setProgress("");
     setDone(false);
     try {
       const value = await management.prepare(context, script);
@@ -611,6 +617,7 @@ export function Operation({
     useOperations.getState().begin(preview.token,label);
     setBusy(true);
     setError(null);
+    setProgress("");
     try {
       const messages = await management.apply(preview.token, (e) =>
         setProgress(e.message),
@@ -636,6 +643,9 @@ export function Operation({
     if (tokenRef.current) void management.discard(tokenRef.current);
     tokenRef.current = null;
     setPreview(null);
+    setProgress("");
+    setError(null);
+    setDone(false);
   };
   return (
     <>
@@ -744,6 +754,7 @@ export function BridgeOperation({
   async function prepare() {
     setBusy(true);
     setError(null);
+    setProgress("");
     try {
       const preview = await management.bridgePrepare(context, action, args);
       preparedToken.current = preview.token;
@@ -764,11 +775,13 @@ export function BridgeOperation({
     if (preparedToken.current) void management.discard(preparedToken.current);
     preparedToken.current = null;
     setPrepared(null);
+    setError(null);
     setConfirm(false);
   }
   async function run() {
     setBusy(true);
     setError(null);
+    setProgress("");
     setResult(null);
     const operationId = prepared?.token ?? crypto.randomUUID();
     useOperations.getState().begin(operationId,label);
@@ -811,7 +824,7 @@ export function BridgeOperation({
       >
         {busy ? "Working…" : label}
       </Button>
-      {busy && runningToken.current && (
+      {!confirm && busy && runningToken.current && (
         <Button
           variant="outline"
           onClick={() =>
@@ -821,15 +834,15 @@ export function BridgeOperation({
           Cancel operation
         </Button>
       )}
-      {progress && <Notice>{progress}</Notice>}
-      {error && <Notice error>{error}</Notice>}
+      {!confirm && progress && <Notice>{progress}</Notice>}
+      {!confirm && error && <Notice error>{error}</Notice>}
       {result !== null && !onResult && (
         <pre className={cn(codeClass, "max-h-72")}>
           {JSON.stringify(result, null, 2)}
         </pre>
       )}
       <Dialog open={confirm} onOpenChange={(open) => !open && close()}>
-        <DialogContent>
+        <DialogContent onInteractOutside={(e) => busy && e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>{label}</DialogTitle>
             <DialogDescription>
@@ -848,8 +861,20 @@ export function BridgeOperation({
               2,
             )}
           </pre>
+          {progress && <Notice>{progress}</Notice>}
           {error && <Notice error>{error}</Notice>}
           <DialogFooter>
+            {busy && runningToken.current && (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  runningToken.current &&
+                  void management.cancel(runningToken.current)
+                }
+              >
+                Cancel operation
+              </Button>
+            )}
             <Button variant="outline" disabled={busy} onClick={close}>
               Cancel
             </Button>

@@ -225,6 +225,7 @@ async fn columns(session: &mut Session, db: &str, object_id: i64) -> Result<Vec<
                 name: text(row, 1)?,
                 // Shown as a label only, never run.
                 schema: None,
+                user_defined: false,
                 max_length: int(row, 2)?,
                 precision: int(row, 3)?,
                 scale: int(row, 4)?,
@@ -275,6 +276,9 @@ pub(crate) struct SqlType {
     /// The schema of a user-defined type, which is then written as
     /// `[schema].[name]`: its name is chosen by whoever created it.
     pub(crate) schema: Option<String>,
+    /// True when scripting a user-defined type: even if the schema is missing,
+    /// its name must always be bracket-quoted rather than emitted raw.
+    pub(crate) user_defined: bool,
     pub(crate) max_length: i64,
     pub(crate) precision: i64,
     pub(crate) scale: i64,
@@ -284,6 +288,9 @@ impl std::fmt::Display for SqlType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(schema) = &self.schema {
             return write!(f, "{}.{}", quote_name(schema), quote_name(&self.name));
+        }
+        if self.user_defined {
+            return f.write_str(&quote_name(&self.name));
         }
         let name = self.name.as_str();
         let length = |bytes_per_char: i64| match self.max_length {
@@ -308,6 +315,7 @@ mod tests {
         SqlType {
             name: name.into(),
             schema: None,
+            user_defined: false,
             max_length,
             precision,
             scale,
@@ -332,6 +340,7 @@ mod tests {
         let crafted = SqlType {
             name: "int);DROP TABLE dbo.Victim;CREATE TABLE #x(y int".into(),
             schema: Some("dbo".into()),
+            user_defined: true,
             max_length: 4,
             precision: 10,
             scale: 0,
@@ -343,11 +352,22 @@ mod tests {
         let alias = SqlType {
             name: "Phone]x".into(),
             schema: Some("sales".into()),
+            user_defined: true,
             max_length: 40,
             precision: 0,
             scale: 0,
         };
         assert_eq!(alias.to_string(), "[sales].[Phone]]x]");
+        // Defense in depth: even without a schema, user-defined types stay quoted.
+        let unschematized = SqlType {
+            name: "int);DROP TABLE dbo.Victim;--".into(),
+            schema: None,
+            user_defined: true,
+            max_length: 4,
+            precision: 10,
+            scale: 0,
+        };
+        assert_eq!(unschematized.to_string(), "[int);DROP TABLE dbo.Victim;--]");
     }
 
     #[test]

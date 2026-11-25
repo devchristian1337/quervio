@@ -372,8 +372,9 @@ pub async fn management_bridge(
 }
 
 #[tauri::command]
-pub fn management_component_select(
+pub async fn management_component_select(
     app: tauri::AppHandle,
+    language: State<'_, crate::language::LanguageState>,
     kind: String,
     path: PathBuf,
 ) -> CommandResult<()> {
@@ -395,12 +396,17 @@ pub fn management_component_select(
         dir.join(format!("{kind}.json")),
         serde_json::to_vec(&path).map_err(message)?,
     )
-    .map_err(message)
+    .map_err(message)?;
+    if kind == "language" {
+        language.reset().await;
+    }
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn management_install_language(
     app: tauri::AppHandle,
+    language: State<'_, crate::language::LanguageState>,
     on_event: Channel<Progress>,
 ) -> CommandResult<()> {
     let installer = if cfg!(windows) { "install-sqltools.ps1" } else { "install-sqltools.sh" };
@@ -456,10 +462,23 @@ pub async fn management_install_language(
             .into(),
         completed: None,
     });
-    let result = command.output().await.map_err(message)?;
+    let child = command.spawn().map_err(message)?;
+    let pid = child
+        .id()
+        .ok_or("SQL Tools Service installer process ID is missing.")?;
+    let _registration = crate::processes::Registration::new(pid);
+    let result = match tokio::time::timeout(Duration::from_secs(180), child.wait_with_output()).await
+    {
+        Ok(output) => output.map_err(message)?,
+        Err(_) => {
+            crate::processes::terminate_tree(pid).await;
+            return Err("SQL Tools Service installation timed out.".into());
+        }
+    };
     if !result.status.success() {
         return Err(String::from_utf8_lossy(&result.stderr).into_owned());
     }
+    language.reset().await;
     let _ = on_event.send(Progress {
         phase: "completed".into(),
         message: String::from_utf8_lossy(&result.stdout).into_owned(),

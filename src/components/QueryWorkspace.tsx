@@ -529,7 +529,14 @@ const MessageChunk = memo(
               key={start + offset}
               className={cn(message.isError && "text-destructive", line && "cursor-pointer hover:underline")}
               onDoubleClick={line ? () => revealLine(line) : undefined}
-              onClick={line ? () => revealLine(line) : undefined}
+              onClick={
+                line
+                  ? () => {
+                      if (window.getSelection()?.toString()) return;
+                      revealLine(line);
+                    }
+                  : undefined
+              }
             >
               {message.header && <div>{message.header}</div>}
               <div>{message.text}</div>

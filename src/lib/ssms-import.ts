@@ -27,8 +27,8 @@ export type ImportStatus =
  * named "… [TEST SERVER]"; null when it says none.
  */
 export function environmentFromName(name: string): Environment | null {
-  if (/\b(test|collaudo|qa|staging)\b/i.test(name)) return "test";
-  if (/\b(dev|develop|development|sviluppo|svil)\b/i.test(name)) return "development";
+  if (/(?<![A-Za-z0-9])(test|collaudo|qa|staging)(?![A-Za-z0-9])/i.test(name)) return "test";
+  if (/(?<![A-Za-z0-9])(dev|develop|development|sviluppo|svil)(?![A-Za-z0-9])/i.test(name)) return "development";
   return null;
 }
 

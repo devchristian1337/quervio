@@ -90,15 +90,29 @@ impl SsmsConnection {
     }
 }
 
-/// .NET encrypts the password's UTF-16 bytes; UTF-8 is the fallback.
+/// .NET encrypts the password's UTF-16LE bytes; UTF-8 is the fallback.
 fn password_text(plain: &[u8]) -> String {
-    if plain.len() % 2 == 0 {
-        let units: Vec<u16> = plain.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
-        if let Ok(text) = String::from_utf16(&units) {
-            if !text.chars().any(char::is_control) {
-                return text;
-            }
+    let decode_utf16le = |bytes: &[u8]| -> Option<String> {
+        if bytes.len() % 2 != 0 {
+            return None;
         }
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        String::from_utf16(&units)
+            .ok()
+            .filter(|text| !text.chars().any(char::is_control))
+    };
+    if !plain.contains(&0) {
+        if let Ok(text) = std::str::from_utf8(plain)
+            && !text.chars().any(char::is_control)
+        {
+            return text.to_string();
+        }
+    }
+    if let Some(text) = decode_utf16le(plain) {
+        return text;
     }
     String::from_utf8_lossy(plain).into_owned()
 }
@@ -193,20 +207,38 @@ fn registered_server(document: Node) -> Option<SsmsConnection> {
     let groups = groups_of(path);
     let name = property("Name").to_string();
     let options = connection_string(property("ConnectionStringWithEncryptedPassword"));
-    let option = |key: &str| options.iter().find(|(k, _)| k == key).map(|(_, value)| value.as_str()).unwrap_or_default();
-    let server = Some(property("ServerName")).filter(|server| !server.is_empty()).unwrap_or(option("data source")).to_string();
+    let option = |keys: &[&str]| {
+        options
+            .iter()
+            .rev()
+            .find(|(k, _)| keys.contains(&k.as_str()))
+            .map(|(_, value)| value.as_str())
+            .unwrap_or_default()
+    };
+    let server = Some(property("ServerName"))
+        .filter(|server| !server.is_empty())
+        .unwrap_or(option(&[
+            "data source",
+            "server",
+            "address",
+            "addr",
+            "network address",
+        ]))
+        .to_string();
     if server.is_empty() {
         return None;
     }
-    let windows = is_true(option("integrated security"));
+    let windows = is_true(option(&["integrated security", "trusted_connection"]));
     let authentication = match property("AuthenticationType") {
         _ if windows => Authentication::Windows,
         "0" => Authentication::Windows,
-        "1" => Authentication::Sql { user_name: option("user id").to_string() },
+        "1" => Authentication::Sql {
+            user_name: option(&["user id", "uid"]).to_string(),
+        },
         // Entra ID logins come in several kinds; they are not mapped yet.
         _ => return None,
     };
-    let encrypted_password = Some(option("password"))
+    let encrypted_password = Some(option(&["password", "pwd"]))
         .filter(|password| !password.is_empty())
         .and_then(|password| base64::engine::general_purpose::STANDARD.decode(password).ok());
     Some(SsmsConnection {
@@ -215,13 +247,18 @@ fn registered_server(document: Node) -> Option<SsmsConnection> {
         groups,
         server,
         authentication,
-        default_database: Some(option("initial catalog")).filter(|db| !db.is_empty()).map(str::to_string),
-        encrypt: match option("encrypt").to_lowercase().as_str() {
+        default_database: Some(option(&["initial catalog", "database"]))
+            .filter(|db| !db.is_empty())
+            .map(str::to_string),
+        encrypt: match option(&["encrypt"]).to_lowercase().as_str() {
             "true" | "yes" | "mandatory" => Encrypt::Mandatory,
             "strict" => Encrypt::Strict,
             _ => Encrypt::Optional,
         },
-        trust_server_certificate: is_true(option("trust server certificate")),
+        trust_server_certificate: is_true(option(&[
+            "trust server certificate",
+            "trustservercertificate",
+        ])),
         last_used: None,
         source: Source::Registered,
         ssms_version: None,
@@ -233,27 +270,95 @@ fn registered_server(document: Node) -> Option<SsmsConnection> {
 /// The group names on a path such as `ServerGroup/A/ServerGroup/B/RegisteredServer/X`.
 fn groups_of(path: &str) -> Vec<String> {
     let parts: Vec<&str> = path.split('/').collect();
-    parts
-        .windows(2)
-        .filter(|pair| pair[0] == "ServerGroup")
-        .map(|pair| pair[1].to_string())
-        .collect()
+    let mut groups = Vec::new();
+    let mut i = 0;
+    while i + 1 < parts.len() {
+        if parts[i] == "ServerGroup" {
+            groups.push(parts[i + 1].to_string());
+            i += 2;
+        } else {
+            break;
+        }
+    }
+    groups
 }
 
-/// `key=value;…` pairs with lowercase keys; a value may be quoted.
+/// Parses .NET `key=value;...` connection strings, respecting `"..."` and `'...'`
+/// quoting (including doubled-quote escaping `""` / `''`) so `;` inside quoted
+/// values never splits pairs or injects options.
 fn connection_string(text: &str) -> Vec<(String, String)> {
-    text.split(';')
-        .filter_map(|pair| pair.split_once('='))
-        .map(|(key, value)| {
-            let value = value.trim();
-            let value = value
-                .strip_prefix('"')
-                .and_then(|v| v.strip_suffix('"'))
-                .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
-                .unwrap_or(value);
-            (key.trim().to_lowercase(), value.to_string())
-        })
-        .collect()
+    let mut pairs = Vec::new();
+    let mut chars = text.chars().peekable();
+    loop {
+        while chars.peek().is_some_and(|c| c.is_whitespace() || *c == ';') {
+            chars.next();
+        }
+        if chars.peek().is_none() {
+            break;
+        }
+        let mut key = String::new();
+        let mut saw_eq = false;
+        while let Some(c) = chars.next() {
+            if c == '=' {
+                if chars.peek() == Some(&'=') {
+                    key.push('=');
+                    chars.next();
+                } else {
+                    saw_eq = true;
+                    break;
+                }
+            } else if c == ';' {
+                break;
+            } else {
+                key.push(c);
+            }
+        }
+        if !saw_eq {
+            continue;
+        }
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+        let value = match chars.peek().copied() {
+            Some(quote @ ('"' | '\'')) => {
+                chars.next();
+                let mut val = String::new();
+                while let Some(c) = chars.next() {
+                    if c == quote {
+                        if chars.peek() == Some(&quote) {
+                            val.push(quote);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    } else {
+                        val.push(c);
+                    }
+                }
+                while let Some(c) = chars.next() {
+                    if c == ';' {
+                        break;
+                    }
+                }
+                val
+            }
+            _ => {
+                let mut val = String::new();
+                while let Some(c) = chars.next() {
+                    if c == ';' {
+                        break;
+                    }
+                    val.push(c);
+                }
+                val.trim_end().to_string()
+            }
+        };
+        let key = key.trim().to_lowercase();
+        if !key.is_empty() {
+            pairs.push((key, value));
+        }
+    }
+    pairs
 }
 
 fn is_true(value: &str) -> bool {
@@ -306,7 +411,11 @@ fn history_entry(settings: Node, version: &str) -> Option<SsmsConnection> {
         server,
         authentication,
         default_database: database,
-        encrypt: if option("EC").eq_ignore_ascii_case("true") { Encrypt::Mandatory } else { Encrypt::Optional },
+        encrypt: match option("EC").trim().to_ascii_lowercase().as_str() {
+            "true" | "yes" | "mandatory" => Encrypt::Mandatory,
+            "strict" => Encrypt::Strict,
+            _ => Encrypt::Optional,
+        },
         trust_server_certificate: option("TSC").eq_ignore_ascii_case("true"),
         last_used: last_used(settings),
         source: Source::History,
@@ -545,6 +654,59 @@ mod tests {
     fn reads_passwords_as_dotnet_writes_them() {
         let utf16: Vec<u8> = "Pàss;1".encode_utf16().flat_map(u16::to_le_bytes).collect();
         assert_eq!(password_text(&utf16), "Pàss;1");
+        let utf16_cjk: Vec<u8> = "密碼".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        assert_eq!(password_text(&utf16_cjk), "密碼");
         assert_eq!(password_text("plain".as_bytes()), "plain");
+        assert_eq!(password_text("secret".as_bytes()), "secret");
+    }
+
+    #[test]
+    fn connection_string_respects_quotes_escapes_and_aliases() {
+        let conn = r#"data source=10.0.0.5;initial catalog="App;trust server certificate=True;encrypt=False;x";user id="sa""1";encrypt=Strict;trust server certificate=False"#;
+        let xml = store(&[registered(
+            "ServerGroup/ServerGroup/RegisteredServer/App",
+            "App",
+            "10.0.0.5",
+            1,
+            conn,
+        )]);
+        let found = read_registered_servers(&xml);
+        assert_eq!(found.len(), 1);
+        let c = &found[0];
+        assert_eq!(c.groups, ["ServerGroup"]);
+        assert_eq!(
+            c.default_database.as_deref(),
+            Some("App;trust server certificate=True;encrypt=False;x")
+        );
+        assert_eq!(c.authentication, Authentication::Sql { user_name: "sa\"1".into() });
+        assert_eq!(c.encrypt, Encrypt::Strict);
+        assert!(!c.trust_server_certificate);
+
+        let aliases = "Server=10.0.0.6;Database=MyDb;UID=app;Encrypt=Mandatory;TrustServerCertificate=True";
+        let found2 = read_registered_servers(&store(&[registered(
+            "RegisteredServer/S2",
+            "S2",
+            "",
+            1,
+            aliases,
+        )]));
+        assert_eq!(found2.len(), 1);
+        assert_eq!(found2[0].server, "10.0.0.6");
+        assert_eq!(found2[0].default_database.as_deref(), Some("MyDb"));
+        assert_eq!(found2[0].authentication, Authentication::Sql { user_name: "app".into() });
+        assert_eq!(found2[0].encrypt, Encrypt::Mandatory);
+        assert!(found2[0].trust_server_certificate);
+    }
+
+    #[test]
+    fn history_maps_mandatory_and_strict_encryption() {
+        let xml = user_settings(&[
+            history("10.0.0.8", 1, "sa", OCTOBER, &[("EC", "Strict")]),
+            history("10.0.0.9", 1, "sa", JUNE, &[("EC", "Mandatory")]),
+        ]);
+        let found = read_user_settings(&xml, "21.0");
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].encrypt, Encrypt::Strict);
+        assert_eq!(found[1].encrypt, Encrypt::Mandatory);
     }
 }

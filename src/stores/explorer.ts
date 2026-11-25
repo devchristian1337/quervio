@@ -96,7 +96,7 @@ function qualified(item: CatalogItem) {
 
 function databaseNode(parentKey: string, connectionId: string, item: CatalogItem): TreeNode {
   return {
-    key: `${parentKey}/db:${item.name}`,
+    key: `${parentKey}/db:${encodeURIComponent(item.name)}`,
     label: item.name,
     kind: { type: "database", connectionId, database: item.name },
     expandable: true,
@@ -155,7 +155,7 @@ async function loadChildren(node: TreeNode, cache: Record<string, Children>): Pr
       return (["principals", "roles"] as const).map(section => ({key: `${key}/${section}`, label: section === "principals" ? kind.server ? "Logins" : "Users" : "Roles", kind: {type: "securityList" as const, connectionId: kind.connectionId, database: kind.database, server: kind.server, section}, expandable: true}));
     case "securityList": {
       const data = await management.read({connectionId: kind.connectionId, database: kind.database}, kind.section === "serverTriggers" ? {kind: "serverTriggers"} : {kind: kind.section, server: kind.server});
-      return records(data).map((row, index) => ({key: `${key}/${row.principal_id ?? index}`, label: row.name ?? row.role_name ?? "", detail: row.type_desc, kind: {type: "securityObject" as const, connectionId: kind.connectionId, database: kind.database, definition: row.definition ?? undefined}, expandable: false}));
+      return records(data).map((row, index) => ({key: `${key}/${encodeURIComponent(String(row.principal_id ?? index))}`, label: row.name ?? row.role_name ?? "", detail: row.type_desc, kind: {type: "securityObject" as const, connectionId: kind.connectionId, database: kind.database, definition: row.definition ?? undefined}, expandable: false}));
     }
     case "securityObject":case "tool":return [];
     case "objectFolder": {
@@ -164,7 +164,7 @@ async function loadChildren(node: TreeNode, cache: Record<string, Children>): Pr
       return items
         .filter((item) => !item.system)
         .map((item) => ({
-          key: `${key}/${item.objectId ?? qualified(item)}`,
+          key: `${key}/${item.objectId ?? encodeURIComponent(qualified(item))}`,
           label: qualified(item),
           objectName: item.name,
           objectSchema: item.schema ?? "dbo",
@@ -193,7 +193,7 @@ async function loadChildren(node: TreeNode, cache: Record<string, Children>): Pr
     case "tableFolder": {
       const items = await api.tableChildren(kind.connectionId, kind.database, kind.objectId, kind.folder);
       return items.map((item) => ({
-        key: `${key}/${item.name}`,
+        key: `${key}/${encodeURIComponent(item.name)}`,
         label: item.name,
         detail: item.detail,
         kind: {
@@ -240,27 +240,52 @@ interface ExplorerState {
 }
 
 /** Drops cached state of a node's descendants (and the node itself when asked). */
+function matchesSubtree(candidate: string, key: string, includeSelf: boolean) {
+  return candidate.startsWith(`${key}/`) || (includeSelf && candidate === key);
+}
+
 function prune<T>(record: Record<string, T>, key: string, includeSelf: boolean) {
   return Object.fromEntries(
-    Object.entries(record).filter(
-      ([k]) => !(k.startsWith(`${key}/`) || (includeSelf && k === key)),
-    ),
+    Object.entries(record).filter(([k]) => !matchesSubtree(k, key, includeSelf)),
   );
 }
 
 export const useExplorer = create<ExplorerState>((set, get) => {
+  // Per-node and per-connection revisions invalidate stale in-flight loads on refresh/disconnect.
+  const loadRevision = new Map<string, number>();
+  const connectionRevision = new Map<string, number>();
+
+  function invalidateSubtree(key: string, includeSelf: boolean) {
+    for (const k of loadRevision.keys()) {
+      if (matchesSubtree(k, key, includeSelf)) {
+        loadRevision.set(k, (loadRevision.get(k) ?? 0) + 1);
+      }
+    }
+  }
+
   async function load(node: TreeNode) {
+    const connectionId = "connectionId" in node.kind ? node.kind.connectionId : null;
+    const rev = (loadRevision.get(node.key) ?? 0) + 1;
+    loadRevision.set(node.key, rev);
+    const connRev = connectionId !== null ? (connectionRevision.get(connectionId) ?? 0) : 0;
+    const isStale = () =>
+      loadRevision.get(node.key) !== rev ||
+      (connectionId !== null && (connectionRevision.get(connectionId) ?? 0) !== connRev);
+
     set((s) => ({ children: { ...s.children, [node.key]: { status: "loading" } } }));
     try {
       if (node.kind.type === "server") {
-        const { connectionId } = node.kind;
-        const info = await api.connect(connectionId);
-        set((s) => ({ servers: { ...s.servers, [connectionId]: info } }));
+        const { connectionId: serverId } = node.kind;
+        const info = await api.connect(serverId);
+        if (isStale()) return;
+        set((s) => ({ servers: { ...s.servers, [serverId]: info } }));
       }
       const extra: Record<string, Children> = {};
       const nodes = await loadChildren(node, extra);
+      if (isStale()) return;
       set((s) => ({ children: { ...s.children, ...extra, [node.key]: { status: "ready", nodes } } }));
     } catch (error) {
+      if (isStale()) return;
       set((s) => ({
         children: { ...s.children, [node.key]: { status: "error", error: errorMessage(error) } },
       }));
@@ -294,6 +319,7 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     refresh: async (node) => {
       invalidateCatalog();
       if (!node.expandable || node.kind.type === "group") return;
+      invalidateSubtree(node.key, true);
       set((s) => ({
         children: prune(s.children, node.key, true),
         expanded: { ...prune(s.expanded, node.key, false), [node.key]: true },
@@ -313,6 +339,8 @@ export const useExplorer = create<ExplorerState>((set, get) => {
 
     disconnect: async (connectionId) => {
       const key = serverKey(connectionId);
+      connectionRevision.set(connectionId, (connectionRevision.get(connectionId) ?? 0) + 1);
+      invalidateSubtree(key, true);
       set((s) => ({
         children: prune(s.children, key, true),
         expanded: prune(s.expanded, key, true),

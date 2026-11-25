@@ -95,19 +95,21 @@ export let languageStatus = "Checking language services…";
 export function invalidateMetadata() {
   metadata.clear();
   component = null;
+  serviceFailedAt = 0;
 }
 async function cached(
   context: Context,
   resource: Parameters<typeof management.read>[1],
 ) {
+  const now = Date.now();
+  const rev = metadataRevision();
   const key = JSON.stringify([context, resource]),
     old = metadata.get(key);
-  if (
-    old &&
-    old.revision === metadataRevision() &&
-    Date.now() - old.loaded < 60000
-  )
-    return old.data;
+  if (old && old.revision === rev && now - old.loaded < 60000) return old.data;
+  // Evict stale or expired entries so long sessions across many databases stay bounded.
+  for (const [entryKey, entry] of metadata) {
+    if (entry.revision !== rev || now - entry.loaded >= 60000) metadata.delete(entryKey);
+  }
   const data = await management.read(context, resource);
   metadata.set(key, { loaded: Date.now(), data, revision: metadataRevision() });
   return data;
@@ -283,6 +285,18 @@ async function catalogSuggestions(
 
   const qualifier = qualifierBefore(before);
   if (qualifier !== null) {
+    // Monaco's SQL word stops after "[", so a bracketed prefix after "." must
+    // include the opening "[" (and any auto-closed "]") in the replacement range.
+    const lineBefore = before.slice(before.lastIndexOf("\n") + 1);
+    const bracketed = /\.(\[[^\]]*)$/.exec(lineBefore);
+    const memberRange = bracketed
+      ? new monaco.Range(
+          position.lineNumber,
+          position.column - bracketed[1].length,
+          position.lineNumber,
+          Math.max(position.column, replace.endColumn) + (text[offset] === "]" ? 1 : 0),
+        )
+      : replace;
     const target = resolveQualifier(qualifier, references, objects);
     if (target && "columnsOf" in target)
       return {
@@ -293,7 +307,7 @@ async function catalogSuggestions(
           detail: `${c.type}${c.is_nullable === "1" ? " null" : " not null"}`,
           insertText: identifier(c.name ?? ""),
           sortText: ORDER.column,
-          range: replace,
+          range: memberRange,
         })),
       };
     if (target)
@@ -307,7 +321,7 @@ async function catalogSuggestions(
             detail: o.type,
             insertText: identifier(o.name),
             sortText: ORDER.object,
-            range: replace,
+            range: memberRange,
           })),
       };
     return { items: [], member: true };

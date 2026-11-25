@@ -144,7 +144,11 @@ function goCount(line: string): number | null {
   return count <= 0xffff_ffff ? count : null;
 }
 
-type State = { kind: "code" } | { kind: "comment"; depth: number } | { kind: "quoted"; close: string };
+type State =
+  | { kind: "code" }
+  | { kind: "lineComment" }
+  | { kind: "comment"; depth: number }
+  | { kind: "quoted"; close: string };
 
 function stateAfter(text: string): State {
   let state: State = { kind: "code" };
@@ -153,11 +157,14 @@ function stateAfter(text: string): State {
 }
 
 function scan(line: string, state: State): State {
+  if (state.kind === "lineComment") {
+    return line.endsWith("\n") ? { kind: "code" } : state;
+  }
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
     const next = line[i + 1];
     if (state.kind === "code") {
-      if (c === "-" && next === "-") return state;
+      if (c === "-" && next === "-") return line.endsWith("\n") ? state : { kind: "lineComment" };
       if (c === "/" && next === "*") {
         state = { kind: "comment", depth: 1 };
         i++;
@@ -193,7 +200,7 @@ export function sameTokens(a: string, b: string): boolean {
 
 // Everything but block comments, which nest and are read by hand.
 const TOKEN =
-  /--[^\n]*|N?'(?:[^']|'')*'|"(?:[^"]|"")*"|\[(?:[^\]]|\]\])*\]|[\w@#$.]+|>=|<=|<>|!=|!<|!>|::|[-+*/%&|^]=|\S/y;
+  /--[^\n]*|[Nn]?'(?:[^']|'')*'|"(?:[^"]|"")*"|\[(?:[^\]]|\]\])*\]|[\w@#$.]+|>=|<=|<>|!=|!<|!>|::|[-+*/%&|^]=|\S/y;
 
 /** The tokens of `script` as SQL Server reads them, block comments nested. */
 function codeTokens(script: string): { text: string; start: number }[] {
@@ -225,6 +232,7 @@ function codeTokens(script: string): { text: string; start: number }[] {
       i = TOKEN.lastIndex;
       token = match[0];
       if (token.startsWith("--")) token = token.trimEnd();
+      else if (token.startsWith("n'")) token = "N" + token.slice(1);
       else if (!/^N?'|^"|^\[/.test(token)) token = token.toUpperCase();
     }
     tokens.push({ text: token, start });

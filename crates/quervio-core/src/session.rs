@@ -49,11 +49,10 @@ impl Session {
         for batch in crate::batch::split(sql) {
             for _ in 0..batch.repeat {
                 if cancel.is_cancelled() {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Interrupted,
-                        "Operation cancelled; completed statements may already be committed.",
-                    )
-                    .into());
+                    return Err(Error::Cancelled(
+                        "Operation cancelled; completed statements may already be committed."
+                            .into(),
+                    ));
                 }
                 let result: Result<()> = async {
                     let options = mssql_tds::connection::tds_client::ExecuteOptions {
@@ -117,6 +116,10 @@ impl Session {
                                 .map(|c| c.column_name.clone())
                                 .collect();
                             while let Some(row) = self.client.next_row().await? {
+                                if table.rows.len() >= limit {
+                                    table.truncated = true;
+                                    break;
+                                }
                                 table.rows.push(
                                     row.iter()
                                         .map(|v| {
@@ -275,11 +278,14 @@ impl Session {
 /// name, with no instance, port or protocol prefix.
 fn is_bare_local(server: &str) -> bool {
     let name = server.trim();
+    if name == "::1" {
+        return true;
+    }
     if name.is_empty() || name.contains(['\\', ',', ':']) {
         return false;
     }
     let machine = std::env::var("COMPUTERNAME").unwrap_or_default();
-    ["localhost", ".", "(local)", "127.0.0.1", "::1"]
+    ["localhost", ".", "(local)", "127.0.0.1"]
         .iter()
         .any(|local| name.eq_ignore_ascii_case(local))
         || (!machine.is_empty() && name.eq_ignore_ascii_case(&machine))
@@ -365,6 +371,7 @@ mod tests {
             ".",
             "(local)",
             "127.0.0.1",
+            "::1",
             " localhost ",
         ] {
             assert!(is_bare_local(name), "{name}");

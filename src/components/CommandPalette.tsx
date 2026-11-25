@@ -91,8 +91,7 @@ export function CommandPalette({ context, onPointerDismiss }: { context: Context
             <CommandSeparator />
             <CommandGroup heading="Open tabs">
               {queries.map((tab) => {
-                const connection = connections.find((c) => c.id === tab.connectionId);
-                const detail = [connection ? displayName(connection) : tab.server?.serverName, tab.database].filter(Boolean).join(" · ");
+                const detail = [tab.connectionName || tab.server?.serverName, tab.database].filter(Boolean).join(" · ");
                 return (
                   <CommandItem key={tab.id} value={`query-${tab.id}`} keywords={[tab.title, detail]} onSelect={() => select(() => { useQueries.getState().activate(tab.id); useWorkbench.getState().activate(null); requestAnimationFrame(focusEditor); })}>
                     <FileCode2 />

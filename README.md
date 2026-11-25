@@ -92,7 +92,7 @@ cargo test --workspace
 pnpm test
 ```
 
-Integration tests run against SQL Server 2022 in Docker. Copy `.env.example` to `.env` first, then:
+Integration tests run against SQL Server 2022 in Docker. Copy `.env.example` to `.env` and set a unique local `QUERVIO_TEST_PASSWORD` first, then:
 
 ```bash
 docker compose up -d --wait

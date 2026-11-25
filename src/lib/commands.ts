@@ -66,14 +66,16 @@ const KEY_NAMES: Record<string, string> = {
 /** The shortcut a key press makes, or null for a lone modifier. */
 export function shortcutOf(event: KeyboardEvent): string | null {
   if (["Control", "Shift", "Alt", "Meta", "AltGraph", "CapsLock"].includes(event.key)) return null;
-  // With Shift the key may be a symbol ("?" for "/"); use the physical key for letters and digits.
+  // With Shift a digit becomes a symbol ("!" for "1"): keep physical digits,
+  // but respect the active keyboard layout for letters and punctuation (AZERTY/Dvorak/QWERTZ).
   const code = event.code;
   let key = KEY_NAMES[event.key] ?? event.key;
-  if (/^Key[A-Z]$/.test(code)) key = code.slice(3);
-  else if (/^Digit\d$/.test(code)) key = code.slice(5);
+  if (/^Digit\d$/.test(code)) key = code.slice(5);
+  else if ((key === "Dead" || key === "Unidentified") && /^Key[A-Z]$/.test(code)) key = code.slice(3);
   else if (key.length === 1) key = key.toUpperCase();
   const parts: string[] = [];
   if (event.ctrlKey) parts.push("Ctrl");
+  if (event.metaKey) parts.push("Meta");
   if (event.shiftKey) parts.push("Shift");
   if (event.altKey) parts.push("Alt");
   parts.push(key);

@@ -52,6 +52,15 @@ describe("figures", () => {
     const f = figures(azure, null);
     expect([f.memoryPercent, f.diskPercent, f.uptimeSeconds, f.workersPercent]).toEqual([null, null, null, null]);
   });
+  it("treats non-numeric, whitespace-only and invalid timestamp fields as null", () => {
+    const f = figures(
+      { cpu_percent: "N/A", blocked_requests: "   ", sampled_at: "not-a-date", started_at: "2026-10-28T20:00:00" },
+      null,
+    );
+    expect(f.cpuPercent).toBeNull();
+    expect(f.blocked).toBeNull();
+    expect(f.uptimeSeconds).toBeNull();
+  });
 });
 
 describe("pressure and status", () => {
