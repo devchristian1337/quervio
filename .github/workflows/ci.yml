@@ -52,6 +52,8 @@ jobs:
         run: pnpm build
       - name: Backend tests
         run: cargo test --locked --workspace
+      - name: Backend tests (test-profile feature)
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features test-profile
       - name: Desktop executable build
         run: cargo build --locked --workspace
       - name: Install browser
@@ -105,4 +107,63 @@ jobs:
         with:
           name: sql-compatibility-${{ matrix.version }}
           path: target/sql-compatibility/
+          if-no-files-found: ignore
+
+  desktop-e2e:
+    name: Desktop E2E WebdriverIO (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: '10.22.0'
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Windows script shell
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"npm_config_script_shell=$((Get-Command pwsh -ErrorAction Stop).Source)" >> $env:GITHUB_ENV'
+      - name: Linux WebDriver and desktop prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev libkrb5-dev libicu-dev libsecret-1-0 libodbc2 webkit2gtk-driver xvfb dbus-x11 gnome-keyring
+      - name: Rust toolchain
+        run: rustup update stable --no-self-update
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --version 2.1.0 --locked
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build Microsoft bridge (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/build-microsoft.ps1
+      - name: Build Microsoft bridge (Linux)
+        if: runner.os == 'Linux'
+        run: bash scripts/build-microsoft.sh
+      - name: Build frontend and test-profile desktop binary
+        run: |
+          pnpm build
+          cargo build --locked --manifest-path src-tauri/Cargo.toml --features "test-profile,tauri/custom-protocol"
+      - name: Run Windows real desktop E2E suite (WebdriverIO + tauri-driver)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node scripts/run-desktop-e2e.mjs --skip-build
+      - name: Run Linux real desktop E2E suite with isolated Docker SQL Server 2022
+        if: runner.os == 'Linux'
+        run: bash scripts/run-linux-desktop-e2e.sh --skip-build --with-sql
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: desktop-e2e-${{ matrix.os }}
+          path: target/e2e-desktop-results/
           if-no-files-found: ignore

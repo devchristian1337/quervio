@@ -24,8 +24,10 @@ pub fn run() {
         .setup(|app| {
             #[cfg(windows)]
             browser_shortcuts::disable(app)?;
-            let data_dir = app.path().app_data_dir()?;
-            copy_querydeck_data(&data_dir);
+            let (data_dir, isolated_test_profile) = resolve_data_dir(app)?;
+            if !isolated_test_profile {
+                copy_querydeck_data(&data_dir);
+            }
             app.manage(explorer::ExplorerState::open(&data_dir, &app.path().resource_dir()?)?);
             app.manage(query::QueryState::default());
             app.manage(management::ManagementState::default());
@@ -110,6 +112,29 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+/// Resolves the app data directory. Only builds explicitly compiled with the
+/// `test-profile` Cargo feature honor `QUERVIO_TEST_DATA_DIR`, keeping
+/// distributed user builds free of automation overrides.
+#[cfg(feature = "test-profile")]
+fn resolve_test_data_dir(env_value: Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
+    let dir = env_value.filter(|value| !value.is_empty())?;
+    let path = std::path::PathBuf::from(dir);
+    path.is_absolute().then_some(path)
+}
+
+#[cfg(feature = "test-profile")]
+fn resolve_data_dir(app: &tauri::App) -> tauri::Result<(std::path::PathBuf, bool)> {
+    if let Some(path) = resolve_test_data_dir(std::env::var_os("QUERVIO_TEST_DATA_DIR")) {
+        return Ok((path, true));
+    }
+    Ok((app.path().app_data_dir()?, false))
+}
+
+#[cfg(not(feature = "test-profile"))]
+fn resolve_data_dir(app: &tauri::App) -> tauri::Result<(std::path::PathBuf, bool)> {
+    Ok((app.path().app_data_dir()?, false))
+}
+
 /// The app was called Querydeck and kept its data in `com.querydeck.app`.
 /// On the first start as Quervio, copy the Saved Connections, their
 /// passwords (DPAPI is tied to the Windows user, not the folder) and the
@@ -154,6 +179,17 @@ fn copy_querydeck_data(data_dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::copy_querydeck_data;
+
+    #[cfg(feature = "test-profile")]
+    #[test]
+    fn test_profile_override_accepts_only_absolute_paths() {
+        use std::ffi::OsString;
+        assert_eq!(super::resolve_test_data_dir(None), None);
+        assert_eq!(super::resolve_test_data_dir(Some(OsString::from(""))), None);
+        assert_eq!(super::resolve_test_data_dir(Some(OsString::from("relative/path"))), None);
+        let abs = std::env::temp_dir().join("quervio-test-profile-check");
+        assert_eq!(super::resolve_test_data_dir(Some(abs.clone().into_os_string())), Some(abs));
+    }
 
     #[test]
     fn querydeck_migration_preserves_existing_tabs_and_retries_after_partial_failure() {

@@ -30,7 +30,7 @@ for (const closeAfterSave of [false, true]) {
     });
     const tab = page.getByRole("tab").filter({ hasText: "edited.sql" });
     if (closeAfterSave) {
-      await tab.getByRole("button", { name: "Close", exact: true }).click();
+      await tab.locator("..").getByRole("button", { name: "Close", exact: true }).click();
       await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
       await expect(page.getByRole("dialog")).toHaveCount(0);
     } else {

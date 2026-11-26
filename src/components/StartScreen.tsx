@@ -73,8 +73,8 @@ export function StartScreen() {
             </div>
           ) : (
             byGroup(connections).map(({ group, connections: inGroup }) => (
-              // A group, so the scroll fade shrinks and blurs row by row, not the whole list.
-              <ul key={group ?? ""} role="group" aria-label={group ?? "Ungrouped"} className="@container border-t">
+              // ScrollFade treats <ul> natively as a row group, keeping valid list semantics for <li>.
+              <ul key={group ?? ""} aria-label={group ?? "Ungrouped"} className="@container border-t">
                 {/* Wraps rather than truncates: nested SSMS groups differ at the end. */}
                 {group !== null && (
                   <li className="flex min-h-8 items-end px-1 pt-2 pb-1 text-xs font-medium text-muted-foreground">{group}</li>

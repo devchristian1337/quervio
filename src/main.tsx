@@ -22,7 +22,7 @@ applyTheme(
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     {/* A short wait, so moving across a toolbar does not flash every tip. */}
-    <TooltipProvider delayDuration={400}>
+    <TooltipProvider delayDuration={400} disableHoverableContent>
       <App />
     </TooltipProvider>
   </React.StrictMode>,

@@ -147,7 +147,7 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
             />
           </Field>
 
-          <Field label="Authentication">
+          <Field label="Authentication" htmlFor="authentication">
             <Select
               value={draft.authentication.kind}
               onValueChange={(kind) => {
@@ -157,7 +157,7 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
                 });
               }}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id="authentication" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -218,12 +218,12 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Environment">
+            <Field label="Environment" htmlFor="environment">
               <Select
                 value={draft.environment}
                 onValueChange={(environment) => update({ environment: environment as Environment })}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="environment" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -236,9 +236,9 @@ export function ConnectDialog({ editing, preset, open, onOpenChange, onSaved }: 
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Encrypt">
+            <Field label="Encrypt" htmlFor="encrypt">
               <Select value={draft.encrypt} onValueChange={(encrypt) => update({ encrypt: encrypt as Encrypt })}>
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="encrypt" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

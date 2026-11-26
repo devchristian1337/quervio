@@ -129,6 +129,13 @@ function TabBar() {
 
   return (
     <div ref={bar} className="flex h-9 shrink-0 items-end overflow-x-auto border-b bg-panel">
+      {/* aria-owns connects the tablist to each role="tab" while keeping its sibling Close button outside the tablist. */}
+      <div
+        role="tablist"
+        aria-label="Query tabs"
+        aria-owns={ids.map((id) => `query-tab-${id}`).join(" ")}
+        className="sr-only"
+      />
       {ids.map((id) => (
         <TabItem key={id} id={id} selected={id === activeId} />
       ))}
@@ -175,39 +182,52 @@ const TabItem = memo(function TabItem({ id, selected }: { id: string; selected: 
       }
     >
     <div
-      role="tab"
-      aria-selected={selected}
-      onMouseDown={(e) => {
-        if (e.button === 1) {
-          e.preventDefault();
-          void closeTab(tab);
-        } else {
-          activate(tab.id);
-        }
-      }}
       className={cn(
-        "group flex h-full min-w-0 max-w-56 shrink-0 cursor-pointer items-center gap-2 border-r border-t-2 px-3",
+        "group flex h-full min-w-0 max-w-56 shrink-0 items-center border-r border-t-2",
         selected ? "border-t-primary bg-background" : "border-t-transparent text-muted-foreground hover:bg-accent/40",
       )}
     >
-      {tab.longRunning ? (
-        <Loader2 className="size-3 shrink-0 animate-spin" />
-      ) : tab.openTransactions > 0 ? (
-        // The brand's second colour, as for activity: amber is the Test Environment's.
-        <Circle className="size-2.5 shrink-0 fill-brand-secondary text-brand-secondary" aria-label="Open transaction" />
-      ) : null}
-      {/* The * outside the cut title: a long file name must not hide unsaved changes. */}
-      <span className="flex max-w-40 min-w-0 shrink-0 items-baseline">
-        <span className="min-w-0 truncate">{tab.title}</span>
-        {tab.dirty && <span className="shrink-0">*</span>}
-      </span>
-      {/* The title keeps up to 10rem; the server gives way, so a long name never cuts the title to "Q…". */}
-      {connectionName && <span className="min-w-0 truncate text-xs text-muted-foreground">{connectionName}</span>}
+      <div
+        id={`query-tab-${tab.id}`}
+        role="tab"
+        aria-selected={selected}
+        tabIndex={selected ? 0 : -1}
+        onMouseDown={(e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            void closeTab(tab);
+          } else {
+            activate(tab.id);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            activate(tab.id);
+          }
+        }}
+        className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 pr-3 pl-3 outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+      >
+        {tab.longRunning ? (
+          <Loader2 className="size-3 shrink-0 animate-spin" />
+        ) : tab.openTransactions > 0 ? (
+          // The brand's second colour, as for activity: amber is the Test Environment's.
+          <Circle className="size-2.5 shrink-0 fill-brand-secondary text-brand-secondary" aria-label="Open transaction" />
+        ) : null}
+        {/* The * outside the cut title: a long file name must not hide unsaved changes. */}
+        <span className="flex max-w-40 min-w-0 shrink-0 items-baseline">
+          <span className="min-w-0 truncate">{tab.title}</span>
+          {tab.dirty && <span className="shrink-0">*</span>}
+        </span>
+        {/* The title keeps up to 10rem; the server gives way, so a long name never cuts the title to "Q…". */}
+        {connectionName && <span className="min-w-0 truncate text-xs text-muted-foreground">{connectionName}</span>}
+      </div>
       <button
+        type="button"
         aria-label="Close"
-        // A 20 px target; -mr-1 keeps the tab's right padding where it was.
+        // A 20 px target beside the tab trigger (not nested inside role="tab").
         className={cn(
-          "-mr-1 ml-1 grid size-5 shrink-0 place-items-center rounded hover:bg-accent",
+          "mr-2 grid size-5 shrink-0 place-items-center rounded hover:bg-accent",
           !selected && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
         )}
         onMouseDown={(e) => e.stopPropagation()}

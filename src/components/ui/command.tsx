@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Command as CommandPrimitive } from "cmdk";
+import { Command as CommandPrimitive, useCommandState } from "cmdk";
 import { Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -74,9 +74,25 @@ const CommandGroup = React.forwardRef<React.ComponentRef<typeof CommandPrimitive
 ));
 CommandGroup.displayName = "CommandGroup";
 
-const CommandSeparator = React.forwardRef<React.ComponentRef<typeof CommandPrimitive.Separator>, React.ComponentPropsWithoutRef<typeof CommandPrimitive.Separator>>(({ className, ...props }, ref) => (
-  <CommandPrimitive.Separator ref={ref} className={cn("h-px bg-border", className)} {...props} />
-));
+// Visual divider inside the command listbox: role="separator" is disallowed as an
+// owned child of ARIA listbox, so we render a presentational divider instead.
+const CommandSeparator = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentPropsWithoutRef<"div"> & { alwaysRender?: boolean }
+>(({ className, alwaysRender, ...props }, ref) => {
+  const hasSearch = useCommandState((state) => Boolean(state.search));
+  if (!alwaysRender && hasSearch) return null;
+  return (
+    <div
+      ref={ref}
+      cmdk-separator=""
+      role="presentation"
+      aria-hidden="true"
+      className={cn("h-px bg-border", className)}
+      {...props}
+    />
+  );
+});
 CommandSeparator.displayName = "CommandSeparator";
 
 const CommandItem = React.forwardRef<React.ComponentRef<typeof CommandPrimitive.Item>, React.ComponentPropsWithoutRef<typeof CommandPrimitive.Item>>(({ className, ...props }, ref) => (

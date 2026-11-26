@@ -177,9 +177,9 @@ export function Workspace() {
             );
           })}
         </div>
-        <Button data-tour="command-search" variant="ghost" size="sm" className="h-7 shrink-0 gap-2 text-xs text-muted-foreground" onClick={(event) => useCommandPalette.getState().setOpen(true, event.detail > 0)} aria-label="Search commands">
-          <Search /><span>Search commands</span>
-          {commandKey && <kbd className="hidden rounded border px-1 text-[10px] lg:inline-flex">{commandKey}</kbd>}
+        <Button data-tour="command-search" variant="ghost" size="sm" className="h-7 shrink-0 gap-2 text-xs text-muted-foreground" aria-keyshortcuts={commandKey || undefined} onClick={(event) => useCommandPalette.getState().setOpen(true, event.detail > 0)}>
+          <Search aria-hidden="true" /><span>Search commands</span>
+          {commandKey && <kbd aria-hidden="true" className="hidden rounded border px-1 text-[10px] lg:inline-flex">{commandKey}</kbd>}
         </Button>
         <DropdownMenu onOpenChange={(open) => { if (open) toolsDismissedByEscape.current = false; }}>
           <DropdownMenuTrigger asChild>

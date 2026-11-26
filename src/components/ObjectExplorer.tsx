@@ -487,13 +487,13 @@ export function ObjectExplorer() {
                     } else void explorer.toggle(node);
                   }}
                 >
-                  <button
-                    tabIndex={-1}
+                  <span
+                    aria-hidden="true"
                     className={cn("grid size-4 shrink-0 place-items-center", !node.expandable && "invisible")}
                     onClick={() => void explorer.toggle(node)}
                   >
                     <ChevronRight className={cn("size-3.5 transition-transform motion-reduce:transition-none", expanded && "rotate-90")} />
-                  </button>
+                  </span>
                   {connection ? (
                     <span className="grid size-3.5 shrink-0 place-items-center">
                       <span className={cn("size-2 rounded-full", ENVIRONMENTS[connection.environment].dot)} />
