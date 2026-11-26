@@ -18,6 +18,29 @@ const activeTab = (page: Page) => page.evaluate(async (path) => {
   return useQueries.getState().activeId as string;
 }, queries);
 
+test("the grid does not draw row separators below the last result", async ({ page }) => {
+  await page.goto("/?mock&data=one");
+  await page.getByRole("button", { name: "New query on Mock server", exact: true }).click();
+  await execute(page, "SELECT 1;");
+  await page.getByRole("button", { name: "Run anyway", exact: true }).click();
+  await page.getByRole("tab", { name: "Results", exact: true }).click();
+
+  const grid = page.getByTestId("data-grid-canvas");
+  await expect(grid).toBeVisible();
+  const colors = await grid.evaluate((canvas: HTMLCanvasElement) => {
+    const scale = canvas.height / canvas.clientHeight;
+    const context = canvas.getContext("2d")!;
+    // Sample through the first would-be separator below the last row.
+    const { data } = context.getImageData(8, Math.round(80 * scale), 1, Math.round(40 * scale));
+    const colors = new Set<string>();
+    for (let pixel = 0; pixel < data.length; pixel += 4) {
+      colors.add(data.slice(pixel, pixel + 4).join(","));
+    }
+    return [...colors];
+  });
+  expect(colors).toHaveLength(1);
+});
+
 test("each query tab keeps its own result rows and sort", async ({ page }) => {
   await page.goto("/?mock");
   await page.getByRole("button", { name: "New query on Mock server", exact: true }).click();

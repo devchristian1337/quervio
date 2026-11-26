@@ -170,6 +170,10 @@ or database. Query tabs keep their dedicated Rust sessions.
   success/failure routing. They run with Quervio closed. They are Quervio flows,
   not SSIS Maintenance Plans.
 - CSV/Excel export is available from the results grid and the transfer wizard.
+- In a focused results grid, Ctrl+F opens Find in Results. Enter and Shift+Enter
+  find the next or previous match in the retained result, without running SQL again.
+- Right-click a result column header to freeze it and the columns to its left.
+  Unfreeze Columns restores normal horizontal scrolling.
   Copy, Copy with Headers and Copy as Markdown include only the selected rows
   or columns, including separate Ctrl+click selections, in their displayed order.
   Copy all as Markdown and file exports use the whole Result set.

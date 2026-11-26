@@ -102,6 +102,7 @@ export function useGlobalShortcuts() {
         event.stopPropagation();
         runCommand(command);
       } else if (shortcut === "Ctrl+F") {
+        if ((event.target as Element | null)?.closest?.("[data-result-grid]")) return;
         // WebView2 otherwise opens its native page-search bar when the
         // editor does not have focus. Search the active Query Tab instead.
         event.preventDefault();

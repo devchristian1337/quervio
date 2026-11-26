@@ -17,6 +17,50 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 
+test("SQLCMD tooltip stays dismissed during repeated clicks", async ({ page }) => {
+  const newQuery = page.getByRole("button", { name: "New query on Mock server", exact: true });
+  await newQuery.click();
+  const checkbox = page.getByRole("checkbox", { name: "SQLCMD", exact: true });
+  const label = page.getByText("SQLCMD", { exact: true });
+  const tooltip = page.getByRole("tooltip").filter({ hasText: "SQLCMD includes" });
+
+  await label.hover();
+  await expect(tooltip).toHaveCount(1);
+  await label.evaluate((element) => {
+    const observer = new MutationObserver((records) => {
+      const reopened = records.some((record, index) => {
+        const nextState = records[index + 1]?.oldValue ?? element.getAttribute("data-state");
+        return record.oldValue === "closed" && nextState !== "closed";
+      });
+      if (reopened) {
+        element.setAttribute("data-tooltip-reopened", "");
+      }
+    });
+    observer.observe(element, { attributeFilter: ["data-state"], attributeOldValue: true });
+  });
+  for (const [target, checked] of [[label, true], [checkbox, false], [label, true]] as const) {
+    await target.click();
+    await expect(checkbox).toBeChecked({ checked });
+    await expect(tooltip).toHaveCount(0);
+  }
+
+  expect(await label.getAttribute("data-tooltip-reopened")).toBeNull();
+
+  const tools = page.getByRole("button", { name: "Tools", exact: true });
+  await tools.hover();
+  await label.hover();
+  await expect(tooltip).toHaveCount(1);
+
+  await tools.hover();
+  await expect(tooltip).toHaveCount(0);
+  await tools.focus();
+  await page.keyboard.press("Tab");
+  await checkbox.focus();
+  await expect(tooltip).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(tooltip).toHaveCount(0);
+});
+
 test("SQLCMD include access is approved separately from script execution", async ({ page }) => {
   await page.getByRole("button", { name: "New query on Mock server", exact: true }).click();
   // Monaco's EditContext exposes a zero-size accessibility textbox; click

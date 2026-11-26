@@ -20,6 +20,10 @@ import {
   type Theme as GridTheme,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
+import { X } from "lucide-react";
+import { Checkbox } from "@/components/ui/radix-checkbox";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { save } from "@tauri-apps/plugin-dialog";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "@/components/ui/basic-toast";
@@ -226,7 +230,7 @@ function drawArrow(ctx: CanvasRenderingContext2D, x: number, y: number, color: s
 
 type Sort = { column: number; direction: SortDirection } | null;
 
-const ROW_MARKERS = { kind: "clickable-number", headerDisabled: true } as const;
+const EMPTY_ROW_THEME: Partial<GridTheme> = { horizontalBorderColor: "transparent" };
 const KEYBINDINGS = { copy: false, paste: false, search: false } as const;
 
 interface Props {
@@ -259,6 +263,17 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   const p = theme.palette;
   const fontsReady = useFontsReady();
   const gridRef = useRef<DataEditorRef>(null);
+  const gridViewport = useRef<HTMLDivElement>(null);
+  const [gridWidth, setGridWidth] = useState(0);
+  const [freezeThrough, setFreezeThrough] = useState(0);
+  const [menuColumn, setMenuColumn] = useState<number | null>(null);
+  const findInput = useRef<HTMLInputElement>(null);
+  const findRevision = useRef(0);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findText, setFindText] = useState("");
+  const [match, setMatch] = useState<Item | null>(null);
+  const [findMessage, setFindMessage] = useState("");
+  const [finding, setFinding] = useState(false);
   const [initialBlocks] = useState(() => startingBlocks(tabId, runId, set.index));
   const blocks = useRef(initialBlocks);
   const pending = useRef(new Set<number>());
@@ -277,6 +292,19 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   }, [tabId, runId, set.index]);
   // Bumped after a sort so every cell is read again in the new order.
   const [order, setOrder] = useState(0);
+  const matchHighlight = useMemo(() => match ? [{
+    range: { x: match[0], y: match[1], width: 1, height: 1 },
+    color: p.accent,
+    style: "solid-outline" as const,
+  }] : undefined, [match, p.accent]);
+
+  useLayoutEffect(() => {
+    const viewport = gridViewport.current;
+    if (!viewport) return;
+    const observer = new ResizeObserver(([entry]) => setGridWidth(entry.contentRect.width));
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
 
   // fontsReady is a dependency on purpose: a new theme object redraws the canvas in the loaded font.
   const base = useMemo(
@@ -323,11 +351,17 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
     if (shownRun.current === `${tabId}\u0000${runId}`) return;
     shownRun.current = `${tabId}\u0000${runId}`;
     ++sortRevision.current;
+    ++findRevision.current;
     blocks.current = startingBlocks(tabId, runId, set.index);
     pending.current = new Set();
     setSelection(emptySelection);
     setWidths({});
     setViewer(null);
+    setFreezeThrough(0);
+    setFindOpen(false);
+    setFindText("");
+    setMatch(null);
+    setFindMessage("");
     setShownSort(sortOf(tabId, runId, set.index));
     setOrder((value) => value + 1);
     setMeasuredWidths(minimumColumnWidths(set.columns, set.kinds, [...blocks.current.values()].flat(), base.cellHorizontalPadding!, measure));
@@ -339,7 +373,7 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
     setMeasuredWidths(minimumColumnWidths(set.columns, set.kinds, [...blocks.current.values()].flat(), base.cellHorizontalPadding!, measure));
   }, [set.columns, set.kinds, base.cellHorizontalPadding, measure]);
 
-  const columns = useMemo<GridColumn[]>(
+  const columns = useMemo(
     () =>
       set.columns.map((name, index) => {
         const title = name || "(No column name)";
@@ -427,6 +461,9 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
       pending.current = new Set();
       setSort(next);
       setOrder((value) => value + 1);
+      ++findRevision.current;
+      setMatch(null);
+      setFindMessage("");
     } catch (error) {
       if (shownRun.current !== expectedRun || sortRevision.current !== revision) return;
       toast.error("Sort failed", { description: errorMessage(error) });
@@ -526,10 +563,18 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
     [],
   );
   const onCellActivated = useCallback(([column, row]: Item) => setViewer({ row, column }), []);
+  // Glide draws each separator at the top of a row, even beyond the result set.
+  const getRowThemeOverride = useCallback(
+    (row: number) => (row > set.rows ? EMPTY_ROW_THEME : undefined),
+    [set.rows],
+  );
 
   const block = selectedBlock(selection, set.rows, set.columns.length);
   const all = { rows: [[0, set.rows]], columns: [[0, set.columns.length]] } as const;
   const selectedRows = selection.rows.length;
+  const allSelected = set.rows > 0 &&
+    block?.rows.length === 1 && block.rows[0][0] === 0 && block.rows[0][1] === set.rows &&
+    block.columns.length === 1 && block.columns[0][0] === 0 && block.columns[0][1] === set.columns.length;
 
   async function copy(format: CopyFormat, range = block ?? all) {
     try {
@@ -569,8 +614,65 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
     catch(error){toast.error("Export failed",{description:errorMessage(error)});}
   }
 
+  function showFind() {
+    if (!findOpen) {
+      setFindOpen(true);
+      return;
+    }
+    findInput.current?.focus();
+    findInput.current?.select();
+  }
+
+  function closeFind() {
+    ++findRevision.current;
+    setFindOpen(false);
+    setMatch(null);
+    setFindMessage("");
+    gridRef.current?.focus();
+  }
+
+  function updateFindText(text: string) {
+    ++findRevision.current;
+    setFindText(text);
+    setMatch(null);
+    setFindMessage("");
+  }
+
+  async function find(backwards: boolean) {
+    if (!canFind || finding) return;
+    const revision = ++findRevision.current;
+    setFinding(true);
+    try {
+      const found = await api.resultFind(tabId, set.index, findText, match, backwards);
+      if (findRevision.current !== revision) return;
+      setMatch(found);
+      setFindMessage(found ? `Row ${found[1] + 1}, column ${found[0] + 1}` : "No matches");
+      if (found) {
+        // A frozen column is already visible and needs only vertical movement.
+        gridRef.current?.scrollTo(found[0], found[1], found[0] < frozenColumns ? "vertical" : "both");
+      }
+    } catch {
+      if (findRevision.current === revision) setFindMessage("Search failed");
+    } finally {
+      setFinding(false);
+    }
+  }
+
   function onKeyDown(event: React.KeyboardEvent) {
     if (viewer || !event.currentTarget.contains(event.target as Node)) return;
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      event.stopPropagation();
+      showFind();
+      return;
+    }
+    if (findOpen && event.key === "Escape" && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeFind();
+      return;
+    }
+    if (event.target === findInput.current) return;
     if (event.key === "Escape" && (selection.rows.length || selection.current || selection.columns.length)) {
       setSelection(emptySelection);
       return;
@@ -582,21 +684,40 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
   }
 
   const size = SIZES[density];
+  // Keep the same gutter widths Glide uses for row numbers.
+  const rowMarkerWidth = set.rows > 10_000 ? 48 : set.rows > 1000 ? 44 : set.rows > 100 ? 36 : 32;
+  // Keep some space for horizontal scrolling even after resizing the panel.
+  let maxFrozenColumns = 0;
+  let freezeSpace = gridWidth - rowMarkerWidth - MIN_COLUMN_WIDTH;
+  while (maxFrozenColumns < columns.length - 1 && freezeSpace >= columns[maxFrozenColumns].width) {
+    freezeSpace -= columns[maxFrozenColumns++].width;
+  }
+  const frozenColumns = Math.min(freezeThrough, maxFrozenColumns);
+  const canFind = set.done && set.rows > 0 && findText.length > 0;
   const sortedName = sort ? set.columns[sort.column] || "(No column name)" : null;
 
-  function sortArrowAt(clientX: number, clientY: number): number | null {
+  function headerAt(clientX: number, clientY: number) {
+    const viewport = gridViewport.current?.getBoundingClientRect();
+    if (!viewport || clientX < viewport.left + rowMarkerWidth) return null;
     for (let column = 0; column < columns.length; column++) {
       const bounds = gridRef.current?.getBounds(column, -1);
       if (!bounds || clientY < bounds.y || clientY >= bounds.y + bounds.height) continue;
       const x = clientX - bounds.x;
       if (x >= 0 && x < bounds.width) {
-        // Leave the column resize edges to Glide.
-        if (x <= 5 || x >= bounds.width - 5) return null;
-        const onArrow = set.kinds[column] === "number" ? x <= SORT_ZONE : x >= bounds.width - SORT_ZONE;
-        return onArrow ? column : null;
+        return { column, x, width: bounds.width };
       }
     }
     return null;
+  }
+
+  function sortArrowAt(clientX: number, clientY: number): number | null {
+    const header = headerAt(clientX, clientY);
+    if (!header) return null;
+    const { column, x, width } = header;
+    // Leave the column resize edges to Glide.
+    if (x <= 5 || x >= width - 5) return null;
+    const onArrow = set.kinds[column] === "number" ? x <= SORT_ZONE : x >= width - SORT_ZONE;
+    return onArrow ? column : null;
   }
 
   function onGridPointerDown(event: React.PointerEvent<HTMLDivElement>) {
@@ -623,11 +744,54 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
 
   return (
     <>
-    <div className="flex h-full flex-col" onKeyDownCapture={onKeyDown}>
+    <div className="flex h-full flex-col" data-result-grid onKeyDownCapture={onKeyDown}>
+      {findOpen && (
+        <div role="search" aria-label="Find in results" className="flex flex-wrap items-center gap-1 border-b px-2 py-1">
+          <div className="relative w-48">
+            <Input
+              ref={findInput}
+              autoFocus
+              aria-label="Find in results"
+              placeholder="Find in results"
+              className="h-7 pr-8"
+              value={findText}
+              onChange={(event) => updateFindText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) return;
+                event.preventDefault();
+                void find(event.shiftKey);
+              }}
+            />
+            {findText.length > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Clear search"
+                className="absolute right-0.5 top-0.5 text-muted-foreground"
+                onClick={() => {
+                  updateFindText("");
+                  findInput.current?.focus();
+                }}
+              >
+                <X aria-hidden="true" />
+              </Button>
+            )}
+          </div>
+          <Button type="button" size="sm" variant="ghost" disabled={!canFind || finding} onClick={() => void find(true)}>Previous</Button>
+          <Button type="button" size="sm" variant="ghost" disabled={!canFind || finding} onClick={() => void find(false)}>Next</Button>
+          <Button type="button" size="sm" variant="ghost" onClick={closeFind}>Close</Button>
+          <span role="status" className="text-xs text-muted-foreground">
+            {!set.done ? "Wait for the query to finish" : finding ? "Searching…" : findMessage}
+          </span>
+        </div>
+      )}
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
-            className="min-h-0 flex-1"
+            ref={gridViewport}
+            className="relative min-h-0 flex-1"
+            onContextMenuCapture={(event) => setMenuColumn(headerAt(event.clientX, event.clientY)?.column ?? null)}
             onPointerDownCapture={onGridPointerDown}
             onPointerCancelCapture={() => { sortGesture.current = null; }}
             onPointerUpCapture={onGridPointerUp}
@@ -636,16 +800,17 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
               ref={gridRef}
               columns={columns}
               rows={set.rows}
+              getRowThemeOverride={getRowThemeOverride}
               getCellContent={getCellContent}
-              // Row numbers that select their row when clicked, as in SSMS: no checkboxes
-              // in place of the numbers on hover, and none in the corner (Ctrl+A selects all).
-              rowMarkers={ROW_MARKERS}
+              rowMarkers={{ kind: "clickable-number", headerDisabled: true, width: rowMarkerWidth }}
               rowHeight={size.row}
               headerHeight={size.header}
               width="100%"
               height="100%"
               smoothScrollX
               smoothScrollY
+              freezeColumns={frozenColumns}
+              highlightRegions={matchHighlight}
               theme={base}
               verticalBorder={false}
               drawHeader={drawHeader}
@@ -658,6 +823,20 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
               onColumnResize={onColumnResize}
               onCellActivated={onCellActivated}
             />
+            <label
+              className="absolute left-0 top-0 z-10 grid cursor-pointer place-items-center has-[:disabled]:cursor-not-allowed"
+              style={{ width: rowMarkerWidth, height: size.header }}
+            >
+              <Checkbox
+                aria-label="Select all result rows"
+                checked={allSelected}
+                disabled={set.rows === 0}
+                onCheckedChange={(checked) => setSelection(checked ? {
+                  ...emptySelection,
+                  rows: CompactSelection.fromSingleSelection([0, set.rows]),
+                } : emptySelection)}
+              />
+            </label>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="min-w-72">
@@ -670,6 +849,19 @@ export default memo(function ResultGrid({ tabId, runId, set }: Props) {
           <ContextMenuItem onSelect={() => void copy("markdown")}>
             Copy as Markdown <ContextMenuShortcut>Ctrl+Shift+Alt+C</ContextMenuShortcut>
           </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={showFind}>
+            Find in Results <ContextMenuShortcut>Ctrl+F</ContextMenuShortcut>
+          </ContextMenuItem>
+          {menuColumn !== null && (
+            <ContextMenuItem
+              disabled={menuColumn >= maxFrozenColumns || menuColumn + 1 === frozenColumns}
+              onSelect={() => setFreezeThrough(menuColumn + 1)}
+            >
+              Freeze Columns Through Here
+            </ContextMenuItem>
+          )}
+          {freezeThrough > 0 && <ContextMenuItem onSelect={() => setFreezeThrough(0)}>Unfreeze Columns</ContextMenuItem>}
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={() => void copy("markdown", all)}>Copy all as Markdown</ContextMenuItem>
           <ContextMenuItem onSelect={() => void exportMarkdown()}>Save as Markdown…</ContextMenuItem>

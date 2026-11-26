@@ -93,6 +93,7 @@ pub fn run() {
             query::query_end_transactions,
             query::result_rows,
             query::result_sort,
+            query::result_find,
             query::result_cell,
             query::result_copy,
             query::result_export_markdown,

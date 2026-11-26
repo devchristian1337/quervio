@@ -135,3 +135,114 @@ test("copy preserves gaps in Ctrl-click row and column selections", async ({ pag
   await grid.click({ position: { x: 300, y: 18 }, modifiers: ["Control"], force: true });
   expect(await copy("ControlOrMeta+c")).toEqual({ rows: [[0, 1_000_000]], columns: [[0, 1], [2, 3]] });
 });
+
+test("the top-left corner selects the whole result for explicit copy", async ({ page }) => {
+  await page.goto("/?mock");
+  await page.getByRole("button", { name: "New query on Mock server", exact: true }).click();
+  await page.locator(".monaco-editor").click({ position: { x: 80, y: 12 } });
+  await page.keyboard.insertText("SELECT 1;");
+  await page.getByRole("button", { name: "Execute", exact: true }).click();
+  const grid = page.getByTestId("data-grid-canvas");
+  await expect(grid).toBeVisible();
+
+  const copies: unknown[] = [];
+  await page.exposeFunction("recordGridCopy", (args: unknown) => { copies.push(args); });
+  await page.evaluate(() => {
+    const target = window as unknown as IpcWindow & { recordGridCopy: (args: unknown) => Promise<void> };
+    const internal = target.__TAURI_INTERNALS__;
+    const invoke = internal.invoke;
+    internal.invoke = (command, args) => {
+      if (command === "result_copy") void target.recordGridCopy(args);
+      return invoke(command, args);
+    };
+  });
+
+  const selectAll = page.getByRole("checkbox", { name: "Select all result rows", exact: true });
+  await expect(selectAll).not.toBeChecked();
+  // The corner remains clickable outside the painted checkbox.
+  await grid.click({ position: { x: 4, y: 18 }, force: true });
+  await expect(selectAll).toBeChecked();
+  await expect(page.getByText("selected", { exact: true })).toBeVisible();
+  expect(copies).toHaveLength(0);
+
+  await page.keyboard.press("ControlOrMeta+c");
+  await expect.poll(() => copies).toMatchObject([
+    { rows: [[0, 1_000_000]], columns: [[0, 4]], format: "text" },
+  ]);
+  await page.keyboard.press("ControlOrMeta+Shift+c");
+  await expect.poll(() => copies).toMatchObject([
+    { format: "text" },
+    { rows: [[0, 1_000_000]], columns: [[0, 4]], format: "textWithHeaders" },
+  ]);
+
+  await page.keyboard.press("Escape");
+  await expect(selectAll).not.toBeChecked();
+  await selectAll.press("Space");
+  await expect(selectAll).toBeChecked();
+  await selectAll.press("Space");
+  await expect(selectAll).not.toBeChecked();
+});
+
+test("find in results navigates to matches outside the visible rows", async ({ page }) => {
+  await page.goto("/?mock");
+  await page.getByRole("button", { name: "New query on Mock server", exact: true }).click();
+  await page.locator(".monaco-editor").click({ position: { x: 80, y: 12 } });
+  await page.keyboard.insertText("SELECT 1;");
+  await page.getByRole("button", { name: "Execute", exact: true }).click();
+  const grid = page.getByTestId("data-grid-canvas");
+  await grid.click({ position: { x: 300, y: 50 }, force: true });
+  await page.keyboard.press("ControlOrMeta+f");
+  const search = page.getByRole("textbox", { name: "Find in results", exact: true });
+  const clear = page.getByRole("button", { name: "Clear search", exact: true });
+  await expect(search).toBeFocused();
+  await expect(clear).toHaveCount(0);
+  await search.fill("CUSTOMER 204");
+  await search.press("Enter");
+  const status = page.getByRole("search", { name: "Find in results" }).getByRole("status");
+  await expect(status).toHaveText("Row 204, column 2");
+  await search.press("Enter");
+  await expect(status).toHaveText("Row 2040, column 2");
+  await search.press("Shift+Enter");
+  await expect(status).toHaveText("Row 204, column 2");
+  const scroller = page.locator("[data-result-grid] .dvn-scroller");
+  await expect.poll(() => scroller.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  await clear.click();
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+  await expect(status).toBeEmpty();
+  await expect(clear).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
+  await search.press("Escape");
+  await expect(search).toHaveCount(0);
+});
+
+test("frozen leading columns stay selectable after horizontal scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 840, height: 900 });
+  await page.goto("/?mock");
+  await page.getByRole("button", { name: "New query on Mock server", exact: true }).click();
+  await page.locator(".monaco-editor").click({ position: { x: 80, y: 12 } });
+  await page.keyboard.insertText("SELECT 1;");
+  await page.getByRole("button", { name: "Execute", exact: true }).click();
+  const grid = page.getByTestId("data-grid-canvas");
+  await grid.click({ button: "right", position: { x: 90, y: 18 }, force: true });
+  await page.getByRole("menuitem", { name: "Freeze Columns Through Here", exact: true }).click();
+  await page.evaluate(() => {
+    const target = window as unknown as IpcWindow;
+    const internal = target.__TAURI_INTERNALS__;
+    const invoke = internal.invoke;
+    internal.invoke = (command, args) => {
+      if (command === "result_copy") target.copiedRange = { columns: args.columns as [number, number][], rows: args.rows as [number, number][] };
+      return invoke(command, args);
+    };
+  });
+  const scroller = page.locator("[data-result-grid] .dvn-scroller");
+  await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  await expect.poll(() => scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await grid.click({ position: { x: 90, y: 18 }, force: true });
+  await page.keyboard.press("ControlOrMeta+c");
+  await expect.poll(() => page.evaluate(() => (window as unknown as IpcWindow).copiedRange))
+    .toEqual({ rows: [[0, 1_000_000]], columns: [[0, 1]] });
+  await grid.click({ button: "right", position: { x: 90, y: 18 }, force: true });
+  await page.getByRole("menuitem", { name: "Unfreeze Columns", exact: true }).click();
+});

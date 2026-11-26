@@ -146,6 +146,8 @@ export const api = {
 
   resultRows: (tabId: string, set: number, start: number, count: number) =>
     invoke<ArrayBuffer>("result_rows", { tabId, set, start, count }),
+  resultFind: (tabId: string, set: number, query: string, after: readonly [number, number] | null, backwards: boolean) =>
+    invoke<[number, number] | null>("result_find", { tabId, set, query, after, backwards }),
   resultSort: (tabId: string, set: number, column: number | null, direction: SortDirection) =>
     invoke<void>("result_sort", { tabId, set, column, direction }),
   resultCell: (tabId: string, set: number, row: number, column: number) =>

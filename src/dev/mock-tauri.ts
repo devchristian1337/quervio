@@ -5,7 +5,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import type { CatalogItem, SavedConnection, SsmsConnection } from "@/lib/api";
 import type { ExecutionEvent } from "@/lib/execution";
 import { CONNECTION_FIXTURES, fixtureFromUrl, mountFixtureSwitch } from "@/dev/connection-fixtures";
-import { override, ssmsList, UNHANDLED } from "@/dev/worst-mock";
+import { findMockCell, override, ssmsList, UNHANDLED } from "@/dev/worst-mock";
 
 const connection: SavedConnection = {
   id: "mock",
@@ -240,6 +240,8 @@ mockIPC(async (cmd, args) => {
       send({ type: "finished", outcome: "succeeded", elapsedMs: 1234, database: "master", openTransactions: 0 });
       return "succeeded";
     }
+    case "result_find":
+      return findMockCell(MOCK_ROWS, COLUMNS.length, mockCell, a as Parameters<typeof findMockCell>[3]);
     case "result_sort":
       // Only Id sorts in the mock: descending reverses the rows.
       mockDescending = a.column === 0 && a.direction === "descending";

@@ -237,6 +237,27 @@ function worstCell(set: number, row: number, column: number): string | null {
   return [null, "", "   ", "NULL", "line one\r\nline two\n\tline three", "👩🏽‍💻 Priya 王秀英 Đặng Thị Ngọc Hân", UNBROKEN, "<b>bold</b> &amp;"][(row + column) % 8];
 }
 
+export async function findMockCell(
+  rows: number,
+  columns: number,
+  cell: (row: number, column: number) => string | null,
+  { query, after, backwards }: { query: string; after: [number, number] | null; backwards: boolean },
+): Promise<[number, number] | null> {
+  const count = rows * columns;
+  if (!query || count === 0) return null;
+  const needle = query.toLowerCase();
+  const step = backwards ? -1 : 1;
+  let index = after ? after[1] * columns + after[0] : backwards ? count : -1;
+  for (let scanned = 0; scanned < count; scanned++) {
+    index = (index + step + count) % count;
+    const row = Math.floor(index / columns);
+    const column = index % columns;
+    if ((cell(row, column) ?? "NULL").toLowerCase().includes(needle)) return [column, row];
+    if (scanned % 65536 === 65535) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return null;
+}
+
 /** The window as Rust encodes it; previews are cut by character, as Rust does. */
 function encodeWorst(set: number, start: number, count: number): ArrayBuffer {
   const encoder = new TextEncoder();
@@ -390,6 +411,15 @@ export function override(mode: Mode, cmd: string, a: Args): unknown {
       const text = worstCell(a.set as number, a.row as number, a.column as number);
       // A clipped JSON value with a bigint and a trailing zero, as nvarchar(max) holds.
       return text === UNBROKEN ? { text: `{"id":12345678901234567890,"price":1.10,"text":"${UNBROKEN}"}`, clipped: true } : { text, clipped: false };
+    }
+    case "result_find": {
+      const set = a.set as number;
+      return findMockCell(
+        mode === "one" ? 1 : setRows(set),
+        setColumns(set).length,
+        (row, column) => worstCell(set, row, column),
+        a as Parameters<typeof findMockCell>[3],
+      );
     }
     case "result_sort":
       return null;

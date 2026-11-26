@@ -377,7 +377,13 @@ function Toolbar({ tab }: { tab: QueryTab }) {
         </SelectContent>
       </Select>
       <Tip label="SQLCMD includes, variables and commands are expanded and reviewed before execution">
-        <label className="ml-1 flex h-7 cursor-pointer items-center gap-2 rounded-md px-2 text-sm select-none hover:bg-accent has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+        <label
+          className="ml-1 flex h-7 cursor-pointer items-center gap-2 rounded-md px-2 text-sm select-none hover:bg-accent has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50"
+          onFocus={(event) => {
+            // A label click focuses the checkbox after pointerup, when the tooltip can reopen.
+            if (!event.target.matches(":focus-visible")) event.preventDefault();
+          }}
+        >
           <Checkbox
             disabled={executing}
             checked={tab.sqlcmdMode ?? false}

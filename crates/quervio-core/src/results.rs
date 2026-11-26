@@ -427,6 +427,36 @@ impl ResultSet {
         })
     }
 
+    /// Finds a cell in display order, wrapping once. Coordinates are [column, row].
+    pub fn find_cell(
+        &self,
+        query: &str,
+        after: Option<[usize; 2]>,
+        backwards: bool,
+    ) -> Option<[usize; 2]> {
+        let width = self.columns.len();
+        let cells = self.rows * width;
+        if cells == 0 || query.is_empty() {
+            return None;
+        }
+        let needle = fold_case(query);
+        let anchor = after
+            .filter(|&[column, row]| column < width && row < self.rows)
+            .map(|[column, row]| row * width + column);
+        let matches = |&index: &usize| {
+            let text = self.cell_text(self.stored(index / width), index % width).unwrap_or("NULL");
+            text.contains(needle.as_ref()) || fold_case(text).contains(needle.as_ref())
+        };
+        let index = if backwards {
+            let split = anchor.unwrap_or(cells);
+            (0..split).rev().chain((split..cells).rev()).find(matches)
+        } else {
+            let split = anchor.map_or(0, |index| index + 1);
+            (split..cells).chain(0..split).find(matches)
+        }?;
+        Some([index % width, index / width])
+    }
+
     /// Rows `start..start + count` in the binary form the grid decodes
     /// (src/lib/results.ts): `u32` row count, `u32` column count, then per
     /// cell a kind byte (0 text, 1 NULL, 2 text cut to `preview_chars`), a
@@ -1352,6 +1382,26 @@ mod tests {
         );
         assert_eq!(set.markdown(0..1, 1..2), "| Name |\n|---|\n| Rossi |\n");
     }
+    #[test]
+    fn finds_cells_in_display_order_and_wraps_in_both_directions() {
+        let mut set = set();
+        set.push_row(
+            &[
+                ColumnValues::Int(4),
+                ColumnValues::String(SqlString::from_utf8_string("CAFÉ Rossi".into())),
+            ],
+            100,
+        );
+        assert_eq!(set.find_cell("rossi", None, false), Some([1, 0]));
+        assert_eq!(set.find_cell("Rossi", Some([1, 0]), true), Some([1, 3]));
+        assert_eq!(set.find_cell("Rossi", Some([1, 3]), false), Some([1, 0]));
+        assert_eq!(set.find_cell("null", None, false), Some([1, 1]));
+        assert_eq!(set.find_cell("absent", None, false), None);
+        assert_eq!(set.find_cell("", None, false), None);
+        set.sort(Some((0, SortDirection::Descending)));
+        assert_eq!(set.find_cell("café", None, false), Some([1, 0]));
+    }
+
     #[test]
     fn sorts_numbers_text_and_nulls_without_moving_the_data() {
         let mut set = set();

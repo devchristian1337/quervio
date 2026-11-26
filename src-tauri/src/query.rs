@@ -1233,6 +1233,21 @@ pub async fn result_rows(
         .map(Response::new)
 }
 
+/// Finds a cell in the retained Result Set without reading from the Server.
+#[tauri::command]
+pub async fn result_find(
+    state: State<'_, QueryState>,
+    tab_id: String,
+    set: usize,
+    query: String,
+    after: Option<[usize; 2]>,
+    backwards: bool,
+) -> CommandResult<Option<[usize; 2]>> {
+    state
+        .read_set(&tab_id, set, move |set| set.find_cell(&query, after, backwards))
+        .await
+}
+
 /// Sorts a Result Set by one column, or restores the Server's order with
 /// `None`. The grid then reads its rows again.
 #[tauri::command]
